@@ -230,3 +230,6 @@ documentacion/
 
 # Datos originales, derivados y resultados de ejecuciones (ver diseño técnico, sección de estructura)
 datos/
+
+# Línea base local de la vigilancia de SUMO (estado de cada equipo)
+tools/sumo/vigilar_sumo_baseline.json
