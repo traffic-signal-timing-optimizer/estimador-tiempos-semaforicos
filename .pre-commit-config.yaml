@@ -1,3 +1,5 @@
+# Solo hooks rápidos y autocontenidos. Tipos y pruebas: scripts/check.ps1.
+# La versión de ruff debe coincidir con la de uv.lock (la comprueba scripts/check.ps1).
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.17.1
@@ -5,17 +7,3 @@ repos:
       - id: ruff
         args: [--fix]
       - id: ruff-format
-  - repo: local
-    hooks:
-      - id: pyright
-        name: pyright
-        entry: uv run pyright
-        language: system
-        types: [python]
-        pass_filenames: false
-      - id: pytest
-        name: pytest
-        entry: uv run pytest -q
-        language: system
-        types: [python]
-        pass_filenames: false
