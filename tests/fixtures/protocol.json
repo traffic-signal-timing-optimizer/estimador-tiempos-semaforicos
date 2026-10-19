@@ -1,0 +1,46 @@
+{
+  "schema_version": "1.0.0",
+  "protocol_id": "PROTOCOL_DEMO",
+  "status": "draft",
+  "purpose": "synthetic_fixture",
+  "metric_definition": "Fixture: timeLoss+departDelay en cohorte completa; no es umbral de tesis",
+  "cohort_policy": "requested_depart_in_measurement_window",
+  "censoring_policy": "complete_cohort_or_no_label",
+  "alternate_censoring_rule": null,
+  "search_budget": 10,
+  "sampling_attempt_limit": 100,
+  "finalist_count": 2,
+  "seeds": {
+    "search": [
+      101,
+      102
+    ],
+    "finalists": [
+      201,
+      202
+    ],
+    "final": [
+      301,
+      302
+    ]
+  },
+  "tie_epsilon_s": 0.01,
+  "queue_speed_threshold_mps": 0.1,
+  "confidence_level": 0.95,
+  "bootstrap_repetitions": 100,
+  "acceptance_margin_s": null,
+  "count_error_tolerance": null,
+  "simulation_fit_tolerance": null,
+  "approval_reference": null,
+  "zone_lane_ids": [
+    "demo_N_0",
+    "demo_E_0"
+  ],
+  "queue_sampling_s": 1,
+  "stop_speed_threshold_mps": 0.1,
+  "calibration_criteria": [],
+  "group_aggregation": "equal_group_weight",
+  "group_weight_artifact": null,
+  "refit_policy": "train_only",
+  "numeric_abs_tolerance": 1e-08
+}

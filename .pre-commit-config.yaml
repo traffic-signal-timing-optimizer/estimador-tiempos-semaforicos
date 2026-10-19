@@ -6,4 +6,6 @@ repos:
     hooks:
       - id: ruff
         args: [--fix]
+        exclude: ^tools/contracts/
       - id: ruff-format
+        exclude: ^tools/contracts/

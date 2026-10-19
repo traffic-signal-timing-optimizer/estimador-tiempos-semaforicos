@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0.0",
+  "split_id": "SPLIT_DEMO",
+  "policy": "Fixture de tres familias; proporciones no aprobadas para experimento real.",
+  "seed": 101,
+  "frozen": true,
+  "assignments": [
+    {
+      "scenario_id": "SCENARIO_DEMO_001",
+      "group_id": "GROUP_DEMO_TRAIN",
+      "partition": "train"
+    },
+    {
+      "scenario_id": "SCENARIO_DEMO_002",
+      "group_id": "GROUP_DEMO_VALIDATION",
+      "partition": "validation"
+    },
+    {
+      "scenario_id": "SCENARIO_DEMO_003",
+      "group_id": "GROUP_DEMO_TEST",
+      "partition": "test"
+    }
+  ]
+}

@@ -13,6 +13,7 @@ dev = [
     "pyright>=1.1",
     "pre-commit>=3",
     "pip-audit>=2",
+    "pydantic>=2,<3",
 ]
 
 [build-system]
@@ -26,6 +27,8 @@ packages = ["src/semaforo"]
 line-length = 100
 target-version = "py312"
 src = ["src", "tests"]
+# Código de referencia entregado por la documentación; se conserva sin reformatear.
+extend-exclude = ["tools/contracts"]
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "B", "UP", "S", "ANN", "RUF", "PL"]

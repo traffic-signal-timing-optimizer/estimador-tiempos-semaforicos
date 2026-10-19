@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0.0",
+  "model_id": "MODEL_DEMO_NOT_TRAINED",
+  "status": "draft",
+  "case_id": "SYNTHETIC_DEMO",
+  "case_version": "1.0.0",
+  "algorithm": "median",
+  "feature_order": [
+    "N_S.flow_vph",
+    "N_S.car",
+    "N_S.bus",
+    "E_W.flow_vph",
+    "E_W.car",
+    "E_W.bus"
+  ],
+  "variable_slot_order": [
+    "s1",
+    "s4"
+  ],
+  "rules_version": "TIMING_V1",
+  "split_id": "SPLIT_DEMO",
+  "dataset_id": "DATASET_DEMO_NOT_BUILT",
+  "training_run_id": "TRAIN_DEMO_NOT_EXECUTED",
+  "training_partitions": [
+    "train"
+  ],
+  "artifacts": [],
+  "environment": {
+    "status": "fixture_only"
+  }
+}

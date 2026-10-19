@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0.0",
+  "label_id": "LABEL_FIXTURE",
+  "scenario_id": "SCENARIO_DEMO_001",
+  "case_version": "1.0.0",
+  "status": "reference",
+  "plan": {
+    "slot_durations_s": {
+      "s1": 30,
+      "s2": 3,
+      "s3": 1,
+      "s4": 22,
+      "s5": 3,
+      "s6": 1
+    },
+    "cycle_s": 60,
+    "greens_s": {
+      "NS": 30,
+      "EW": 22
+    }
+  },
+  "search_run_id": "RUN_DEMO_NOT_EXECUTED",
+  "protocol_id": "PROTOCOL_DEMO",
+  "candidate_count": 0,
+  "simulation_count": 0,
+  "evidence_status": "fixture_only",
+  "reason": "Ejemplo de forma; no procede de simulación ejecutada."
+}

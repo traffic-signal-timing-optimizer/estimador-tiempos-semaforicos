@@ -1,0 +1,47 @@
+{
+  "schema_version": "1.0.0",
+  "scenario_id": "SCENARIO_DEMO_001",
+  "case_id": "SYNTHETIC_DEMO",
+  "case_version": "1.0.0",
+  "origin": "synthetic",
+  "group_id": "GROUP_DEMO_TRAIN",
+  "source_ids": [
+    "SYNTHETIC_FIXTURE"
+  ],
+  "request": {
+    "schema_version": "1.0.0",
+    "request_id": "REQ_DEMO_001",
+    "case_id": "SYNTHETIC_DEMO",
+    "case_version": "1.0.0",
+    "origin": "synthetic",
+    "observation_start": "2026-10-18T08:00:00-05:00",
+    "observation_end": "2026-10-18T08:15:00-05:00",
+    "source_ids": [
+      "SYNTHETIC_FIXTURE"
+    ],
+    "demand": [
+      {
+        "movement_id": "N_S",
+        "flow_vph": 400,
+        "composition": {
+          "car": 0.9,
+          "bus": 0.1
+        }
+      },
+      {
+        "movement_id": "E_W",
+        "flow_vph": 200,
+        "composition": {
+          "car": 1.0,
+          "bus": 0.0
+        }
+      }
+    ]
+  },
+  "boundary_policy_id": "DEMO_EMPTY_START_FIXED_ROUTES",
+  "warmup_s": 0,
+  "measure_s": 900,
+  "drain_max_s": 900,
+  "demand_seed": 100,
+  "demand_artifact": null
+}

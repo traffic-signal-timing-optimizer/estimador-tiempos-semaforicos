@@ -18,6 +18,7 @@ Invoke-Step "ruff check" { & "$bin\ruff.exe" check . }
 Invoke-Step "ruff format --check" { & "$bin\ruff.exe" format --check . }
 Invoke-Step "pyright" { & "$bin\pyright.exe" }
 Invoke-Step "pytest" { & "$bin\pytest.exe" -q }
+Invoke-Step "contratos de referencia" { & "$bin\python.exe" -B tools\contracts\validar_paquete.py | Select-String '"status"|"checks"|"omitted_checks"' }
 
 Write-Output "==> versión de ruff: uv.lock frente a pre-commit"
 $locked = [regex]::Match((Get-Content uv.lock -Raw), '(?m)^name = "ruff"\r?\nversion = "([^"]+)"').Groups[1].Value

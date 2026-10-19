@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0.0",
+  "request_id": "REQ_DEMO_001",
+  "case_id": "SYNTHETIC_DEMO",
+  "case_version": "1.0.0",
+  "model_id": "MODEL_DEMO_NOT_TRAINED",
+  "status": "accepted",
+  "original_variable_durations_s": {
+    "s1": 30,
+    "s4": 22
+  },
+  "plan": {
+    "slot_durations_s": {
+      "s1": 30,
+      "s2": 3,
+      "s3": 1,
+      "s4": 22,
+      "s5": 3,
+      "s6": 1
+    },
+    "cycle_s": 60,
+    "greens_s": {
+      "NS": 30,
+      "EW": 22
+    }
+  },
+  "errors": [],
+  "duration_ms": {
+    "fixture_not_measured": 0
+  },
+  "rules_version": "TIMING_V1"
+}

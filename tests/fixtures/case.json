@@ -1,0 +1,154 @@
+{
+  "schema_version": "1.0.0",
+  "case_id": "SYNTHETIC_DEMO",
+  "case_version": "1.0.0",
+  "origin": "synthetic",
+  "description": "Fixture contractual de dos movimientos; no representa Frutales ni contiene red SUMO ejecutable.",
+  "representation_status": "synthetic_fixture",
+  "network": null,
+  "tick_s": 1,
+  "cycle_s": {
+    "min": 40,
+    "max": 100
+  },
+  "vehicle_classes": [
+    "car",
+    "bus"
+  ],
+  "movements": [
+    {
+      "id": "N_S",
+      "approach_id": "N",
+      "incoming_lanes": [
+        "demo_N_0"
+      ],
+      "outgoing_edges": [
+        "demo_S"
+      ],
+      "tls_id": "DEMO_TLS",
+      "link_indices": [
+        0
+      ],
+      "flow_domain_vph": {
+        "min": 0,
+        "max": 1200
+      }
+    },
+    {
+      "id": "E_W",
+      "approach_id": "E",
+      "incoming_lanes": [
+        "demo_E_0"
+      ],
+      "outgoing_edges": [
+        "demo_W"
+      ],
+      "tls_id": "DEMO_TLS",
+      "link_indices": [
+        1
+      ],
+      "flow_domain_vph": {
+        "min": 0,
+        "max": 1200
+      }
+    }
+  ],
+  "slots": [
+    {
+      "id": "s1",
+      "kind": "variable",
+      "min_s": 10,
+      "max_s": 50,
+      "states": [
+        {
+          "tls_id": "DEMO_TLS",
+          "state": "Gr"
+        }
+      ]
+    },
+    {
+      "id": "s2",
+      "kind": "fixed",
+      "min_s": 3,
+      "max_s": 3,
+      "states": [
+        {
+          "tls_id": "DEMO_TLS",
+          "state": "yr"
+        }
+      ]
+    },
+    {
+      "id": "s3",
+      "kind": "fixed",
+      "min_s": 1,
+      "max_s": 1,
+      "states": [
+        {
+          "tls_id": "DEMO_TLS",
+          "state": "rr"
+        }
+      ]
+    },
+    {
+      "id": "s4",
+      "kind": "variable",
+      "min_s": 10,
+      "max_s": 50,
+      "states": [
+        {
+          "tls_id": "DEMO_TLS",
+          "state": "rG"
+        }
+      ]
+    },
+    {
+      "id": "s5",
+      "kind": "fixed",
+      "min_s": 3,
+      "max_s": 3,
+      "states": [
+        {
+          "tls_id": "DEMO_TLS",
+          "state": "ry"
+        }
+      ]
+    },
+    {
+      "id": "s6",
+      "kind": "fixed",
+      "min_s": 1,
+      "max_s": 1,
+      "states": [
+        {
+          "tls_id": "DEMO_TLS",
+          "state": "rr"
+        }
+      ]
+    }
+  ],
+  "green_groups": [
+    {
+      "id": "NS",
+      "slot_ids": [
+        "s1"
+      ],
+      "min_s": 10,
+      "max_s": 50,
+      "purpose": "vehicle"
+    },
+    {
+      "id": "EW",
+      "slot_ids": [
+        "s4"
+      ],
+      "min_s": 10,
+      "max_s": 50,
+      "purpose": "vehicle"
+    }
+  ],
+  "boundary_policy_id": "DEMO_EMPTY_START_FIXED_ROUTES",
+  "restrictions_evidence": [
+    "FICTICIO: solo prueba contractual"
+  ]
+}
