@@ -1,6 +1,6 @@
 # ADR 0001: Estructura del paquete y herramientas de desarrollo
 
-- **Estado:** aceptada, con una adición pendiente de confirmación (ver «Adiciones»)
+- **Estado:** aceptada
 - **Fecha:** 2026-10-19
 - **Responsable:** Product Owner (validación funcional)
 
@@ -18,10 +18,8 @@ El repositorio no tenía código. La documentación técnica define la estructur
 6. Verificaciones locales en `scripts/check.ps1` (ruff, formato, pyright, pytest y coherencia de la versión de ruff). pre-commit queda solo con los hooks de ruff, que no dependen de `uv` en el PATH.
 7. Finales de línea normalizados a LF con `.gitattributes`.
 8. Las herramientas de vigilancia de la carpeta de SUMO viven en `tools/sumo/`; su línea base es estado local y no se versiona.
-
-## Adiciones pendientes de confirmación
-
-- `hatchling` como backend de construcción en `pyproject.toml`. No estaba en la lista de herramientas aprobada. Alternativa: `setuptools`. Si no se confirma, se sustituye.
+9. Los ejemplos de `documentacion/ejemplos/` pasan a `tests/fixtures/`, y el validador de referencia con sus modelos a `tools/contracts/`, para que git los versione. `pydantic` (2.x) se añade al grupo de desarrollo porque el validador lo necesita. Ese código de referencia se conserva tal cual lo entregó la documentación (ruff lo excluye). Si falta `documentacion/matrices`, el validador omite la comprobación de trazabilidad y lo declara en `omitted_checks`.
+10. `hatchling` se mantiene como backend de construcción. Alternativa descartada: `setuptools`.
 
 ## Alternativas descartadas
 
@@ -31,7 +29,7 @@ El repositorio no tenía código. La documentación técnica define la estructur
 
 ## Impacto
 
-Contratos, validador de referencia (`documentacion/herramientas/validar_paquete.py`) e inventario SHA-256 de `documentacion/`. Las versiones en `uv.lock` fijan las herramientas.
+Contratos (`schemas/`), ejemplos (`tests/fixtures/`), validador de referencia (`tools/contracts/validar_paquete.py`) e inventario SHA-256 de `documentacion/`, que ahora solo cubre los archivos que permanecen en esa carpeta. Las versiones en `uv.lock` fijan las herramientas.
 
 ## Pendiente
 
