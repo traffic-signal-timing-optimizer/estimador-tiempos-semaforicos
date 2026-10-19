@@ -1,0 +1,143 @@
+{
+  "$defs": {
+    "Artifact": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "path",
+        "sha256"
+      ],
+      "title": "Artifact",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "model_id": {
+      "title": "Model Id",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "draft",
+        "frozen"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "case_id": {
+      "title": "Case Id",
+      "type": "string"
+    },
+    "case_version": {
+      "title": "Case Version",
+      "type": "string"
+    },
+    "algorithm": {
+      "enum": [
+        "median",
+        "xgboost_per_output"
+      ],
+      "title": "Algorithm",
+      "type": "string"
+    },
+    "feature_order": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Feature Order",
+      "type": "array"
+    },
+    "variable_slot_order": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Variable Slot Order",
+      "type": "array"
+    },
+    "rules_version": {
+      "title": "Rules Version",
+      "type": "string"
+    },
+    "split_id": {
+      "title": "Split Id",
+      "type": "string"
+    },
+    "dataset_id": {
+      "title": "Dataset Id",
+      "type": "string"
+    },
+    "training_run_id": {
+      "title": "Training Run Id",
+      "type": "string"
+    },
+    "training_partitions": {
+      "items": {
+        "enum": [
+          "train",
+          "validation"
+        ],
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Training Partitions",
+      "type": "array"
+    },
+    "artifacts": {
+      "items": {
+        "$ref": "#/$defs/Artifact"
+      },
+      "title": "Artifacts",
+      "type": "array"
+    },
+    "environment": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Environment",
+      "type": "object"
+    }
+  },
+  "required": [
+    "model_id",
+    "status",
+    "case_id",
+    "case_version",
+    "algorithm",
+    "feature_order",
+    "variable_slot_order",
+    "rules_version",
+    "split_id",
+    "dataset_id",
+    "training_run_id",
+    "training_partitions",
+    "artifacts",
+    "environment"
+  ],
+  "title": "Contrato model_manifest v1.0",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

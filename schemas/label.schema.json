@@ -1,0 +1,127 @@
+{
+  "$defs": {
+    "Plan": {
+      "additionalProperties": false,
+      "properties": {
+        "slot_durations_s": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Slot Durations S",
+          "type": "object"
+        },
+        "cycle_s": {
+          "exclusiveMinimum": 0,
+          "title": "Cycle S",
+          "type": "number"
+        },
+        "greens_s": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Greens S",
+          "type": "object"
+        }
+      },
+      "required": [
+        "slot_durations_s",
+        "cycle_s",
+        "greens_s"
+      ],
+      "title": "Plan",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "label_id": {
+      "title": "Label Id",
+      "type": "string"
+    },
+    "scenario_id": {
+      "title": "Scenario Id",
+      "type": "string"
+    },
+    "case_version": {
+      "title": "Case Version",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "reference",
+        "no_reference"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "plan": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Plan"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "search_run_id": {
+      "title": "Search Run Id",
+      "type": "string"
+    },
+    "protocol_id": {
+      "title": "Protocol Id",
+      "type": "string"
+    },
+    "candidate_count": {
+      "minimum": 0,
+      "title": "Candidate Count",
+      "type": "integer"
+    },
+    "simulation_count": {
+      "minimum": 0,
+      "title": "Simulation Count",
+      "type": "integer"
+    },
+    "evidence_status": {
+      "enum": [
+        "fixture_only",
+        "evaluated"
+      ],
+      "title": "Evidence Status",
+      "type": "string"
+    },
+    "reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Reason"
+    }
+  },
+  "required": [
+    "label_id",
+    "scenario_id",
+    "case_version",
+    "status",
+    "plan",
+    "search_run_id",
+    "protocol_id",
+    "candidate_count",
+    "simulation_count",
+    "evidence_status",
+    "reason"
+  ],
+  "title": "Contrato label v1.0",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

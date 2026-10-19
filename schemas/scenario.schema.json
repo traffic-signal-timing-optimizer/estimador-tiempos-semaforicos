@@ -1,0 +1,228 @@
+{
+  "$defs": {
+    "Artifact": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "path",
+        "sha256"
+      ],
+      "title": "Artifact",
+      "type": "object"
+    },
+    "DemandRow": {
+      "additionalProperties": false,
+      "properties": {
+        "movement_id": {
+          "title": "Movement Id",
+          "type": "string"
+        },
+        "flow_vph": {
+          "minimum": 0,
+          "title": "Flow Vph",
+          "type": "number"
+        },
+        "composition": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "number"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Composition"
+        }
+      },
+      "required": [
+        "movement_id",
+        "flow_vph",
+        "composition"
+      ],
+      "title": "DemandRow",
+      "type": "object"
+    },
+    "Request": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "1.0.0",
+          "default": "1.0.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "case_id": {
+          "title": "Case Id",
+          "type": "string"
+        },
+        "case_version": {
+          "title": "Case Version",
+          "type": "string"
+        },
+        "origin": {
+          "enum": [
+            "synthetic",
+            "field"
+          ],
+          "title": "Origin",
+          "type": "string"
+        },
+        "observation_start": {
+          "format": "date-time",
+          "title": "Observation Start",
+          "type": "string"
+        },
+        "observation_end": {
+          "format": "date-time",
+          "title": "Observation End",
+          "type": "string"
+        },
+        "source_ids": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Source Ids",
+          "type": "array"
+        },
+        "demand": {
+          "items": {
+            "$ref": "#/$defs/DemandRow"
+          },
+          "minItems": 1,
+          "title": "Demand",
+          "type": "array"
+        }
+      },
+      "required": [
+        "request_id",
+        "case_id",
+        "case_version",
+        "origin",
+        "observation_start",
+        "observation_end",
+        "source_ids",
+        "demand"
+      ],
+      "title": "Request",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "scenario_id": {
+      "title": "Scenario Id",
+      "type": "string"
+    },
+    "case_id": {
+      "title": "Case Id",
+      "type": "string"
+    },
+    "case_version": {
+      "title": "Case Version",
+      "type": "string"
+    },
+    "origin": {
+      "enum": [
+        "synthetic",
+        "field_derived"
+      ],
+      "title": "Origin",
+      "type": "string"
+    },
+    "group_id": {
+      "title": "Group Id",
+      "type": "string"
+    },
+    "source_ids": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Source Ids",
+      "type": "array"
+    },
+    "request": {
+      "$ref": "#/$defs/Request"
+    },
+    "boundary_policy_id": {
+      "title": "Boundary Policy Id",
+      "type": "string"
+    },
+    "warmup_s": {
+      "minimum": 0,
+      "title": "Warmup S",
+      "type": "number"
+    },
+    "measure_s": {
+      "exclusiveMinimum": 0,
+      "title": "Measure S",
+      "type": "number"
+    },
+    "drain_max_s": {
+      "minimum": 0,
+      "title": "Drain Max S",
+      "type": "number"
+    },
+    "demand_seed": {
+      "minimum": 0,
+      "title": "Demand Seed",
+      "type": "integer"
+    },
+    "demand_artifact": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Artifact"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "scenario_id",
+    "case_id",
+    "case_version",
+    "origin",
+    "group_id",
+    "source_ids",
+    "request",
+    "boundary_policy_id",
+    "warmup_s",
+    "measure_s",
+    "drain_max_s",
+    "demand_seed",
+    "demand_artifact"
+  ],
+  "title": "Contrato scenario v1.0",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

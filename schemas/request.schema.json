@@ -1,0 +1,107 @@
+{
+  "$defs": {
+    "DemandRow": {
+      "additionalProperties": false,
+      "properties": {
+        "movement_id": {
+          "title": "Movement Id",
+          "type": "string"
+        },
+        "flow_vph": {
+          "minimum": 0,
+          "title": "Flow Vph",
+          "type": "number"
+        },
+        "composition": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "number"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Composition"
+        }
+      },
+      "required": [
+        "movement_id",
+        "flow_vph",
+        "composition"
+      ],
+      "title": "DemandRow",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "request_id": {
+      "title": "Request Id",
+      "type": "string"
+    },
+    "case_id": {
+      "title": "Case Id",
+      "type": "string"
+    },
+    "case_version": {
+      "title": "Case Version",
+      "type": "string"
+    },
+    "origin": {
+      "enum": [
+        "synthetic",
+        "field"
+      ],
+      "title": "Origin",
+      "type": "string"
+    },
+    "observation_start": {
+      "format": "date-time",
+      "title": "Observation Start",
+      "type": "string"
+    },
+    "observation_end": {
+      "format": "date-time",
+      "title": "Observation End",
+      "type": "string"
+    },
+    "source_ids": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Source Ids",
+      "type": "array"
+    },
+    "demand": {
+      "items": {
+        "$ref": "#/$defs/DemandRow"
+      },
+      "minItems": 1,
+      "title": "Demand",
+      "type": "array"
+    }
+  },
+  "required": [
+    "request_id",
+    "case_id",
+    "case_version",
+    "origin",
+    "observation_start",
+    "observation_end",
+    "source_ids",
+    "demand"
+  ],
+  "title": "Contrato request v1.0",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

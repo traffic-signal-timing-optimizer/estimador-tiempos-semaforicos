@@ -1,0 +1,179 @@
+{
+  "$defs": {
+    "Error": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "field": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Field"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "artifact_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifact Id"
+        }
+      },
+      "required": [
+        "code",
+        "field",
+        "message"
+      ],
+      "title": "Error",
+      "type": "object"
+    },
+    "Plan": {
+      "additionalProperties": false,
+      "properties": {
+        "slot_durations_s": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Slot Durations S",
+          "type": "object"
+        },
+        "cycle_s": {
+          "exclusiveMinimum": 0,
+          "title": "Cycle S",
+          "type": "number"
+        },
+        "greens_s": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Greens S",
+          "type": "object"
+        }
+      },
+      "required": [
+        "slot_durations_s",
+        "cycle_s",
+        "greens_s"
+      ],
+      "title": "Plan",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "request_id": {
+      "title": "Request Id",
+      "type": "string"
+    },
+    "case_id": {
+      "title": "Case Id",
+      "type": "string"
+    },
+    "case_version": {
+      "title": "Case Version",
+      "type": "string"
+    },
+    "model_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Model Id"
+    },
+    "status": {
+      "enum": [
+        "accepted",
+        "corrected",
+        "rejected",
+        "invalid_input",
+        "out_of_domain",
+        "failed"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "original_variable_durations_s": {
+      "anyOf": [
+        {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Original Variable Durations S"
+    },
+    "plan": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Plan"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "errors": {
+      "items": {
+        "$ref": "#/$defs/Error"
+      },
+      "title": "Errors",
+      "type": "array"
+    },
+    "duration_ms": {
+      "additionalProperties": {
+        "type": "number"
+      },
+      "title": "Duration Ms",
+      "type": "object"
+    },
+    "rules_version": {
+      "title": "Rules Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "request_id",
+    "case_id",
+    "case_version",
+    "model_id",
+    "status",
+    "original_variable_durations_s",
+    "plan",
+    "errors",
+    "duration_ms",
+    "rules_version"
+  ],
+  "title": "Contrato response v1.0",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

@@ -1,0 +1,77 @@
+{
+  "$defs": {
+    "Assignment": {
+      "additionalProperties": false,
+      "properties": {
+        "scenario_id": {
+          "title": "Scenario Id",
+          "type": "string"
+        },
+        "group_id": {
+          "title": "Group Id",
+          "type": "string"
+        },
+        "partition": {
+          "enum": [
+            "train",
+            "validation",
+            "test"
+          ],
+          "title": "Partition",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scenario_id",
+        "group_id",
+        "partition"
+      ],
+      "title": "Assignment",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "split_id": {
+      "title": "Split Id",
+      "type": "string"
+    },
+    "policy": {
+      "title": "Policy",
+      "type": "string"
+    },
+    "seed": {
+      "minimum": 0,
+      "title": "Seed",
+      "type": "integer"
+    },
+    "frozen": {
+      "title": "Frozen",
+      "type": "boolean"
+    },
+    "assignments": {
+      "items": {
+        "$ref": "#/$defs/Assignment"
+      },
+      "minItems": 1,
+      "title": "Assignments",
+      "type": "array"
+    }
+  },
+  "required": [
+    "split_id",
+    "policy",
+    "seed",
+    "frozen",
+    "assignments"
+  ],
+  "title": "Contrato split v1.0",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

@@ -1,0 +1,340 @@
+{
+  "$defs": {
+    "Artifact": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "path",
+        "sha256"
+      ],
+      "title": "Artifact",
+      "type": "object"
+    },
+    "CalibrationCriterion": {
+      "additionalProperties": false,
+      "properties": {
+        "variable": {
+          "enum": [
+            "volume",
+            "queue",
+            "travel_time"
+          ],
+          "title": "Variable",
+          "type": "string"
+        },
+        "metric": {
+          "title": "Metric",
+          "type": "string"
+        },
+        "unit": {
+          "title": "Unit",
+          "type": "string"
+        },
+        "scope": {
+          "title": "Scope",
+          "type": "string"
+        },
+        "maximum_error": {
+          "minimum": 0,
+          "title": "Maximum Error",
+          "type": "number"
+        },
+        "pilot_evidence": {
+          "title": "Pilot Evidence",
+          "type": "string"
+        }
+      },
+      "required": [
+        "variable",
+        "metric",
+        "unit",
+        "scope",
+        "maximum_error",
+        "pilot_evidence"
+      ],
+      "title": "CalibrationCriterion",
+      "type": "object"
+    },
+    "Seeds": {
+      "additionalProperties": false,
+      "properties": {
+        "search": {
+          "items": {
+            "type": "integer"
+          },
+          "minItems": 1,
+          "title": "Search",
+          "type": "array"
+        },
+        "finalists": {
+          "items": {
+            "type": "integer"
+          },
+          "minItems": 1,
+          "title": "Finalists",
+          "type": "array"
+        },
+        "final": {
+          "items": {
+            "type": "integer"
+          },
+          "minItems": 1,
+          "title": "Final",
+          "type": "array"
+        }
+      },
+      "required": [
+        "search",
+        "finalists",
+        "final"
+      ],
+      "title": "Seeds",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "protocol_id": {
+      "title": "Protocol Id",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "draft",
+        "frozen"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "purpose": {
+      "enum": [
+        "synthetic_fixture",
+        "main_experiment"
+      ],
+      "title": "Purpose",
+      "type": "string"
+    },
+    "metric_definition": {
+      "title": "Metric Definition",
+      "type": "string"
+    },
+    "cohort_policy": {
+      "title": "Cohort Policy",
+      "type": "string"
+    },
+    "censoring_policy": {
+      "enum": [
+        "complete_cohort_or_no_label",
+        "approved_alternative"
+      ],
+      "title": "Censoring Policy",
+      "type": "string"
+    },
+    "alternate_censoring_rule": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Alternate Censoring Rule"
+    },
+    "search_budget": {
+      "exclusiveMinimum": 0,
+      "title": "Search Budget",
+      "type": "integer"
+    },
+    "sampling_attempt_limit": {
+      "exclusiveMinimum": 0,
+      "title": "Sampling Attempt Limit",
+      "type": "integer"
+    },
+    "finalist_count": {
+      "exclusiveMinimum": 0,
+      "title": "Finalist Count",
+      "type": "integer"
+    },
+    "seeds": {
+      "$ref": "#/$defs/Seeds"
+    },
+    "tie_epsilon_s": {
+      "minimum": 0,
+      "title": "Tie Epsilon S",
+      "type": "number"
+    },
+    "queue_speed_threshold_mps": {
+      "minimum": 0,
+      "title": "Queue Speed Threshold Mps",
+      "type": "number"
+    },
+    "confidence_level": {
+      "exclusiveMaximum": 1,
+      "exclusiveMinimum": 0,
+      "title": "Confidence Level",
+      "type": "number"
+    },
+    "bootstrap_repetitions": {
+      "exclusiveMinimum": 0,
+      "title": "Bootstrap Repetitions",
+      "type": "integer"
+    },
+    "acceptance_margin_s": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Acceptance Margin S"
+    },
+    "count_error_tolerance": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Count Error Tolerance"
+    },
+    "simulation_fit_tolerance": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Simulation Fit Tolerance"
+    },
+    "approval_reference": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Approval Reference"
+    },
+    "zone_lane_ids": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Zone Lane Ids",
+      "type": "array"
+    },
+    "queue_sampling_s": {
+      "exclusiveMinimum": 0,
+      "title": "Queue Sampling S",
+      "type": "number"
+    },
+    "stop_speed_threshold_mps": {
+      "minimum": 0,
+      "title": "Stop Speed Threshold Mps",
+      "type": "number"
+    },
+    "calibration_criteria": {
+      "items": {
+        "$ref": "#/$defs/CalibrationCriterion"
+      },
+      "title": "Calibration Criteria",
+      "type": "array"
+    },
+    "group_aggregation": {
+      "enum": [
+        "equal_group_weight",
+        "declared_field_weights"
+      ],
+      "title": "Group Aggregation",
+      "type": "string"
+    },
+    "group_weight_artifact": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Artifact"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "refit_policy": {
+      "enum": [
+        "train_only",
+        "train_plus_validation_after_selection"
+      ],
+      "title": "Refit Policy",
+      "type": "string"
+    },
+    "numeric_abs_tolerance": {
+      "minimum": 0,
+      "title": "Numeric Abs Tolerance",
+      "type": "number"
+    }
+  },
+  "required": [
+    "protocol_id",
+    "status",
+    "purpose",
+    "metric_definition",
+    "cohort_policy",
+    "censoring_policy",
+    "alternate_censoring_rule",
+    "search_budget",
+    "sampling_attempt_limit",
+    "finalist_count",
+    "seeds",
+    "tie_epsilon_s",
+    "queue_speed_threshold_mps",
+    "confidence_level",
+    "bootstrap_repetitions",
+    "approval_reference",
+    "zone_lane_ids",
+    "queue_sampling_s",
+    "stop_speed_threshold_mps",
+    "calibration_criteria",
+    "group_aggregation",
+    "group_weight_artifact",
+    "refit_policy",
+    "numeric_abs_tolerance"
+  ],
+  "title": "Contrato protocol v1.0",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

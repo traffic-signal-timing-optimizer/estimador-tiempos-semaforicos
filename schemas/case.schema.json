@@ -1,0 +1,332 @@
+{
+  "$defs": {
+    "Artifact": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": {
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifact_id",
+        "path",
+        "sha256"
+      ],
+      "title": "Artifact",
+      "type": "object"
+    },
+    "GreenGroup": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "slot_ids": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Slot Ids",
+          "type": "array"
+        },
+        "min_s": {
+          "minimum": 0,
+          "title": "Min S",
+          "type": "number"
+        },
+        "max_s": {
+          "exclusiveMinimum": 0,
+          "title": "Max S",
+          "type": "number"
+        },
+        "purpose": {
+          "enum": [
+            "vehicle",
+            "pedestrian"
+          ],
+          "title": "Purpose",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "slot_ids",
+        "min_s",
+        "max_s",
+        "purpose"
+      ],
+      "title": "GreenGroup",
+      "type": "object"
+    },
+    "Movement": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "approach_id": {
+          "title": "Approach Id",
+          "type": "string"
+        },
+        "incoming_lanes": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Incoming Lanes",
+          "type": "array"
+        },
+        "outgoing_edges": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Outgoing Edges",
+          "type": "array"
+        },
+        "tls_id": {
+          "title": "Tls Id",
+          "type": "string"
+        },
+        "link_indices": {
+          "items": {
+            "type": "integer"
+          },
+          "minItems": 1,
+          "title": "Link Indices",
+          "type": "array"
+        },
+        "flow_domain_vph": {
+          "$ref": "#/$defs/Range"
+        }
+      },
+      "required": [
+        "id",
+        "approach_id",
+        "incoming_lanes",
+        "outgoing_edges",
+        "tls_id",
+        "link_indices",
+        "flow_domain_vph"
+      ],
+      "title": "Movement",
+      "type": "object"
+    },
+    "Range": {
+      "additionalProperties": false,
+      "properties": {
+        "min": {
+          "minimum": 0,
+          "title": "Min",
+          "type": "number"
+        },
+        "max": {
+          "minimum": 0,
+          "title": "Max",
+          "type": "number"
+        }
+      },
+      "required": [
+        "min",
+        "max"
+      ],
+      "title": "Range",
+      "type": "object"
+    },
+    "Slot": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "variable",
+            "fixed"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "min_s": {
+          "exclusiveMinimum": 0,
+          "title": "Min S",
+          "type": "number"
+        },
+        "max_s": {
+          "exclusiveMinimum": 0,
+          "title": "Max S",
+          "type": "number"
+        },
+        "states": {
+          "items": {
+            "$ref": "#/$defs/State"
+          },
+          "minItems": 1,
+          "title": "States",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "min_s",
+        "max_s",
+        "states"
+      ],
+      "title": "Slot",
+      "type": "object"
+    },
+    "State": {
+      "additionalProperties": false,
+      "properties": {
+        "tls_id": {
+          "title": "Tls Id",
+          "type": "string"
+        },
+        "state": {
+          "pattern": "^[rRyYgGsuoO]+$",
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tls_id",
+        "state"
+      ],
+      "title": "State",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0",
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "case_id": {
+      "title": "Case Id",
+      "type": "string"
+    },
+    "case_version": {
+      "title": "Case Version",
+      "type": "string"
+    },
+    "origin": {
+      "enum": [
+        "synthetic",
+        "field"
+      ],
+      "title": "Origin",
+      "type": "string"
+    },
+    "description": {
+      "title": "Description",
+      "type": "string"
+    },
+    "representation_status": {
+      "enum": [
+        "synthetic_fixture",
+        "unverified",
+        "calibrated",
+        "validated"
+      ],
+      "title": "Representation Status",
+      "type": "string"
+    },
+    "network": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Artifact"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "tick_s": {
+      "exclusiveMinimum": 0,
+      "title": "Tick S",
+      "type": "number"
+    },
+    "cycle_s": {
+      "$ref": "#/$defs/Range"
+    },
+    "vehicle_classes": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Vehicle Classes",
+      "type": "array"
+    },
+    "movements": {
+      "items": {
+        "$ref": "#/$defs/Movement"
+      },
+      "minItems": 1,
+      "title": "Movements",
+      "type": "array"
+    },
+    "slots": {
+      "items": {
+        "$ref": "#/$defs/Slot"
+      },
+      "minItems": 1,
+      "title": "Slots",
+      "type": "array"
+    },
+    "green_groups": {
+      "items": {
+        "$ref": "#/$defs/GreenGroup"
+      },
+      "minItems": 1,
+      "title": "Green Groups",
+      "type": "array"
+    },
+    "boundary_policy_id": {
+      "title": "Boundary Policy Id",
+      "type": "string"
+    },
+    "restrictions_evidence": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Restrictions Evidence",
+      "type": "array"
+    }
+  },
+  "required": [
+    "case_id",
+    "case_version",
+    "origin",
+    "description",
+    "representation_status",
+    "network",
+    "tick_s",
+    "cycle_s",
+    "vehicle_classes",
+    "movements",
+    "slots",
+    "green_groups",
+    "boundary_policy_id",
+    "restrictions_evidence"
+  ],
+  "title": "Contrato case v1.0",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}
