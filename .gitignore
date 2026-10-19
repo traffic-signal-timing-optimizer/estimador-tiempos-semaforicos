@@ -218,3 +218,15 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+
+# Proyecto: documentación completa del paquete (decisión del equipo)
+documentacion/
+
+# Videos: contienen personas y placas (Ley N.° 29733); nunca al repositorio
+*.mp4
+*.avi
+*.mov
+
+# Datos originales, derivados y resultados de ejecuciones (ver diseño técnico, sección de estructura)
+datos/
