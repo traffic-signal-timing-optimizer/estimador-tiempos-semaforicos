@@ -4,7 +4,7 @@
 - **Fecha:** 2026-10-20
 - **Autorización:** el Product Owner autorizó F4 («procede con F4») y aprobó dos cambios de alcance (ver abajo). Pidió no publicar todavía los commits.
 - **Código y pruebas:** commit `2d23020`; corrección posterior en `610b6ae` (ver «Revisión posterior»).
-- **Siguiente fase:** F5 (núcleo de trazabilidad), a la espera de la autorización expresa del Product Owner.
+- **Siguiente fase:** F5 (núcleo de trazabilidad), completada: ver `docs/actas/2026-10-20-dev00-f5-nucleo-de-trazabilidad.md`.
 
 ## Cambios de alcance aprobados
 
