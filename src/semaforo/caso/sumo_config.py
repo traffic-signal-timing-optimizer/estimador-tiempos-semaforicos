@@ -6,7 +6,7 @@ DTD ni entidades, y con un límite de tamaño.
 
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
-from xml.etree.ElementTree import ParseError
+from xml.etree.ElementTree import Element, ParseError
 
 from defusedxml.common import DefusedXmlException
 from defusedxml.ElementTree import parse
@@ -72,20 +72,7 @@ def read_config_references(path: Path, max_bytes: int) -> ConfigReferences:
         CasoError: INPUT_SCHEMA si el archivo no se puede leer, supera el límite, no es XML
             válido, contiene DTD o entidades, o su raíz no es una configuración de SUMO.
     """
-    try:
-        size = path.stat().st_size
-    except OSError as error:
-        raise _invalid(f"no se puede leer el .sumocfg ({type(error).__name__})", path) from error
-    if size > max_bytes:
-        raise _invalid(f"el .sumocfg pesa {size} bytes y el límite es {max_bytes}", path)
-    try:
-        root = parse(path, forbid_dtd=True).getroot()
-    except (DefusedXmlException, ParseError, OSError) as error:
-        raise _invalid(
-            f"el .sumocfg no es un XML válido o seguro ({type(error).__name__})", path
-        ) from error
-    if root is None or root.tag not in _ROOT_TAGS:
-        raise _invalid("la raíz del .sumocfg no es una configuración de SUMO", path)
+    root = _load_root(path, max_bytes)
     files: list[FileReference] = []
     absolute: list[FileReference] = []
     for section in root:
@@ -102,6 +89,42 @@ def read_config_references(path: Path, max_bytes: int) -> ConfigReferences:
             if _declares_files(section.tag, option.tag):
                 files.extend(references)
     return ConfigReferences(files=tuple(files), absolute_paths=tuple(absolute))
+
+
+def read_config_options(path: Path, max_bytes: int) -> dict[str, dict[str, str]]:
+    """Todas las opciones del .sumocfg por sección, con el valor tal como está escrito.
+
+    Sirve para registrar tiempos, semilla y comportamiento de la corrida (HU04). Una opción sin
+    atributo ``value`` se omite.
+
+    Raises:
+        CasoError: los mismos casos que ``read_config_references``.
+    """
+    options: dict[str, dict[str, str]] = {}
+    for section in _load_root(path, max_bytes):
+        for option in section:
+            value = option.get("value")
+            if value is not None:
+                options.setdefault(section.tag, {})[option.tag] = value
+    return options
+
+
+def _load_root(path: Path, max_bytes: int) -> Element:
+    try:
+        size = path.stat().st_size
+    except OSError as error:
+        raise _invalid(f"no se puede leer el .sumocfg ({type(error).__name__})", path) from error
+    if size > max_bytes:
+        raise _invalid(f"el .sumocfg pesa {size} bytes y el límite es {max_bytes}", path)
+    try:
+        root = parse(path, forbid_dtd=True).getroot()
+    except (DefusedXmlException, ParseError, OSError) as error:
+        raise _invalid(
+            f"el .sumocfg no es un XML válido o seguro ({type(error).__name__})", path
+        ) from error
+    if root is None or root.tag not in _ROOT_TAGS:
+        raise _invalid("la raíz del .sumocfg no es una configuración de SUMO", path)
+    return root
 
 
 def _declares_files(section: str, option: str) -> bool:

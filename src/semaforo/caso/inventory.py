@@ -1,20 +1,13 @@
 """Lectura del inventario de una red SUMO (``.net.xml`` o ``.net.xml.gz``).
 
-La red es un archivo externo y por tanto no confiable: se descomprime con un límite de tamaño
-(contra bombas de compresión) y se lee con ``defusedxml``, sin DTD ni entidades.
+La red es un archivo externo y por tanto no confiable: se lee con ``xml_input`` (límite de
+tamaño descomprimido y ``defusedxml``, sin DTD ni entidades).
 """
 
-import gzip
-import math
-import zlib
 from collections import Counter
 from pathlib import Path
-from xml.etree.ElementTree import Element, ParseError
+from xml.etree.ElementTree import Element
 
-from defusedxml.common import DefusedXmlException
-from defusedxml.ElementTree import fromstring
-
-from semaforo.caso.errors import CasoError, ErrorCode
 from semaforo.caso.inventory_models import (
     InventoryFinding,
     NetworkCounts,
@@ -23,11 +16,12 @@ from semaforo.caso.inventory_models import (
     TlsInventory,
     TlsProgram,
 )
+from semaforo.caso.xml_input import integer, number, optional_number, parse_root, required
 
 # Límite provisional del tamaño descomprimido, pendiente del piloto. La red de Frutales ocupa
 # 511 429 bytes descomprimida; el árbol XML en memoria ocupa varias veces el tamaño del archivo.
 MAX_NET_BYTES = 64 * 1024 * 1024
-GZIP_MAGIC = b"\x1f\x8b"
+NET_ROOTS = frozenset({"net"})
 INTERNAL = "internal"
 
 
@@ -42,7 +36,7 @@ def read_network_inventory(path: Path, max_bytes: int = MAX_NET_BYTES) -> Networ
         CasoError: INPUT_SCHEMA si el archivo no se puede leer, supera el límite, está truncado,
             no es XML válido o seguro, no es una red de SUMO o trae valores numéricos no válidos.
     """
-    root = _parse(path, max_bytes)
+    root = parse_root(path, max_bytes, NET_ROOTS, "red")
     controlled = _controlled_links(root)
     programs = _programs(root)
     traffic_lights: list[TlsInventory] = []
@@ -69,75 +63,6 @@ def read_network_inventory(path: Path, max_bytes: int = MAX_NET_BYTES) -> Networ
     )
 
 
-def _invalid(message: str, field: str) -> CasoError:
-    return CasoError(ErrorCode.INPUT_SCHEMA, message, field)
-
-
-def _read_bounded(path: Path, max_bytes: int) -> bytes:
-    """Contenido descomprimido de ``path``, sin leer nunca más de ``max_bytes`` + 1 bytes."""
-    try:
-        with path.open("rb") as handle:
-            compressed = handle.read(len(GZIP_MAGIC)) == GZIP_MAGIC
-            handle.seek(0)
-            data = (gzip.GzipFile(fileobj=handle) if compressed else handle).read(max_bytes + 1)
-    except (OSError, EOFError, zlib.error) as error:
-        raise _invalid(f"no se puede leer la red ({type(error).__name__})", path.name) from error
-    if len(data) > max_bytes:
-        raise _invalid(f"la red supera el límite de {max_bytes} bytes", path.name)
-    return data
-
-
-def _parse(path: Path, max_bytes: int) -> Element:
-    data = _read_bounded(path, max_bytes)
-    try:
-        root = fromstring(data, forbid_dtd=True)
-    except (DefusedXmlException, ParseError) as error:
-        raise _invalid(
-            f"la red no es un XML válido o seguro ({type(error).__name__})", path.name
-        ) from error
-    if root.tag != "net":
-        raise _invalid("la raíz del archivo no es una red de SUMO", path.name)
-    return root
-
-
-def _required(element: Element, name: str) -> str:
-    value = element.get(name)
-    if value is None:
-        raise _invalid(f"falta el atributo {name} en <{element.tag}>", f"{element.tag}.{name}")
-    return value
-
-
-def _to_number(element: Element, name: str, text: str) -> float:
-    try:
-        value = float(text)
-    except ValueError as error:
-        raise _invalid(
-            f"{name} no es un número en <{element.tag}>", f"{element.tag}.{name}"
-        ) from error
-    if not math.isfinite(value):
-        raise _invalid(f"{name} no es finito en <{element.tag}>", f"{element.tag}.{name}")
-    return value
-
-
-def _number(element: Element, name: str) -> float:
-    return _to_number(element, name, _required(element, name))
-
-
-def _optional_number(element: Element, name: str) -> float | None:
-    text = element.get(name)
-    return None if text is None else _to_number(element, name, text)
-
-
-def _integer(element: Element, name: str) -> int:
-    text = _required(element, name)
-    try:
-        return int(text)
-    except ValueError as error:
-        raise _invalid(
-            f"{name} no es un entero en <{element.tag}>", f"{element.tag}.{name}"
-        ) from error
-
-
 def _counts(root: Element) -> NetworkCounts:
     edges = root.findall("edge")
     internal = [edge for edge in edges if edge.get("function") == INTERNAL]
@@ -161,24 +86,24 @@ def _controlled_links(root: Element) -> dict[str, list[int]]:
     for connection in root.findall("connection"):
         tls_id = connection.get("tl")
         if tls_id is not None:
-            links.setdefault(tls_id, []).append(_integer(connection, "linkIndex"))
+            links.setdefault(tls_id, []).append(integer(connection, "linkIndex"))
     return links
 
 
 def _programs(root: Element) -> dict[str, list[TlsProgram]]:
     programs: dict[str, list[TlsProgram]] = {}
     for logic in root.findall("tlLogic"):
-        programs.setdefault(_required(logic, "id"), []).append(_program(logic))
+        programs.setdefault(required(logic, "id"), []).append(_program(logic))
     return programs
 
 
 def _program(logic: Element) -> TlsProgram:
-    offset = _optional_number(logic, "offset")
+    offset = optional_number(logic, "offset")
     return TlsProgram(
         program_id=logic.get("programID", "0"),
         type=logic.get("type", "static"),
         offset_s=0.0 if offset is None else offset,
-        params={_required(p, "key"): _required(p, "value") for p in logic.findall("param")},
+        params={required(p, "key"): required(p, "value") for p in logic.findall("param")},
         phases=[_phase(index, phase) for index, phase in enumerate(logic.findall("phase"))],
     )
 
@@ -186,10 +111,10 @@ def _program(logic: Element) -> TlsProgram:
 def _phase(index: int, element: Element) -> Phase:
     return Phase(
         index=index,
-        duration_s=_number(element, "duration"),
-        min_dur_s=_optional_number(element, "minDur"),
-        max_dur_s=_optional_number(element, "maxDur"),
-        state=_required(element, "state"),
+        duration_s=number(element, "duration"),
+        min_dur_s=optional_number(element, "minDur"),
+        max_dur_s=optional_number(element, "maxDur"),
+        state=required(element, "state"),
         name=element.get("name"),
     )
 

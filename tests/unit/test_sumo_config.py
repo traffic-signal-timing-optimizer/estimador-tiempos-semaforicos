@@ -5,7 +5,12 @@ from pathlib import Path
 import pytest
 
 from semaforo.caso.errors import CasoError, ErrorCode
-from semaforo.caso.sumo_config import FileReference, is_absolute_like, read_config_references
+from semaforo.caso.sumo_config import (
+    FileReference,
+    is_absolute_like,
+    read_config_options,
+    read_config_references,
+)
 
 MAX_BYTES = 10_000
 CONFIG = """<?xml version="1.0" encoding="UTF-8"?>
@@ -73,6 +78,26 @@ def test_ignores_options_without_a_value(tmp_path: Path) -> None:
     result = read_config_references(_write(tmp_path, text), MAX_BYTES)
     assert "net-file" not in {ref.option for ref in result.files}
     assert _paths(result.files, "input") == ["r1.rou.xml", "r2.rou.xml", "x.add.xml"]
+
+
+def test_reads_every_option_by_section_as_written(tmp_path: Path) -> None:
+    options = read_config_options(_write(tmp_path, CONFIG), MAX_BYTES)
+    assert options["time"] == {"begin": "0"}
+    assert options["input"]["route-files"] == "r1.rou.xml, r2.rou.xml"
+    assert options["output"]["tripinfo-output.write-unfinished"] == "true"
+    assert options["gui_only"] == {"gui-settings-file": "view.xml", "delay": "100"}
+
+
+def test_option_reading_skips_options_without_value(tmp_path: Path) -> None:
+    text = CONFIG.replace('<begin value="0"/>', "<begin/>")
+    assert "time" not in read_config_options(_write(tmp_path, text), MAX_BYTES)
+
+
+def test_option_reading_rejects_dangerous_xml(tmp_path: Path) -> None:
+    text = '<?xml version="1.0"?><!DOCTYPE configuration><configuration/>'
+    with pytest.raises(CasoError) as raised:
+        read_config_options(_write(tmp_path, text), MAX_BYTES)
+    assert raised.value.code is ErrorCode.INPUT_SCHEMA
 
 
 def test_reports_the_option_name(tmp_path: Path) -> None:
