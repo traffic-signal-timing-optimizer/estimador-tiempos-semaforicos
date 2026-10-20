@@ -221,15 +221,16 @@ __marimo__/
 
 
 # Proyecto: documentación completa del paquete (decisión del equipo)
-documentacion/
+/documentacion/
 
 # Videos: contienen personas y placas (Ley N.° 29733); nunca al repositorio
 *.mp4
 *.avi
 *.mov
 
-# Datos originales, derivados y resultados de ejecuciones (ver diseño técnico, sección de estructura)
-datos/
+# Datos originales, derivados y resultados de ejecuciones (ver diseño técnico, sección de estructura).
+# Anclado a la raíz: src/semaforo/datos es un paquete de código y debe versionarse.
+/datos/
 
 # Línea base local de la vigilancia de SUMO (estado de cada equipo)
 tools/sumo/vigilar_sumo_baseline.json
