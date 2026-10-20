@@ -8,7 +8,7 @@ publica con un renombrado. Disposición publicada::
     <root>/<run_id>/inputs/...    copia de las entradas
     <root>/<run_id>/outputs/...   lo que produjo la ejecución
 
-Mientras se escribe vive en ``<root>/.tmp-<run_id>-…`` con un manifiesto provisional en estado
+Mientras se escribe vive en ``<root>/.tmp-<8 caracteres>`` con un manifiesto provisional en estado
 ``running``, y el lock ``<root>/.lock-<run_id>`` impide dos escrituras al mismo destino. Una caída
 deja esa carpeta temporal (incompleta): nunca queda publicada una ejecución a medias, y una
 ejecución publicada nunca se sobrescribe.
@@ -162,7 +162,9 @@ class RunWriter:
                 ErrorCode.RUN_EXISTS, "otra escritura de esta ejecución está en curso", "run_id"
             ) from error
         try:
-            self.path = Path(tempfile.mkdtemp(prefix=f"{TEMP_PREFIX}{self.run_id}-", dir=root))
+            # Nombre corto (.tmp- y 8 caracteres): SUMO no abre rutas de más de 257 caracteres.
+            # El run_id queda en el manifiesto provisional.
+            self.path = Path(tempfile.mkdtemp(prefix=TEMP_PREFIX, dir=root))
             (self.path / INPUTS).mkdir()
             (self.path / OUTPUTS).mkdir()
             self._write_manifest(provisional)
@@ -180,6 +182,11 @@ class RunWriter:
         traceback: TracebackType | None,
     ) -> None:
         self._release()
+
+    @property
+    def input_paths(self) -> frozenset[str]:
+        """Rutas (``inputs/…``) de las entradas registradas con ``add_input``."""
+        return frozenset(self._inputs)
 
     def add_input(self, source: Path, relative: str) -> Artifact:
         """Copia ``source`` a ``inputs/<relative>`` y la registra con su hash."""

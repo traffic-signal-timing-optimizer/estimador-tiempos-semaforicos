@@ -102,6 +102,7 @@ def test_run_ids_are_sortable_and_unique() -> None:
 def test_nothing_is_visible_until_published(runs: Path) -> None:
     with RunWriter(runs, SPEC, clock=clock) as writer:
         assert not (runs / writer.run_id).exists()
+        assert len(writer.path.name) <= len(".tmp-") + 8  # corta: SUMO falla con rutas largas
         provisional = (writer.path / "manifest.json").read_text(encoding="utf-8")
         assert RunManifest.model_validate_json(provisional).status == "running"
         publish_succeeded(writer)
