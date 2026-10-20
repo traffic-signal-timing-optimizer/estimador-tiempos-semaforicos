@@ -31,7 +31,7 @@ Además de los artefactos de F7, la carpeta `datos/derivados/recepcion/<receptio
 
 ## Planillas de revisión
 
-Se abren con doble clic en Excel. Van separadas por punto y coma, que es el separador de listas de la configuración regional es-PE de este equipo, y en UTF-8 con BOM para que se vean las tildes.
+Se abren con doble clic en Excel. Van separadas por punto y coma, que es el separador de listas de la configuración regional es-PE de este equipo, y en UTF-8 con BOM para que se vean las tildes. Desde la revisión de F9 (`dcf4b77`), los identificadores de SUMO van como fórmula de texto, porque Excel mostraba las aristas de ID numérico en notación científica.
 
 - **QA23** tiene una fila por movimiento: semáforo, enlace (`linkIndex`), arista y carril de entrada y salida, giro y clases de la demanda que pueden usarlo.
 - **QA24** tiene una fila por fase de cada programa: duración, `minDur`, `maxDur` y movimientos en verde y en amarillo. Añade el ciclo y el desfase, y filas para revisar peatones (DEC03), la frontera con semáforos vecinos (DEC04) y los detectores del programa actuado.

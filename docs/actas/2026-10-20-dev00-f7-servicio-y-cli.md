@@ -10,7 +10,7 @@
 
 | Ampliación | Fase | Motivo |
 |---|---|---|
-| Guardar en el registro de la recepción la huella SHA-256 del manifiesto de la corrida base | F7 (hecho) | Autenticidad (ADR03): quien pueda escribir en la carpeta de la corrida podría rehacerla junto con su manifiesto. Con la huella fuera de ella, el cambio se nota. |
+| Guardar en el registro de la recepción la huella SHA-256 del manifiesto de la corrida base | F7 (hecho; la comprobación automática se añadió en la revisión de F9, `dcf4b77`) | Autenticidad (ADR03): quien pueda escribir en la carpeta de la corrida podría rehacerla junto con su manifiesto. Con la huella fuera de ella, el cambio se nota. |
 | Publicar esa huella en el informe de `docs/recepcion/` | F8 (hecho, `cd58da2`) | Al quedar en el historial de git, alterar la corrida sin que se note exigiría reescribir el historial publicado |
 | Listar las ejecuciones incompletas (carpetas `.tmp-`) en el registro | F7 (hecho) | No se borran solas y pueden ser la única pista de un fallo; el Product Owner decide qué hacer con ellas |
 

@@ -89,6 +89,6 @@ Textos oficiales relevantes:
 
 ## Pendientes de verificación
 
-- Comportamiento de `--end` cuando no se indica: se confirma en F6 y F9.
+- Comportamiento de `--end` cuando no se indica: resuelto en F6 y F9. El `.sumocfg` de R0 no fija `end`; el runner pasa siempre el límite de D4 por línea de comandos y la corrida base termina en ese tiempo (ver el acta de F9).
 - Orden de `linkIndex` que genera `netconvert` a partir de archivos planos: resuelto en F1. Los índices los fija `demo.con.xml` y no dependen del orden que elija `netconvert` (ver `tests/fixtures/sumo/README.md`).
-- Programa activo cuando un semáforo tiene varios programas: resuelto en F3. SUMO 1.27.1 ejecuta el último del archivo (ver el acta de F3). Se reconfirma en F6 con el runner.
+- Programa activo cuando un semáforo tiene varios programas: resuelto en F3. SUMO 1.27.1 ejecuta el último del archivo (ver el acta de F3). La medición de F3 ya ejecuta SUMO y queda fijada en una prueba de integración; no se repitió con el runner de F6, y en R0 no aplica porque su red tiene un solo programa.
