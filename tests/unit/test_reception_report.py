@@ -125,7 +125,9 @@ def test_qa24_lists_each_phase_with_the_movements_it_lets_through(
     phases = [row for row in table if row and row[0].startswith("QA24-S1-demo-F")]
     assert len(phases) == 6
     first = phases[0]
-    assert first[1] == excel("DEMO_TLS")
+    assert first[1:3] == [excel("DEMO_TLS"), excel("demo")]
+    (cycle_row,) = [row for row in table if row and row[0].endswith("-CICLO")]
+    assert cycle_row[1:3] == [excel("DEMO_TLS"), excel("demo")]
     assert first[5:11] == ["0", "30", "", "", "M01", "-"]
     assert phases[1][9:11] == ["-", "M01"]
     assert phases[3][9] == "M02"

@@ -151,7 +151,7 @@ def qa24_csv(
                     [
                         f"{prefix}-F{phase.index:02d}",
                         _excel_text(tls.id),
-                        program.program_id,
+                        _excel_text(program.program_id),
                         program.type,
                         active,
                         str(phase.index),
@@ -170,7 +170,7 @@ def qa24_csv(
                 [
                     f"{prefix}-CICLO",
                     _excel_text(tls.id),
-                    program.program_id,
+                    _excel_text(program.program_id),
                     program.type,
                     active,
                     "ciclo",
