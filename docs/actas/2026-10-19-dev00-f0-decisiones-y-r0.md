@@ -3,8 +3,8 @@
 - **Tipo:** registro de fase del plan de DEV00 (HU04, HU14)
 - **Fecha:** 2026-10-19, 19:28 (UTC−5)
 - **Autorización:** el Product Owner dio el OK a F0 sin objeciones al plan; por la regla anunciada en el plan, se aplican las recomendaciones D1–D6.
-- **Estado posterior:** F1 (fixture SUMO mínimo ejecutable) completada en el commit `5242cd3`. ADR09 aceptada el 2026-10-19 con las recomendaciones del Product Owner.
-- **Siguiente fase:** F2 (hash y copia inmutable), a la espera de la autorización expresa del Product Owner.
+- **Estado posterior:** F1 (fixture SUMO mínimo ejecutable) completada en el commit `5242cd3`. ADR09 aceptada el 2026-10-19 con las recomendaciones del Product Owner. F2 completada: ver `docs/actas/2026-10-19-dev00-f2-copia-inmutable.md`.
+- **Siguiente fase:** F3 (inventario de red y semáforos), a la espera de la autorización expresa del Product Owner.
 
 ## Decisiones D1–D6
 
@@ -17,7 +17,7 @@ Se pueden cambiar en cualquier momento; el cambio afecta solo a las fases indica
 | D3 | Quien lanza SUMO es un runner mínimo en `simulacion/runner.py`, que adelanta el núcleo de DEV07. | F6 |
 | D4 | Límites de la corrida base: 7200 s simulados y 900 s reales. Son provisionales, «pendiente del piloto». Se pasan como parámetros de línea de comandos y no modifican ningún archivo. | F6, F9 |
 | D5 | Punto de entrada: CLI mínima `python -m semaforo case receive`, en lugar de un script suelto. | F7 |
-| D6 | Dependencias nuevas: `pydantic` (pasa de desarrollo a ejecución) y `defusedxml`. Se ejecuta `pip-audit` al agregarlas. Corrección confirmada el 2026-10-19: `pydantic` entra en F2 (el manifiesto usa DTO desde F2) y `defusedxml` en F3. | F2 (pydantic), F3 (defusedxml) |
+| D6 | Dependencias nuevas: `pydantic` (pasa de desarrollo a ejecución) y `defusedxml`. Se ejecuta `pip-audit` al agregarlas. Corrección del 2026-10-19: ambas entran en F2 (el manifiesto usa DTO y el `.sumocfg` se lee con `defusedxml` desde F2). | F2 |
 
 Reglas de identidad y ubicación que acompañan a D1:
 

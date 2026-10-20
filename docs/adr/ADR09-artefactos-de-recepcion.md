@@ -13,6 +13,7 @@
    - El `snapshot_id` es el SHA-256 de una lista ordenada con una línea por archivo: `<ruta relativa>\t<sha256>\n`.
    - La lista incluye el `.sumocfg` de entrada y los archivos de su sección `<input>`. Si un valor es una lista separada por comas, cada archivo cuenta por separado. Las rutas se resuelven respecto a la carpeta del `.sumocfg`.
    - Quedan fuera de la identidad la sección `<gui_only>` (vistas), la sección `<output>`, las salidas de SUMO y los archivos no referenciados. Se registran con hash en el manifiesto, pero no cambian el `snapshot_id`.
+   - La copia contiene únicamente los archivos de identidad. Los demás archivos se registran en el manifiesto con su hash y su rol, pero no se copian.
    - Consecuencia: volver a ejecutar la GUI no crea una versión nueva; cambiar una ruta o la red sí.
 
 2. **Dos identificadores distintos.**
@@ -20,7 +21,7 @@
    - `reception_id`: cada análisis sobre una copia. Formato: `<AAAAMMDDTHHMMSSZ>_<primeros 8 caracteres del snapshot_id>`, con hora UTC para evitar ambigüedad.
    - Una copia puede tener muchas recepciones. Cada recepción es nueva y nunca sobrescribe otra.
 
-3. **Manifiesto, inventario y auditoría** como JSON con `schema_version` 1.0.0, validados con DTO pydantic dentro de `caso`. Se guardan en `datos/derivados/recepcion/<reception_id>/`. `pydantic` pasa a dependencia de ejecución en F2.
+3. **Manifiesto, inventario y auditoría** como JSON con `schema_version` 1.0.0, validados con DTO pydantic dentro de `caso`. Se guardan en `datos/derivados/recepcion/<reception_id>/`. `pydantic` y `defusedxml` pasan a dependencias de ejecución en F2.
 
 4. **Corridas de SUMO** con el contrato existente `run_manifest` (`schemas/run_manifest.schema.json`), en `datos/ejecuciones/<run_id>/`, siempre sobre una copia aislada de las entradas.
 
@@ -50,11 +51,12 @@ Afecta a `caso/`, `trazabilidad/`, `app/`, `cli/`, `docs/recepcion/` y `datos/de
 
 Nombres propuestos; se concretan al implementar cada fase:
 
-- F2: `tests/unit/test_reception.py`: identidad por contenido (incluye las entradas, excluye `gui_only` y `output`), listas separadas por comas, doble hash, rutas fuera del workspace, y que el informe publicado no contiene rutas absolutas.
+- F2: `tests/unit/test_ids.py` (identidad por contenido y orden invariante), `tests/unit/test_sumo_config.py` (referencias, listas separadas por comas y XML peligroso), `tests/unit/test_reception_models.py` (el manifiesto solo admite rutas relativas) y `tests/unit/test_reception.py` (identidad con entradas y sin `gui_only` ni `output`, doble hash, enlaces, rutas fuera de la carpeta y archivos bloqueados).
 - F3: `tests/unit/test_inventory.py`.
 - F4: `tests/unit/test_audit.py`.
 - F5: `tests/unit/test_run_manifest.py` (el esquema del DTO es idéntico a `schemas/run_manifest.schema.json`).
 - F6: QA07 y QA08.
+- F8: el informe publicado no contiene rutas absolutas.
 - F9: QA09 (réplica con la misma semilla).
 
-**Aceptada por el Product Owner el 2026-10-19.** La implementación empieza en F2, que requiere autorización expresa.
+**Aceptada por el Product Owner el 2026-10-19.** Implementada en F2 (copia, identidad y manifiesto); F3 a F8 la completan.
