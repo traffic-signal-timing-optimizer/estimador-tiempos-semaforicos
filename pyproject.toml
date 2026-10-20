@@ -3,7 +3,10 @@ name = "semaforo"
 version = "0.1.0"
 description = "Prototipo local de estimación de tiempos semafóricos con SUMO (caso sintético)."
 requires-python = ">=3.12,<3.13"
-dependencies = []
+dependencies = [
+    "defusedxml>=0.7.1",
+    "pydantic>=2,<3",
+]
 
 [dependency-groups]
 dev = [
@@ -13,7 +16,6 @@ dev = [
     "pyright>=1.1",
     "pre-commit>=3",
     "pip-audit>=2",
-    "pydantic>=2,<3",
 ]
 
 [build-system]
@@ -38,6 +40,9 @@ select = ["E", "W", "F", "I", "B", "UP", "S", "ANN", "RUF", "PL"]
 
 [tool.pyright]
 include = ["src", "tests"]
+# Resuelve los paquetes con el entorno del proyecto, no con el Python del sistema.
+venvPath = "."
+venv = ".venv"
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
 
