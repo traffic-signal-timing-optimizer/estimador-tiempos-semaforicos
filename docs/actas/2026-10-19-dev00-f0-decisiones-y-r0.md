@@ -4,7 +4,7 @@
 - **Fecha:** 2026-10-19, 19:28 (UTC−5)
 - **Autorización:** el Product Owner dio el OK a F0 sin objeciones al plan; por la regla anunciada en el plan, se aplican las recomendaciones D1–D6.
 - **Estado posterior:** F1 (fixture SUMO mínimo ejecutable) completada en el commit `5242cd3`. ADR09 aceptada el 2026-10-19 con las recomendaciones del Product Owner. F2 completada: ver `docs/actas/2026-10-19-dev00-f2-copia-inmutable.md`.
-- **Siguiente fase:** F3 (inventario de red y semáforos), a la espera de la autorización expresa del Product Owner.
+- **Siguiente fase:** F3 (inventario de red y semáforos), completada: ver `docs/actas/2026-10-20-dev00-f3-inventario-de-red.md`.
 
 ## Decisiones D1–D6
 
@@ -91,4 +91,4 @@ Textos oficiales relevantes:
 
 - Comportamiento de `--end` cuando no se indica: se confirma en F6 y F9.
 - Orden de `linkIndex` que genera `netconvert` a partir de archivos planos: resuelto en F1. Los índices los fija `demo.con.xml` y no dependen del orden que elija `netconvert` (ver `tests/fixtures/sumo/README.md`).
-- Programa activo cuando un semáforo tiene varios programas: se confirma en F3 y F6.
+- Programa activo cuando un semáforo tiene varios programas: resuelto en F3. SUMO 1.27.1 ejecuta el último del archivo (ver el acta de F3). Se reconfirma en F6 con el runner.

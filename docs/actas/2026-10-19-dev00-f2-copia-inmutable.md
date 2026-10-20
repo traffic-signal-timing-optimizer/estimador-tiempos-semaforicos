@@ -4,7 +4,7 @@
 - **Fecha:** 2026-10-19, 21:00 (UTC−5)
 - **Autorización:** el Product Owner autorizó F2 («continua con F2») tras aceptar ADR09.
 - **Código y pruebas:** commit `b503e86`; esta acta, `3ba664e`. Una revisión posterior corrigió errores de F2 y del andamiaje (ver «Revisión posterior»). Sin publicar a la fecha de esta acta.
-- **Siguiente fase:** F3 (inventario de red y semáforos), a la espera de la autorización expresa del Product Owner.
+- **Siguiente fase:** F3 (inventario de red y semáforos), completada: ver `docs/actas/2026-10-20-dev00-f3-inventario-de-red.md`.
 
 ## Qué se implementó
 
