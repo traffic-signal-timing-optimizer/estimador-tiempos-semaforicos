@@ -1,4 +1,4 @@
-# Vigila cambios en la carpeta de demos de SUMO comparando hashes SHA256
+﻿# Vigila cambios en la carpeta de demos de SUMO comparando hashes SHA256
 # contra una línea base guardada.
 #
 # Uso:

@@ -1,4 +1,4 @@
-# Verificaciones locales: lint, formato, tipos, pruebas y coherencia de la versión de ruff.
+﻿# Verificaciones locales: lint, formato, tipos, pruebas y coherencia de la versión de ruff.
 # Uso: powershell -ExecutionPolicy Bypass -File scripts/check.ps1
 # Requiere el entorno creado con `uv sync` (carpeta .venv).
 $ErrorActionPreference = "Stop"
@@ -19,6 +19,15 @@ Invoke-Step "ruff format --check" { & "$bin\ruff.exe" format --check . }
 Invoke-Step "pyright" { & "$bin\pyright.exe" }
 Invoke-Step "pytest" { & "$bin\pytest.exe" -q }
 Invoke-Step "contratos de referencia" { & "$bin\python.exe" -B tools\contracts\validar_paquete.py | Select-String '"status"|"checks"|"omitted_checks"' }
+
+Write-Output "==> código que .gitignore oculta a git"
+$caches = '(^|/)(__pycache__|\.hypothesis|\.pytest_cache|\.ruff_cache)(/|$)'
+$hidden = @(git ls-files --others --ignored --exclude-standard -- src tests schemas tools scripts docs |
+    Where-Object { $_ -notmatch $caches -and $_ -ne "tools/sumo/vigilar_sumo_baseline.json" })
+if ($hidden.Count -gt 0) {
+    throw "Archivos de código que .gitignore oculta a git: $($hidden -join ', ')"
+}
+Write-Output "OK: ningún archivo de código está ignorado"
 
 Write-Output "==> versión de ruff: uv.lock frente a pre-commit"
 $locked = [regex]::Match((Get-Content uv.lock -Raw), '(?m)^name = "ruff"\r?\nversion = "([^"]+)"').Groups[1].Value
