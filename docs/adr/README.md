@@ -12,6 +12,6 @@ Los ADR01 a ADR08 provienen de `documentacion/documentos/01_Diseno_tecnico.md` y
 | [ADR06](ADR06-correccion-determinista.md) | Corrección determinista acotada | P | Propuesta | Decidir (DEC09) |
 | [ADR07](ADR07-prueba-final-separada.md) | Prueba final separada | V/P | Propuesta | Decidir (DEC09) |
 | [ADR08](ADR08-formato-de-modelos.md) | Formato de modelos sin deserialización insegura | P | Propuesta | Decidir (DEC09) |
-| [ADR09](ADR09-artefactos-de-recepcion.md) | Artefactos de recepción (manifiesto, inventario y auditoría) | P (equipo) | Aceptada (2026-10-19) | Implementada en F2 a F7; F8 de DEV00 la completa |
+| [ADR09](ADR09-artefactos-de-recepcion.md) | Artefactos de recepción (manifiesto, inventario y auditoría) | P (equipo) | Aceptada (2026-10-19) | Implementada en F2 a F8 de DEV00 |
 
 Estados posibles: Propuesta, Aceptada, Rechazada, Sustituida.

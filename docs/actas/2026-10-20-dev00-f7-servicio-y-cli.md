@@ -4,14 +4,14 @@
 - **Fecha:** 2026-10-20
 - **Autorización:** el Product Owner autorizó F7 y aprobó dos ampliaciones para F7 y F8, derivadas de las limitaciones de F5 (ver abajo).
 - **Código y pruebas:** commit `42162a2`.
-- **Siguiente fase:** F8 (informe público, listas QA23 y QA24, tabla de movimientos por carril y comparación entre recepciones), a la espera de la autorización expresa del Product Owner.
+- **Siguiente fase:** F8 (informe público, listas QA23 y QA24, tabla de movimientos por carril y comparación entre recepciones), completada: ver `docs/actas/2026-10-20-dev00-f8-informes-y-revision.md`.
 
 ## Ampliaciones aprobadas
 
 | Ampliación | Fase | Motivo |
 |---|---|---|
 | Guardar en el registro de la recepción la huella SHA-256 del manifiesto de la corrida base | F7 (hecho) | Autenticidad (ADR03): quien pueda escribir en la carpeta de la corrida podría rehacerla junto con su manifiesto. Con la huella fuera de ella, el cambio se nota. |
-| Publicar esa huella en el informe de `docs/recepcion/` | F8 (pendiente) | Al quedar en el historial de git, alterar la corrida sin que se note exigiría reescribir el historial publicado |
+| Publicar esa huella en el informe de `docs/recepcion/` | F8 (hecho, `cd58da2`) | Al quedar en el historial de git, alterar la corrida sin que se note exigiría reescribir el historial publicado |
 | Listar las ejecuciones incompletas (carpetas `.tmp-`) en el registro | F7 (hecho) | No se borran solas y pueden ser la única pista de un fallo; el Product Owner decide qué hacer con ellas |
 
 ## Uso

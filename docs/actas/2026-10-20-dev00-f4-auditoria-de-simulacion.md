@@ -11,7 +11,7 @@
 | Cambio | Fase | Motivo |
 |---|---|---|
 | Avisar si un archivo adicional declara programas semafóricos o detectores | F4 (hecho) | El inventario de F3 solo lee la red; un cambio de tiempos hecho en un archivo adicional pasaría inadvertido |
-| Tabla de movimientos por carril, calculada desde las conexiones | F8 (pendiente) | QA23 pide revisar movimientos y giros por carril y clase; ninguna fase de F0 a F10 lo cubría |
+| Tabla de movimientos por carril, calculada desde las conexiones | F8 (hecho, `cd58da2`) | QA23 pide revisar movimientos y giros por carril y clase; ninguna fase de F0 a F10 lo cubría |
 | Contar los vehículos de cada flujo como SUMO y separar la carga de entrada por clase | F4 (hecho, `610b6ae`) | La estimación con decimales no coincidía con lo que SUMO carga, y la carga por carril mezclaba un carril exclusivo de bus |
 | Comparar lo declarado con lo cargado y lo insertado, la espera para entrar y los teletransportes por causa; marcar la corrida si hay demanda no atendida | F6 (hecho, `5d9c1f5`) | En la corrida previa del Product Owner una parte de la demanda nunca entró a la red: esa demora no se debe al semáforo |
 
