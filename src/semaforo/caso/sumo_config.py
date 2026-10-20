@@ -5,13 +5,25 @@ DTD ni entidades, y con un límite de tamaño.
 """
 
 from dataclasses import dataclass
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 from xml.etree.ElementTree import Element, ParseError
 
 from defusedxml.common import DefusedXmlException
 from defusedxml.ElementTree import parse
 
 from semaforo.caso.errors import CasoError, ErrorCode
+from semaforo.trazabilidad.paths import is_absolute_like
+
+__all__ = [
+    "GUI_ONLY",
+    "INPUT",
+    "OUTPUT",
+    "ConfigReferences",
+    "FileReference",
+    "is_absolute_like",
+    "read_config_options",
+    "read_config_references",
+]
 
 INPUT = "input"
 GUI_ONLY = "gui_only"
@@ -43,16 +55,6 @@ class ConfigReferences:
 
     files: tuple[FileReference, ...]
     absolute_paths: tuple[FileReference, ...]
-
-
-def is_absolute_like(text: str) -> bool:
-    """Indica si ``text`` parece una ruta absoluta, con sintaxis de Windows o de POSIX.
-
-    Incluye letras de unidad (``C:\\x``, ``C:/x``), rutas UNC y rutas relativas a una unidad
-    (``C:x``), que también escapan de la carpeta de la corrida.
-    """
-    path = PureWindowsPath(text)
-    return bool(path.drive or path.root)
 
 
 def read_config_references(path: Path, max_bytes: int) -> ConfigReferences:

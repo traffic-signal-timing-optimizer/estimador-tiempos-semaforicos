@@ -10,23 +10,12 @@ from typing import Literal, Self
 from pydantic import Field, field_validator, model_validator
 
 from semaforo.caso.base_model import FrozenModel
-from semaforo.caso.sumo_config import is_absolute_like
 from semaforo.trazabilidad.ids import content_id
+from semaforo.trazabilidad.paths import check_relative_path
 
 Role = Literal["entry_config", "input", "view", "output", "script", "unreferenced"]
 IDENTITY_ROLES: frozenset[str] = frozenset({"entry_config", "input"})
 SHA256_PATTERN = r"^[a-f0-9]{64}$"
-_LINE_BREAKING_CHARACTERS = "\t\n\r"
-
-
-def _check_relative_path(value: str) -> str:
-    if not value or is_absolute_like(value) or "\\" in value:
-        raise ValueError(f"la ruta debe ser relativa y usar '/': {value!r}")
-    if any(character in value for character in _LINE_BREAKING_CHARACTERS):
-        raise ValueError(f"la ruta no puede contener tabuladores ni saltos de línea: {value!r}")
-    if any(part in ("", ".", "..") for part in value.split("/")):
-        raise ValueError(f"la ruta no puede salir de la carpeta ni tener tramos vacíos: {value!r}")
-    return value
 
 
 class FileRecord(FrozenModel):
@@ -46,7 +35,7 @@ class FileRecord(FrozenModel):
     @field_validator("path")
     @classmethod
     def _relative_path(cls, value: str) -> str:
-        return _check_relative_path(value)
+        return check_relative_path(value)
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
@@ -104,7 +93,7 @@ class SnapshotManifest(FrozenModel):
     @field_validator("entry_config")
     @classmethod
     def _relative_entry_config(cls, value: str) -> str:
-        return _check_relative_path(value)
+        return check_relative_path(value)
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
