@@ -90,5 +90,5 @@ Textos oficiales relevantes:
 ## Pendientes de verificación
 
 - Comportamiento de `--end` cuando no se indica: se confirma en F6 y F9.
-- Orden de `linkIndex` que genera `netconvert` a partir de archivos planos: se confirma en F1.
+- Orden de `linkIndex` que genera `netconvert` a partir de archivos planos: resuelto en F1. Los índices los fija `demo.con.xml` y no dependen del orden que elija `netconvert` (ver `tests/fixtures/sumo/README.md`).
 - Programa activo cuando un semáforo tiene varios programas: se confirma en F3 y F6.
