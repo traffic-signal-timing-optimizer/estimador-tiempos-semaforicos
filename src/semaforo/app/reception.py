@@ -1,28 +1,44 @@
-"""Servicio de recepción de una simulación SUMO (F7 de DEV00, ADR09).
+"""Servicio de recepción de una simulación SUMO (F7 y F8 de DEV00, ADR09).
 
 Encadena las piezas de DEV00 dentro de un espacio de trabajo (``datos/``):
 
 1. copia inmutable de las entradas (F2), en ``originales/sumo/<snapshot_id>/``;
-2. auditoría de rutas, demanda y comportamiento (F4) e inventario de la red (F3) sobre esa copia;
+2. auditoría de rutas, demanda y comportamiento (F4), inventario de la red (F3) y tabla de
+   movimientos por carril (F8) sobre esa copia;
 3. corrida base de SUMO (F6), en ``ejecuciones/<run_id>/``;
 4. registro de la recepción, en ``derivados/recepcion/<reception_id>/``, publicado de una vez y
-   nunca sobrescrito.
+   nunca sobrescrito: los artefactos anteriores, las planillas de revisión QA23 y QA24, el detalle
+   privado de los hallazgos y el informe público (F8).
 
 El registro guarda la huella SHA-256 del manifiesto de la corrida base, para acreditar después
 que la corrida no se rehízo (ADR03: un hash guardado junto a un archivo modificable no basta), y
-lista las ejecuciones incompletas que dejó una caída anterior.
+lista las ejecuciones incompletas que dejó una caída anterior. ``publish_public_report`` copia el
+informe público a ``docs/recepcion/`` tras verificar la recepción.
 """
 
-from collections.abc import Callable
+import re
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
 
-from pydantic import Field, ValidationError
+from pydantic import BaseModel, ValidationError
 
-from semaforo.caso.audit import audit_simulation
-from semaforo.caso.base_model import FrozenModel
+from semaforo.app.reception_models import (
+    BaseRunRecord,
+    IncompleteRun,
+    ProposedStatus,
+    ReceptionRecord,
+)
+from semaforo.app.reception_report import (
+    find_machine_paths,
+    findings_markdown,
+    public_report,
+    qa23_csv,
+    qa24_csv,
+)
+from semaforo.caso.audit import DEFAULT_CLASS, audit_simulation
 from semaforo.caso.inventory import read_network_inventory
+from semaforo.caso.movements import MovementTable, read_movements
 from semaforo.caso.reception import snapshot_source
 from semaforo.dominio.errors import DomainError, ErrorCode
 from semaforo.simulacion.runner import RunLimits, run_simulation
@@ -37,13 +53,18 @@ __all__ = [
     "IncompleteRun",
     "ReceptionRecord",
     "exit_code_for",
+    "publish_public_report",
+    "read_reception",
     "receive_case",
 ]
 
 SNAPSHOTS = "originales/sumo"
 RUNS = "ejecuciones"
 RECEPTIONS = "derivados/recepcion"
-SHA256_PATTERN = r"^[a-f0-9]{64}$"
+RECORD = "reception.json"
+PUBLIC_REPORT = "informe_publico.md"
+RECEPTION_ID_PATTERN = re.compile(r"\d{8}T\d{6}Z_[a-f0-9]{8}")
+MAX_RECORD_BYTES = 16 * 1024 * 1024
 INTERNAL_ERROR_EXIT = 1
 # Diseño técnico, «Errores y códigos de salida».
 EXIT_CODES: dict[ErrorCode, int] = {
@@ -56,7 +77,6 @@ EXIT_CODES: dict[ErrorCode, int] = {
     ErrorCode.PATH_NOT_ALLOWED: 5,
     ErrorCode.RUN_EXISTS: 5,
 }
-ProposedStatus = Literal["acceptable", "with_findings", "failed"]
 
 
 def exit_code_for(code: ErrorCode | str) -> int:
@@ -65,51 +85,6 @@ def exit_code_for(code: ErrorCode | str) -> int:
         return EXIT_CODES[ErrorCode(code)]
     except (ValueError, KeyError):
         return INTERNAL_ERROR_EXIT
-
-
-class BaseRunRecord(FrozenModel):
-    """La corrida base de la recepción, enlazada por la huella de su manifiesto."""
-
-    run_id: str
-    path: str
-    status: str
-    manifest_sha256: str = Field(pattern=SHA256_PATTERN)
-    exit_code: int | None
-    error_code: str | None
-    summary: SimulationSummary | None
-
-
-class IncompleteRun(FrozenModel):
-    """Una ejecución que quedó sin publicar (carpeta ``.tmp-``), por ejemplo tras una caída."""
-
-    folder: str
-    run_id: str | None
-    created_at: datetime | None
-
-
-class ReceptionRecord(FrozenModel):
-    """Registro de una recepción: qué se recibió, qué se produjo y en qué estado quedó.
-
-    Las rutas son relativas al espacio de trabajo. ``proposed_status`` es una propuesta: la valida
-    el Product Owner (QA23 y QA24). ``exit_code`` es el código de salida de la CLI.
-    """
-
-    schema_version: Literal["1.0.0"] = "1.0.0"
-    reception_id: str
-    created_at: datetime
-    source_name: str
-    entry_config: str
-    case_id: str
-    snapshot_id: str = Field(pattern=SHA256_PATTERN)
-    snapshot_path: str
-    snapshot_reused: bool
-    sumo_version: str | None
-    artifacts: list[Artifact]
-    base_run: BaseRunRecord
-    finding_counts: dict[str, int]
-    proposed_status: ProposedStatus
-    exit_code: int
-    incomplete_runs: list[IncompleteRun]
 
 
 def receive_case(  # noqa: PLR0913  (los opcionales son de solo palabra clave)
@@ -145,9 +120,10 @@ def receive_case(  # noqa: PLR0913  (los opcionales son de solo palabra clave)
     manifest = snapshot.manifest
     entry = manifest.entry_config
     audit = audit_simulation(snapshot.path, entry)
-    inventory = (
-        None if audit.net_file is None else read_network_inventory(snapshot.path / audit.net_file)
-    )
+    classes = sorted({item.vclass for item in audit.demand}) or [DEFAULT_CLASS]
+    net = None if audit.net_file is None else snapshot.path / audit.net_file
+    inventory = None if net is None else read_network_inventory(net)
+    movements = None if net is None else read_movements(net, classes)
     reception_id = f"{created_at.astimezone(UTC):%Y%m%dT%H%M%SZ}_{manifest.snapshot_id[:8]}"
     final = workspace / RECEPTIONS / reception_id
     if final.exists():
@@ -173,19 +149,45 @@ def receive_case(  # noqa: PLR0913  (los opcionales son de solo palabra clave)
         declared_vehicles=audit.expected_vehicles_total,
         clock=clock,
     )
-    run = result.manifest
-    files = {
-        "snapshot_manifest.json": manifest.model_dump_json(indent=2).encode("utf-8"),
-        "audit.json": audit.model_dump_json(indent=2).encode("utf-8"),
+    run, summary = result.manifest, result.summary
+    files: dict[str, bytes] = {
+        "snapshot_manifest.json": _json(manifest),
+        "audit.json": _json(audit),
     }
-    if inventory is not None:
-        files["inventory.json"] = inventory.model_dump_json(indent=2).encode("utf-8")
+    if inventory is not None and movements is not None:
+        files["inventory.json"] = _json(inventory)
+        files["movements.json"] = _json(MovementTable(classes=classes, movements=movements))
+        files["revision_qa23.csv"] = qa23_csv(movements)
+        files["revision_qa24.csv"] = qa24_csv(inventory, movements, audit)
+    files["hallazgos.md"] = findings_markdown(
+        reception_id=reception_id,
+        inventory=inventory,
+        movements=movements,
+        audit=audit,
+        summary=summary,
+        incomplete_runs=incomplete,
+    ).encode("utf-8")
     counts = {
         "inventory": 0 if inventory is None else len(inventory.findings),
         "audit": len(audit.findings),
-        "run": 0 if result.summary is None else len(result.summary.findings),
+        "run": 0 if summary is None else len(summary.findings),
     }
-    failed = run.status != "succeeded"
+    status: ProposedStatus
+    if run.status != "succeeded":
+        status = "failed"
+    else:
+        status = "with_findings" if any(counts.values()) else "acceptable"
+    base_run = _base_run(run, runs_root, summary)
+    sumo_version = run.environment.get("sumo")
+    files[PUBLIC_REPORT] = public_report(
+        reception_id=reception_id,
+        created_at=created_at,
+        sumo_version=sumo_version,
+        proposed_status=status,
+        snapshot=manifest,
+        run=base_run,
+        artifacts=_artifacts(files),
+    ).encode("utf-8")
     record = ReceptionRecord(
         reception_id=reception_id,
         created_at=created_at,
@@ -195,20 +197,15 @@ def receive_case(  # noqa: PLR0913  (los opcionales son de solo palabra clave)
         snapshot_id=manifest.snapshot_id,
         snapshot_path=f"{SNAPSHOTS}/{manifest.snapshot_id}",
         snapshot_reused=snapshot.reused,
-        sumo_version=run.environment.get("sumo"),
-        artifacts=[
-            Artifact(artifact_id=name.removesuffix(".json"), path=name, sha256=sha256_bytes(data))
-            for name, data in sorted(files.items())
-        ],
-        base_run=_base_run(run, runs_root, result.summary),
+        sumo_version=sumo_version,
+        artifacts=_artifacts(files),
+        base_run=base_run,
         finding_counts=counts,
-        proposed_status="failed"
-        if failed
-        else ("with_findings" if any(counts.values()) else "acceptable"),
+        proposed_status=status,
         exit_code=_exit_code(run),
         incomplete_runs=incomplete,
     )
-    files["reception.json"] = record.model_dump_json(indent=2).encode("utf-8")
+    files[RECORD] = _json(record)
     try:
         publish_files(final, files)
     except FileExistsError as error:
@@ -216,6 +213,90 @@ def receive_case(  # noqa: PLR0913  (los opcionales son de solo palabra clave)
             ErrorCode.RUN_EXISTS, "la recepción ya existe y no se sobrescribe", "reception_id"
         ) from error
     return record
+
+
+def read_reception(workspace: Path, reception_id: str) -> ReceptionRecord:
+    """Lee una recepción publicada y comprueba que su carpeta coincide con su registro.
+
+    Raises:
+        DomainError: PATH_NOT_ALLOWED si el identificador no es válido; INPUT_SCHEMA si la
+            recepción no existe o su registro no es válido; HASH_MISMATCH si un artefacto falta,
+            sobra o fue modificado.
+    """
+    folder = reception_folder(workspace, reception_id)
+    path = folder / RECORD
+    if not path.is_file():
+        raise DomainError(ErrorCode.INPUT_SCHEMA, "la recepción no existe", "reception_id")
+    try:
+        if path.stat().st_size > MAX_RECORD_BYTES:
+            raise DomainError(ErrorCode.INPUT_SCHEMA, "el registro es demasiado grande", RECORD)
+        record = ReceptionRecord.model_validate_json(path.read_bytes())
+    except (OSError, ValidationError) as error:
+        raise DomainError(
+            ErrorCode.INPUT_SCHEMA,
+            f"registro ilegible o no válido ({type(error).__name__})",
+            RECORD,
+        ) from error
+    if record.reception_id != reception_id:
+        raise DomainError(ErrorCode.HASH_MISMATCH, "el registro es de otra recepción", RECORD)
+    present = {p.name for p in folder.iterdir()}
+    if present != {artifact.path for artifact in record.artifacts} | {RECORD}:
+        raise DomainError(
+            ErrorCode.HASH_MISMATCH,
+            "la carpeta no tiene exactamente los artefactos del registro",
+            reception_id,
+        )
+    for artifact in record.artifacts:
+        if sha256_file(folder / artifact.path) != artifact.sha256:
+            raise DomainError(
+                ErrorCode.HASH_MISMATCH,
+                "un artefacto de la recepción fue modificado",
+                artifact.path,
+            )
+    return record
+
+
+def reception_folder(workspace: Path, reception_id: str) -> Path:
+    """Carpeta de una recepción; PATH_NOT_ALLOWED si el identificador no tiene el formato."""
+    if not RECEPTION_ID_PATTERN.fullmatch(reception_id):
+        raise DomainError(
+            ErrorCode.PATH_NOT_ALLOWED,
+            f"identificador de recepción no válido: {reception_id!r}",
+            "reception_id",
+        )
+    return workspace / RECEPTIONS / reception_id
+
+
+def publish_public_report(workspace: Path, reception_id: str, destination: Path) -> Path:
+    """Copia el informe público de una recepción verificada a ``destination/<reception_id>.md``.
+
+    Raises:
+        DomainError: los de ``read_reception``; PATH_NOT_ALLOWED si el informe contiene rutas de
+            un equipo; RUN_EXISTS si el informe ya se publicó (nunca se sobrescribe).
+    """
+    read_reception(workspace, reception_id)
+    text = (reception_folder(workspace, reception_id) / PUBLIC_REPORT).read_text(encoding="utf-8")
+    if find_machine_paths(text):
+        raise DomainError(
+            ErrorCode.PATH_NOT_ALLOWED, "el informe contiene rutas de un equipo", PUBLIC_REPORT
+        )
+    target = destination / f"{reception_id}.md"
+    if target.exists():
+        raise DomainError(ErrorCode.RUN_EXISTS, "el informe ya se publicó", target.name)
+    destination.mkdir(parents=True, exist_ok=True)
+    target.write_text(text, encoding="utf-8", newline="\n")
+    return target
+
+
+def _json(model: BaseModel) -> bytes:
+    return model.model_dump_json(indent=2).encode("utf-8")
+
+
+def _artifacts(files: Mapping[str, bytes]) -> list[Artifact]:
+    return [
+        Artifact(artifact_id=name.rsplit(".", 1)[0], path=name, sha256=sha256_bytes(data))
+        for name, data in sorted(files.items())
+    ]
 
 
 def _exit_code(run: RunManifest) -> int:

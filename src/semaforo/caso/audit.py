@@ -28,6 +28,7 @@ from semaforo.caso.audit_models import (
     VehicleTypeInfo,
 )
 from semaforo.caso.errors import CasoError, ErrorCode
+from semaforo.caso.permissions import permits
 from semaforo.caso.sumo_config import (
     INPUT,
     ConfigReferences,
@@ -219,16 +220,6 @@ def _config_summary(options: dict[str, dict[str, str]]) -> ConfigSummary:
     )
 
 
-def _permits(allow: str | None, disallow: str | None, vclass: str) -> bool:
-    if allow is not None:
-        allowed = allow.split()
-        return "all" in allowed or vclass in allowed
-    if disallow is not None:
-        forbidden = disallow.split()
-        return "all" not in forbidden and vclass not in forbidden
-    return True
-
-
 @dataclass(frozen=True)
 class _Network:
     """Lo que la auditoría necesita de la red: carriles con permisos y conexiones."""
@@ -264,14 +255,14 @@ class _Network:
 
     def _lane_permits(self, edge: str, index: str, vclass: str) -> bool:
         return any(
-            _permits(allow, disallow, vclass)
+            permits(allow, disallow, vclass)
             for lane, allow, disallow in self.lanes[edge]
             if lane == index
         )
 
     def lanes_for(self, edge: str, vclass: str) -> int:
         """Carriles de ``edge`` que admiten ``vclass``."""
-        return sum(_permits(allow, disallow, vclass) for _, allow, disallow in self.lanes[edge])
+        return sum(permits(allow, disallow, vclass) for _, allow, disallow in self.lanes[edge])
 
     def edge_permits(self, edge: str, vclass: str) -> bool:
         return self.lanes_for(edge, vclass) > 0
@@ -280,7 +271,7 @@ class _Network:
         return any(
             self._lane_permits(origin, from_lane, vclass)
             and self._lane_permits(target, to_lane, vclass)
-            and _permits(allow, disallow, vclass)
+            and permits(allow, disallow, vclass)
             for from_lane, to_lane, allow, disallow in self.connections.get((origin, target), [])
         )
 

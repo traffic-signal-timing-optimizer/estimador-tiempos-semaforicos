@@ -3,6 +3,12 @@
 Solo traduce argumentos y resultados; la lógica vive en ``app`` (ADR01). La salida estándar lleva
 siempre un JSON: quien la consuma debe leer su estado, no solo el código de salida (diseño
 técnico, «Errores y códigos de salida»). La salida de error lleva un resumen para la persona.
+
+Comandos de ``case``:
+
+- ``receive``: recibe una simulación (copia, inventario, auditoría, corrida base y registro).
+- ``publish-report``: copia el informe público de una recepción verificada a ``docs/recepcion``.
+- ``compare``: muestra qué cambió entre dos recepciones.
 """
 
 import argparse
@@ -11,7 +17,13 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from semaforo.app.reception import DomainError, exit_code_for, receive_case
+from semaforo.app.comparison import compare_receptions
+from semaforo.app.reception import (
+    DomainError,
+    exit_code_for,
+    publish_public_report,
+    receive_case,
+)
 
 INTERNAL_ERROR_EXIT = 1
 
@@ -30,18 +42,32 @@ def build_parser() -> argparse.ArgumentParser:
     receive.add_argument("--config", required=True, help=".sumocfg de entrada, relativo a --source")
     receive.add_argument("--case-id", required=True, help="identificador del caso")
     receive.add_argument(
-        "--workspace",
-        type=Path,
-        default=Path("datos"),
-        help="espacio de trabajo (por defecto, datos)",
-    )
-    receive.add_argument(
         "--mode", choices=("base", "smoke"), default="base", help="tipo de corrida"
     )
     receive.add_argument("--sumo-bin", type=Path, default=None, help="SUMO; por defecto, SUMO_HOME")
-    receive.add_argument(
-        "--debug", action="store_true", help="muestra la traza de un error interno"
+    publish = actions.add_parser(
+        "publish-report", help="copia el informe público de una recepción a docs/recepcion"
     )
+    publish.add_argument("--reception-id", required=True, help="identificador de la recepción")
+    publish.add_argument(
+        "--destination",
+        type=Path,
+        default=Path("docs") / "recepcion",
+        help="carpeta del informe (por defecto, docs/recepcion)",
+    )
+    compare = actions.add_parser("compare", help="qué cambió entre dos recepciones")
+    compare.add_argument("--before", required=True, help="recepción anterior")
+    compare.add_argument("--after", required=True, help="recepción posterior")
+    for command in (receive, publish, compare):
+        command.add_argument(
+            "--workspace",
+            type=Path,
+            default=Path("datos"),
+            help="espacio de trabajo (por defecto, datos)",
+        )
+        command.add_argument(
+            "--debug", action="store_true", help="muestra la traza de un error interno"
+        )
     return parser
 
 
@@ -61,18 +87,46 @@ def _error(code: str, message: str, field: str | None) -> str:
     return json.dumps(report, ensure_ascii=False, indent=2)
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """Ejecuta la CLI y devuelve el código de salida."""
-    arguments = build_parser().parse_args(argv)
-    try:
+def _run(arguments: argparse.Namespace) -> int:
+    workspace = Path(arguments.workspace)
+    if arguments.action == "receive":
         record = receive_case(
             Path(arguments.source),
             str(arguments.config),
-            Path(arguments.workspace),
+            workspace,
             case_id=str(arguments.case_id),
             mode="smoke" if arguments.mode == "smoke" else "base",
             sumo=None if arguments.sumo_bin is None else Path(arguments.sumo_bin),
         )
+        _emit(record.model_dump_json(indent=2))
+        _say(
+            f"Recepción {record.reception_id}: {record.proposed_status} "
+            f"(corrida base {record.base_run.status})"
+        )
+        return record.exit_code
+    if arguments.action == "publish-report":
+        target = publish_public_report(
+            workspace, str(arguments.reception_id), Path(arguments.destination)
+        )
+        report = {
+            "status": "published",
+            "reception_id": arguments.reception_id,
+            "path": target.as_posix(),
+        }
+        _emit(json.dumps(report, ensure_ascii=False, indent=2))
+        _say(f"Informe publicado en {target.as_posix()}")
+        return 0
+    comparison = compare_receptions(workspace, str(arguments.before), str(arguments.after))
+    _emit(comparison.model_dump_json(indent=2))
+    _say(f"{len(comparison.changes)} cambios entre {comparison.before} y {comparison.after}")
+    return 0
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Ejecuta la CLI y devuelve el código de salida."""
+    arguments = build_parser().parse_args(argv)
+    try:
+        return _run(arguments)
     except DomainError as error:
         _emit(_error(error.code.value, error.message, error.field))
         _say(f"Error {error.code.value}: {error.message}")
@@ -83,9 +137,3 @@ def main(argv: Sequence[str] | None = None) -> int:
         _emit(_error("INTERNAL", "error interno; repita con --debug para ver el detalle", None))
         _say("Error interno; repita con --debug para ver el detalle.")
         return INTERNAL_ERROR_EXIT
-    _emit(record.model_dump_json(indent=2))
-    _say(
-        f"Recepción {record.reception_id}: {record.proposed_status} "
-        f"(corrida base {record.base_run.status})"
-    )
-    return record.exit_code

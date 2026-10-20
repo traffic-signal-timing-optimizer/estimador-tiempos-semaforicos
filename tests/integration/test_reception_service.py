@@ -1,6 +1,7 @@
 """Pruebas del servicio de recepción completo con SUMO real (F7 de DEV00)."""
 
 import json
+import os
 import shutil
 import stat
 from collections.abc import Callable, Iterator
@@ -9,7 +10,14 @@ from pathlib import Path
 
 import pytest
 
-from semaforo.app.reception import ReceptionRecord, receive_case
+from semaforo.app.comparison import compare_receptions
+from semaforo.app.reception import (
+    ReceptionRecord,
+    publish_public_report,
+    read_reception,
+    receive_case,
+)
+from semaforo.app.reception_report import find_machine_paths
 from semaforo.dominio.errors import DomainError, ErrorCode
 from semaforo.trazabilidad.fs import remove_tree
 from semaforo.trazabilidad.hashing import sha256_file
@@ -62,8 +70,13 @@ def test_a_reception_produces_every_artifact(workspace: Path, sumo_binary: Path)
     assert record.reception_id == f"20261020T190001Z_{record.snapshot_id[:8]}"
     assert sorted(p.name for p in folder.iterdir()) == [
         "audit.json",
+        "hallazgos.md",
+        "informe_publico.md",
         "inventory.json",
+        "movements.json",
         "reception.json",
+        "revision_qa23.csv",
+        "revision_qa24.csv",
         "snapshot_manifest.json",
     ]
     for artifact in record.artifacts:
@@ -186,6 +199,93 @@ def test_the_reception_files_are_read_only_and_have_no_machine_paths(
         assert not path.stat().st_mode & stat.S_IWRITE
         assert str(tmp_path) not in path.read_text(encoding="utf-8")
     assert json.loads((folder / "reception.json").read_text("utf-8"))["source_name"] == "demo"
+
+
+def test_the_public_report_is_published_after_verifying_the_reception(
+    workspace: Path, sumo_binary: Path, tmp_path: Path
+) -> None:
+    record = receive(workspace, sumo_binary)
+    docs = tmp_path / "docs" / "recepcion"
+    target = publish_public_report(workspace, record.reception_id, docs)
+    assert target == docs / f"{record.reception_id}.md"
+    text = target.read_text(encoding="utf-8")
+    assert record.base_run.manifest_sha256 in text
+    assert find_machine_paths(text) == []
+    with pytest.raises(DomainError) as raised:
+        publish_public_report(workspace, record.reception_id, docs)
+    assert raised.value.code is ErrorCode.RUN_EXISTS
+
+
+def test_a_tampered_reception_is_not_published(
+    workspace: Path, sumo_binary: Path, tmp_path: Path
+) -> None:
+    record = receive(workspace, sumo_binary)
+    audit = workspace / RECEPTIONS / record.reception_id / "audit.json"
+    os.chmod(audit, stat.S_IWRITE | stat.S_IREAD)
+    audit.write_text("{}", encoding="utf-8")
+    with pytest.raises(DomainError) as raised:
+        publish_public_report(workspace, record.reception_id, tmp_path / "docs")
+    assert raised.value.code is ErrorCode.HASH_MISMATCH
+    assert not (tmp_path / "docs").exists()
+
+
+def test_a_report_with_machine_paths_is_not_published(
+    workspace: Path, sumo_binary: Path, tmp_path: Path
+) -> None:
+    """Simula un informe contaminado: se rehace también su huella para que pase la verificación."""
+    record = receive(workspace, sumo_binary)
+    folder = workspace / RECEPTIONS / record.reception_id
+    for path in folder.iterdir():
+        os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+    report = folder / "informe_publico.md"
+    report.write_text(report.read_text("utf-8") + "\nC:\\Users\\alguien\\x\n", encoding="utf-8")
+    artifacts = [
+        a.model_copy(update={"sha256": sha256_file(report)}) if a.path == report.name else a
+        for a in record.artifacts
+    ]
+    (folder / "reception.json").write_text(
+        record.model_copy(update={"artifacts": artifacts}).model_dump_json(), encoding="utf-8"
+    )
+    with pytest.raises(DomainError) as raised:
+        publish_public_report(workspace, record.reception_id, tmp_path / "docs")
+    assert raised.value.code is ErrorCode.PATH_NOT_ALLOWED
+
+
+@pytest.mark.parametrize("reception_id", ["../x", "20261020T190001Z_ZZZ", ""])
+def test_unsafe_reception_ids_are_rejected(workspace: Path, reception_id: str) -> None:
+    with pytest.raises(DomainError) as raised:
+        read_reception(workspace, reception_id)
+    assert raised.value.code is ErrorCode.PATH_NOT_ALLOWED
+
+
+def test_two_receptions_of_the_same_simulation_have_no_changes(
+    workspace: Path, sumo_binary: Path
+) -> None:
+    clock = Clock()
+    first = receive(workspace, sumo_binary, clock=clock)
+    second = receive(workspace, sumo_binary, clock=clock)
+    comparison = compare_receptions(workspace, first.reception_id, second.reception_id)
+    assert comparison.same_snapshot is True
+    assert comparison.changes == []
+
+
+def test_the_comparison_shows_what_changed(
+    workspace: Path, sumo_binary: Path, tmp_path: Path
+) -> None:
+    clock = Clock()
+    first = receive(workspace, sumo_binary, clock=clock)
+    case = variant(tmp_path, 'number="90"', 'number="60"', file="demo.rou.xml")
+    second = receive(workspace, sumo_binary, source=case, clock=clock)
+    comparison = compare_receptions(workspace, first.reception_id, second.reception_id)
+    assert comparison.same_snapshot is False
+    items = {(c.area, c.item) for c in comparison.changes}
+    assert ("snapshot", "demo.rou.xml") in items
+    assert ("audit", "vehículos declarados") in items
+    assert ("audit", "demanda N_S_car") in items
+    assert ("run", "vehicles_loaded") in items
+    assert not any(area == "inventory" for area, _ in items)
+    loaded = next(c for c in comparison.changes if c.item == "vehicles_loaded")
+    assert (loaded.before, loaded.after) == ("150", "120")
 
 
 def test_errors_before_running_are_raised_without_a_reception(

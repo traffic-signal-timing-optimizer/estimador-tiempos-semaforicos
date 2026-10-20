@@ -95,6 +95,39 @@ def test_a_missing_sumo_exits_with_three(workspace: Path, tmp_path: Path) -> Non
     assert (report["status"], report["code"]) == ("error", "DEPENDENCY_MISSING")
 
 
+def run_cli(*arguments: str) -> tuple[int, dict[str, object]]:
+    result = subprocess.run(  # noqa: S603  (intérprete actual y argumentos fijos)
+        [sys.executable, "-m", "semaforo", "case", *arguments],
+        capture_output=True,
+        check=False,
+        timeout=300,
+    )
+    report: dict[str, object] = json.loads(result.stdout.decode("utf-8"))
+    return result.returncode, report
+
+
+def test_publish_report_and_compare(workspace: Path, sumo_binary: Path, tmp_path: Path) -> None:
+    code, report, _ = cli(workspace, FIXTURES / "demo", "--sumo-bin", str(sumo_binary))
+    assert code == 0
+    reception_id = str(report["reception_id"])
+    docs = tmp_path / "docs" / "recepcion"
+    code, published = run_cli(
+        "publish-report",
+        "--reception-id",
+        reception_id,
+        "--workspace",
+        str(workspace),
+        "--destination",
+        str(docs),
+    )
+    assert (code, published["status"]) == (0, "published")
+    assert (docs / f"{reception_id}.md").is_file()
+    code, comparison = run_cli(
+        "compare", "--before", reception_id, "--after", reception_id, "--workspace", str(workspace)
+    )
+    assert (code, comparison["changes"]) == (0, [])
+
+
 def test_missing_arguments_exit_with_two() -> None:
     result = subprocess.run(
         [sys.executable, "-m", "semaforo", "case", "receive"],
