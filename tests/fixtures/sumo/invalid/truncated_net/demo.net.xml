@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- generated on 2026-10-19T19:53:53.380455-05:00 by Eclipse SUMO netconvert 1.27.1
+<netconvertConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/netconvertConfiguration.xsd">
+
+    <input>
+        <node-files value="demo.nod.xml"/>
+        <edge-files value="demo.edg.xml"/>
+        <connection-files value="demo.con.xml"/>
+        <tllogic-files value="demo.tll.xml"/>
+    </input>
+
+    <output>
+        <output-file value="demo.net.xml"/>
+    </output>
+
+</netconvertConfiguration>
+-->
+
+<net version="1.20" junctionCornerDetail="5" limitTurnSpeed="5.50" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/net_file.xsd">
+
+    <location netOffset="100.00,100.00" convBoundary="0.00,0.00,200.00,200.00" origBoundary="-100.00,-100.00,100.00,100.00" projParameter="!"/>
+
+    <edge id=":C_0" function="internal">
+        <lane id=":C_0_0" index="0" speed="13.89" length="11.20" shape="98.40,107.20 98.40,96.00"/>
+    </edge>
+    <edge id=":C_1" function="internal">
+        <lane id=":C_1_0" index="0" speed="13.89" length="11.20" shape="104.00,101.60 92.80,101.60"/>
+    </edge>
+
+    <edge id="demo_E" from="E" to="C" priority="-1">
+        <lane id="demo_E_0" index="0" speed="13.89" length="96.00" shape="200.00,101.60 104.00,101.60"/>
+    </edge>
+    <edge id="demo_N" from="N" to="C" priority="-1">
+        <lane id="demo_N_0" index="0" speed="13.89" length="92.80" shape="98.40,200.00 98.40,107.20"/>
+    </edge>
+    <edge id="demo_S" from="C" to="S" priority="-1">
+        <lane id="demo_S_0" index="0" speed="13.89" length="96.00" shape="98.40,96.00 98.40,0.00"/>
+    </edge>
+    <edge id="demo_W" from="C" to="W" priority="-1">
+        <lane id="demo_W_0" index="0" speed="13.89" length="92.80" sh

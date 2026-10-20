@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Cuatro aristas de un carril y 50 km/h: demo_N y demo_E entran al cruce; demo_S y demo_W salen. -->
+<edges>
+    <edge id="demo_N" from="N" to="C" numLanes="1" speed="13.89"/>
+    <edge id="demo_S" from="C" to="S" numLanes="1" speed="13.89"/>
+    <edge id="demo_E" from="E" to="C" numLanes="1" speed="13.89"/>
+    <edge id="demo_W" from="C" to="W" numLanes="1" speed="13.89"/>
+</edges>

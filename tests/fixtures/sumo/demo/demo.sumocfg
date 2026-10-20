@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fixture sintético ejecutable. Rutas relativas: las salidas se escriben junto a este archivo, por eso
+     se ejecuta siempre sobre una copia. Semilla 301 como run_manifest.json; paso de 1 s como tick_s de case.json. -->
+<configuration>
+    <input>
+        <net-file value="demo.net.xml"/>
+        <route-files value="demo.rou.xml"/>
+    </input>
+    <time>
+        <begin value="0"/>
+        <step-length value="1"/>
+    </time>
+    <random_number>
+        <seed value="301"/>
+    </random_number>
+    <output>
+        <tripinfo-output value="tripinfo.xml"/>
+        <statistic-output value="statistics.xml"/>
+    </output>
+    <report>
+        <no-step-log value="true"/>
+        <duration-log.statistics value="true"/>
+    </report>
+</configuration>

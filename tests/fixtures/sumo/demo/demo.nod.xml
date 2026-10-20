@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fixture sintético (no representa Frutales): cruce de dos calles de un solo sentido con el semáforo DEMO_TLS. -->
+<nodes>
+    <node id="N" x="0.00" y="100.00" type="priority"/>
+    <node id="S" x="0.00" y="-100.00" type="priority"/>
+    <node id="E" x="100.00" y="0.00" type="priority"/>
+    <node id="W" x="-100.00" y="0.00" type="priority"/>
+    <node id="C" x="0.00" y="0.00" type="traffic_light" tl="DEMO_TLS"/>
+</nodes>

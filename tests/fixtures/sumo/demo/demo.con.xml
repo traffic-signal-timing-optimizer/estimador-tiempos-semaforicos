@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Solo los dos movimientos del caso case.json: N_S (linkIndex 0) y E_W (linkIndex 1). -->
+<connections>
+    <connection from="demo_N" to="demo_S" fromLane="0" toLane="0" tl="DEMO_TLS" linkIndex="0"/>
+    <connection from="demo_E" to="demo_W" fromLane="0" toLane="0" tl="DEMO_TLS" linkIndex="1"/>
+</connections>

@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- generated on 2026-10-19T19:53:53.380455-05:00 by Eclipse SUMO netconvert 1.27.1
+<netconvertConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/netconvertConfiguration.xsd">
+
+    <input>
+        <node-files value="demo.nod.xml"/>
+        <edge-files value="demo.edg.xml"/>
+        <connection-files value="demo.con.xml"/>
+        <tllogic-files value="demo.tll.xml"/>
+    </input>
+
+    <output>
+        <output-file value="demo.net.xml"/>
+    </output>
+
+</netconvertConfiguration>
+-->
+
+<net version="1.20" junctionCornerDetail="5" limitTurnSpeed="5.50" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/net_file.xsd">
+
+    <location netOffset="100.00,100.00" convBoundary="0.00,0.00,200.00,200.00" origBoundary="-100.00,-100.00,100.00,100.00" projParameter="!"/>
+
+    <edge id=":C_0" function="internal">
+        <lane id=":C_0_0" index="0" speed="13.89" length="11.20" shape="98.40,107.20 98.40,96.00"/>
+    </edge>
+    <edge id=":C_1" function="internal">
+        <lane id=":C_1_0" index="0" speed="13.89" length="11.20" shape="104.00,101.60 92.80,101.60"/>
+    </edge>
+
+    <edge id="demo_E" from="E" to="C" priority="-1">
+        <lane id="demo_E_0" index="0" speed="13.89" length="96.00" shape="200.00,101.60 104.00,101.60"/>
+    </edge>
+    <edge id="demo_N" from="N" to="C" priority="-1">
+        <lane id="demo_N_0" index="0" speed="13.89" length="92.80" shape="98.40,200.00 98.40,107.20"/>
+    </edge>
+    <edge id="demo_S" from="C" to="S" priority="-1">
+        <lane id="demo_S_0" index="0" speed="13.89" length="96.00" shape="98.40,96.00 98.40,0.00"/>
+    </edge>
+    <edge id="demo_W" from="C" to="W" priority="-1">
+        <lane id="demo_W_0" index="0" speed="13.89" length="92.80" shape="92.80,101.60 0.00,101.60"/>
+    </edge>
+
+    <tlLogic id="DEMO_TLS" type="static" programID="demo" offset="0">
+        <phase duration="30" state="Gr"/>
+        <phase duration="3"  state="yr"/>
+        <phase duration="1"  state="rr"/>
+        <phase duration="22" state="rG"/>
+        <phase duration="3"  state="ry"/>
+        <phase duration="1"  state="rr"/>
+    </tlLogic>
+
+    <junction id="C" type="traffic_light" x="100.00" y="100.00" incLanes="demo_N_0 demo_E_0" intLanes=":C_0_0 :C_1_0" shape="96.80,107.20 100.00,107.20 100.44,104.98 101.00,104.20 101.78,103.64 102.78,103.31 104.00,103.20 104.00,100.00 101.78,99.56 101.00,99.00 100.44,98.22 100.11,97.22 100.00,96.00 96.80,96.00 96.36,98.22 95.80,99.00 95.02,99.56 94.02,99.89 92.80,100.00 92.80,103.20 95.02,103.64 95.80,104.20 96.36,104.98 96.69,105.98">
+        <request index="0" response="00" foes="10" cont="0"/>
+        <request index="1" response="01" foes="01" cont="0"/>
+    </junction>
+    <junction id="E" type="dead_end" x="200.00" y="100.00" incLanes="" intLanes="" shape="200.00,100.00 200.00,103.20"/>
+    <junction id="N" type="dead_end" x="100.00" y="200.00" incLanes="" intLanes="" shape="100.00,200.00 96.80,200.00"/>
+    <junction id="S" type="dead_end" x="100.00" y="0.00" incLanes="demo_S_0" intLanes="" shape="96.80,0.00 100.00,0.00"/>
+    <junction id="W" type="dead_end" x="0.00" y="100.00" incLanes="demo_W_0" intLanes="" shape="0.00,103.20 0.00,100.00"/>
+
+    <connection from="demo_E" to="demo_W" fromLane="0" toLane="0" via=":C_1_0" tl="DEMO_TLS" linkIndex="1" dir="s" state="o"/>
+    <connection from="demo_N" to="demo_S" fromLane="0" toLane="0" via=":C_0_0" tl="DEMO_TLS" linkIndex="0" dir="s" state="O"/>
+
+    <connection from=":C_0" to="demo_S" fromLane="0" toLane="0" dir="s" state="M"/>
+    <connection from=":C_1" to="demo_W" fromLane="0" toLane="0" dir="s" state="M"/>
+
+</net>

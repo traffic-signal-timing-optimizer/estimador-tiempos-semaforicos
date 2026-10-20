@@ -30,7 +30,7 @@ NEGATIVE_FIXTURES = 19
 
 def test_fixture_files_exist() -> None:
     expected = {f"{name}.json" for name in CONTRACT_FIXTURES} | set(EXTRA_FIXTURES)
-    assert {path.name for path in FIXTURES.iterdir()} == expected
+    assert {path.name for path in FIXTURES.iterdir() if path.is_file()} == expected
 
 
 def test_reference_validator_passes() -> None:

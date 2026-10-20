@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Programa fijo de 60 s: estados y duraciones del plan de ejemplo (response.json) sobre los slots de case.json. -->
+<tlLogics>
+    <tlLogic id="DEMO_TLS" type="static" programID="demo" offset="0">
+        <phase duration="30" state="Gr"/>
+        <phase duration="3" state="yr"/>
+        <phase duration="1" state="rr"/>
+        <phase duration="22" state="rG"/>
+        <phase duration="3" state="ry"/>
+        <phase duration="1" state="rr"/>
+    </tlLogic>
+</tlLogics>

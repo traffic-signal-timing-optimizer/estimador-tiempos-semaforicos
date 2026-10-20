@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Demanda de 900 s equivalente a aforos.csv: N_S 400 veh/h (90 car + 10 bus) y E_W 200 veh/h (50 car). -->
+<routes>
+    <vType id="car" vClass="passenger" length="5.00"/>
+    <vType id="bus" vClass="bus" length="12.00" guiShape="bus"/>
+    <route id="N_S" edges="demo_N demo_S"/>
+    <route id="E_W" edges="demo_E demo_W"/>
+    <flow id="N_S_car" type="car" route="N_S" begin="0" end="900" number="90"/>
+    <flow id="N_S_bus" type="bus" route="N_S" begin="0" end="900" number="10"/>
+    <flow id="E_W_car" type="car" route="E_W" begin="0" end="900" number="50"/>
+</routes>
