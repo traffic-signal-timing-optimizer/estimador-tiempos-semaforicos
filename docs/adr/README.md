@@ -1,6 +1,6 @@
 # Registro de decisiones de arquitectura (ADR)
 
-Los ADR01 a ADR08 provienen de `documentacion/documentos/01_Diseno_tecnico.md` y conservan su número. Del ADR09 en adelante son propuestas de este equipo. Las aprobaciones y los registros de fase del Product Owner están en `docs/actas/`.
+Los ADR01 a ADR08 provienen de `documentacion/documentos/01_Diseno_tecnico.md` y conservan su número. Del ADR09 en adelante son decisiones de este equipo, aceptadas o pendientes del Product Owner. Las aprobaciones y los registros de fase están en `docs/actas/`.
 
 | ID | Título | Tipo | Estado | Próximo paso |
 |---|---|---|---|---|
@@ -12,6 +12,6 @@ Los ADR01 a ADR08 provienen de `documentacion/documentos/01_Diseno_tecnico.md` y
 | [ADR06](ADR06-correccion-determinista.md) | Corrección determinista acotada | P | Propuesta | Decidir (DEC09) |
 | [ADR07](ADR07-prueba-final-separada.md) | Prueba final separada | V/P | Propuesta | Decidir (DEC09) |
 | [ADR08](ADR08-formato-de-modelos.md) | Formato de modelos sin deserialización insegura | P | Propuesta | Decidir (DEC09) |
-| [ADR09](ADR09-artefactos-de-recepcion.md) | Artefactos de recepción (manifiesto, inventario y auditoría) | P (equipo) | Propuesta | Aceptar antes de cerrar F2 de DEV00 |
+| [ADR09](ADR09-artefactos-de-recepcion.md) | Artefactos de recepción (manifiesto, inventario y auditoría) | P (equipo) | Aceptada (2026-10-19) | Implementar en F2 de DEV00, con autorización expresa |
 
 Estados posibles: Propuesta, Aceptada, Rechazada, Sustituida.
