@@ -1,16 +1,15 @@
 """Manifiesto de la copia de entrada de una recepción (ADR09).
 
-Los modelos siguen las convenciones de los contratos de referencia: sin campos desconocidos,
-sin conversión de tipos y sin NaN. Además no permiten reasignar campos (``frozen``); las listas
-siguen siendo mutables, así que no deben modificarse una vez creado el modelo. Todas las rutas
-son relativas a la carpeta de origen y usan ``/``, para que el manifiesto no revele rutas de
-ningún equipo.
+Los modelos siguen las convenciones de los contratos de referencia (ver ``FrozenModel``). Todas
+las rutas son relativas a la carpeta de origen y usan ``/``, para que el manifiesto no revele
+rutas de ningún equipo.
 """
 
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
+from semaforo.caso.base_model import FrozenModel
 from semaforo.caso.sumo_config import is_absolute_like
 from semaforo.trazabilidad.ids import content_id
 
@@ -30,11 +29,7 @@ def _check_relative_path(value: str) -> str:
     return value
 
 
-class _Base(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True, frozen=True, allow_inf_nan=False)
-
-
-class FileRecord(_Base):
+class FileRecord(FrozenModel):
     """Un archivo observado en la carpeta de origen.
 
     ``in_snapshot`` indica si se copió a la copia inmutable (solo los archivos de identidad).
@@ -67,7 +62,7 @@ class FileRecord(_Base):
         return self
 
 
-class MissingDependency(_Base):
+class MissingDependency(FrozenModel):
     """Un archivo que el .sumocfg declara y que no se pudo encontrar dentro del origen.
 
     ``path`` es el valor tal como está escrito en el .sumocfg: puede ser absoluto o salir de la
@@ -80,7 +75,7 @@ class MissingDependency(_Base):
     reason: Literal["not_found", "not_a_file", "outside_source", "absolute_path"]
 
 
-class Finding(_Base):
+class Finding(FrozenModel):
     """Un hallazgo de la recepción. ``path`` reproduce el valor del .sumocfg."""
 
     code: Literal["ABSOLUTE_PATH"]
@@ -90,7 +85,7 @@ class Finding(_Base):
     message: str
 
 
-class SnapshotManifest(_Base):
+class SnapshotManifest(FrozenModel):
     """Qué contiene una copia de entrada y qué se observó en la carpeta de origen.
 
     El manifiesto no lleva fechas ni rutas de equipo: el mismo contenido produce siempre el
