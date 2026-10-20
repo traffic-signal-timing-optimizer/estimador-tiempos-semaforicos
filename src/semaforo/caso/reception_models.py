@@ -1,8 +1,10 @@
 """Manifiesto de la copia de entrada de una recepción (ADR09).
 
 Los modelos siguen las convenciones de los contratos de referencia: sin campos desconocidos,
-sin conversión de tipos y sin NaN. Además son inmutables. Todas las rutas son relativas a la
-carpeta de origen y usan ``/``, para que el manifiesto no revele rutas de ningún equipo.
+sin conversión de tipos y sin NaN. Además no permiten reasignar campos (``frozen``); las listas
+siguen siendo mutables, así que no deben modificarse una vez creado el modelo. Todas las rutas
+son relativas a la carpeta de origen y usan ``/``, para que el manifiesto no revele rutas de
+ningún equipo.
 """
 
 from typing import Literal, Self

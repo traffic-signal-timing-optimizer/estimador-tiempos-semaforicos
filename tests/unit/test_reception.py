@@ -1,12 +1,13 @@
 """Pruebas de la recepción: copia inmutable de las entradas de una simulación SUMO (ADR09)."""
 
+import contextlib
 import dataclasses
 import os
 import shutil
 import stat
 import subprocess
 import sys
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Iterator, Mapping
 from pathlib import Path
 
 import pytest
@@ -91,6 +92,35 @@ def lock_files(
 
     monkeypatch.setattr("semaforo.caso.reception.sha256_file", fake)
     return calls
+
+
+def make_junction(link: Path, target: Path) -> None:
+    """Crea una unión de Windows (``mklink /J``), que no necesita privilegios."""
+    subprocess.run(  # noqa: S603
+        ["cmd.exe", "/c", "mklink", "/J", str(link), str(target)],  # noqa: S607
+        check=True,
+        capture_output=True,
+    )
+
+
+class FakeEntry:
+    """Entrada de carpeta simulada: un enlace simbólico o un tipo especial (tubería...)."""
+
+    def __init__(self, path: Path, *, symlink: bool = False) -> None:
+        self.path = str(path)
+        self._symlink = symlink
+
+    def is_symlink(self) -> bool:
+        return self._symlink
+
+    def is_junction(self) -> bool:
+        return False
+
+    def is_dir(self, *, follow_symlinks: bool = True) -> bool:
+        return False
+
+    def is_file(self, *, follow_symlinks: bool = True) -> bool:
+        return False
 
 
 def test_classifies_every_file_by_role(tmp_path: Path, snapshots: Path) -> None:
@@ -217,6 +247,21 @@ def test_nested_entry_config_keeps_the_layout(tmp_path: Path, snapshots: Path) -
     )
 
 
+def test_a_load_state_file_is_part_of_the_identity(tmp_path: Path, snapshots: Path) -> None:
+    files = {
+        **BASE_FILES,
+        ENTRY: CONFIG.replace("</input>", '<load-state value="state.xml"/></input>'),
+        "state.xml": "<snapshot/>",
+    }
+    source = make_source(tmp_path, files)
+    first = snapshot_source(source, ENTRY, snapshots, FAST)
+    assert roles(first)["state.xml"] == "input"
+    assert first.manifest.identity_files == [*IDENTITY, "state.xml"]
+    (source / "state.xml").write_text("<snapshot changed='1'/>", encoding="utf-8")
+    second = snapshot_source(source, ENTRY, snapshots, FAST)
+    assert second.manifest.snapshot_id != first.manifest.snapshot_id
+
+
 def test_missing_dependency_is_reported_not_invented(tmp_path: Path, snapshots: Path) -> None:
     source = make_source(tmp_path)
     (source / "routes.xml").unlink()
@@ -334,23 +379,37 @@ def test_the_snapshots_folder_cannot_be_inside_the_source(tmp_path: Path) -> Non
     assert not (source / "snapshots").exists()
 
 
-@pytest.mark.skipif(
+WINDOWS_ONLY = pytest.mark.skipif(
     sys.platform != "win32", reason="las uniones (junctions) solo existen en Windows"
 )
+
+
+@WINDOWS_ONLY
 def test_a_junction_in_the_source_is_rejected(tmp_path: Path, snapshots: Path) -> None:
     source = make_source(tmp_path)
     target = tmp_path / "elsewhere"
     target.mkdir()
     link = source / "linked"
-    subprocess.run(  # noqa: S603
-        ["cmd.exe", "/c", "mklink", "/J", str(link), str(target)],  # noqa: S607
-        check=True,
-        capture_output=True,
-    )
+    make_junction(link, target)
     try:
         with pytest.raises(CasoError) as raised:
             snapshot_source(source, ENTRY, snapshots, FAST)
         assert raised.value.code is ErrorCode.PATH_NOT_ALLOWED
+        assert raised.value.field == "linked"
+    finally:
+        link.rmdir()
+
+
+@WINDOWS_ONLY
+def test_a_source_that_is_a_junction_is_rejected(tmp_path: Path, snapshots: Path) -> None:
+    real = make_source(tmp_path, name="real")
+    link = tmp_path / "linked-source"
+    make_junction(link, real)
+    try:
+        with pytest.raises(CasoError) as raised:
+            snapshot_source(link, ENTRY, snapshots, FAST)
+        assert raised.value.code is ErrorCode.PATH_NOT_ALLOWED
+        assert raised.value.field == "source"
     finally:
         link.rmdir()
 
@@ -364,6 +423,38 @@ def test_a_symlink_in_the_source_is_rejected(tmp_path: Path, snapshots: Path) ->
     with pytest.raises(CasoError) as raised:
         snapshot_source(source, ENTRY, snapshots, FAST)
     assert raised.value.code is ErrorCode.PATH_NOT_ALLOWED
+
+
+@pytest.mark.parametrize(
+    ("symlink", "reason"),
+    [(False, "tipo de archivo no admitido"), (True, "enlaces simbólicos")],
+    ids=["special-file", "symlink"],
+)
+def test_links_and_special_file_types_are_rejected_before_reading_them(
+    tmp_path: Path, snapshots: Path, monkeypatch: pytest.MonkeyPatch, *, symlink: bool, reason: str
+) -> None:
+    """Simula la entrada: crear enlaces o tuberías reales exige privilegios o POSIX."""
+    source = make_source(tmp_path)
+
+    @contextlib.contextmanager
+    def fake_scandir(path: Path) -> Generator[Iterator[FakeEntry]]:
+        yield iter([FakeEntry(Path(path) / "odd", symlink=symlink)])
+
+    monkeypatch.setattr("semaforo.caso.reception.os.scandir", fake_scandir)
+    with pytest.raises(CasoError) as raised:
+        snapshot_source(source, ENTRY, snapshots, FAST)
+    assert raised.value.code is ErrorCode.PATH_NOT_ALLOWED
+    assert raised.value.field == "odd"
+    assert reason in raised.value.message
+
+
+@pytest.mark.parametrize("relative", ["occupied", "occupied/child"])
+def test_the_snapshots_path_must_be_usable_as_a_folder(tmp_path: Path, relative: str) -> None:
+    (tmp_path / "occupied").write_text("no soy una carpeta", encoding="utf-8")
+    with pytest.raises(CasoError) as raised:
+        snapshot_source(make_source(tmp_path), ENTRY, tmp_path / relative, FAST)
+    assert raised.value.code is ErrorCode.INPUT_SCHEMA
+    assert raised.value.field == "snapshots_root"
 
 
 @pytest.mark.parametrize(
@@ -391,8 +482,9 @@ def test_invalid_settings_are_rejected(changes: dict[str, float]) -> None:
 def test_a_locked_non_identity_file_is_recorded_not_skipped(
     tmp_path: Path, snapshots: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    lock_files(monkeypatch, {"tripinfo.xml"}, times=None)
+    calls = lock_files(monkeypatch, {"tripinfo.xml"}, times=None)
     result = snapshot_source(make_source(tmp_path), ENTRY, snapshots, FAST)
+    assert calls["tripinfo.xml"] == FAST.retry_attempts
     locked = next(r for r in result.manifest.files if r.path == "tripinfo.xml")
     assert locked.sha256 is None
     assert locked.in_snapshot is False
@@ -414,9 +506,10 @@ def test_a_transient_lock_is_retried(
 def test_a_locked_identity_file_stops_the_reception(
     tmp_path: Path, snapshots: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    lock_files(monkeypatch, {"net.xml"}, times=None)
+    calls = lock_files(monkeypatch, {"net.xml"}, times=None)
     with pytest.raises(CasoError) as raised:
         snapshot_source(make_source(tmp_path), ENTRY, snapshots, FAST)
+    assert calls["net.xml"] == FAST.retry_attempts
     assert raised.value.code is ErrorCode.INPUT_SCHEMA
     assert raised.value.field == "net.xml"
     assert not snapshots.exists() or list(snapshots.iterdir()) == []

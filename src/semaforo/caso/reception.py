@@ -124,10 +124,11 @@ def snapshot_source(
         settings: límites y reintentos; si es None se usan los valores provisionales.
 
     Raises:
-        CasoError: INPUT_SCHEMA si el origen o el .sumocfg no son válidos, un archivo de entrada
-            no se puede leer o se superan los límites; PATH_NOT_ALLOWED si hay enlaces o uniones,
-            rutas fuera de la carpeta permitida o la carpeta de copias está dentro del origen;
-            HASH_MISMATCH si el origen cambia durante la copia o la copia no coincide.
+        CasoError: INPUT_SCHEMA si el origen o el .sumocfg no son válidos, la carpeta de copias
+            no se puede usar, un archivo de entrada no se puede leer o se superan los límites;
+            PATH_NOT_ALLOWED si hay enlaces o uniones, rutas fuera de la carpeta permitida o la
+            carpeta de copias está dentro del origen; HASH_MISMATCH si el origen cambia durante
+            la copia o la copia no coincide.
     """
     settings = settings or ReceptionSettings()
     origin = _checked_source(source)
@@ -165,7 +166,14 @@ def _checked_root(snapshots_root: Path, origin: Path) -> Path:
             "la carpeta de copias no puede estar dentro de la carpeta de origen",
             "snapshots_root",
         )
-    resolved.mkdir(parents=True, exist_ok=True)
+    try:
+        resolved.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        raise CasoError(
+            ErrorCode.INPUT_SCHEMA,
+            f"no se puede usar la carpeta de copias ({type(error).__name__})",
+            "snapshots_root",
+        ) from error
     return resolved
 
 
@@ -290,15 +298,17 @@ def _classify(
 
 
 def _hash_with_retries(path: Path, settings: ReceptionSettings) -> str:
-    """SHA-256 de un archivo, reintentando si otro proceso lo tiene bloqueado."""
-    for attempt in range(1, settings.retry_attempts + 1):
+    """SHA-256 de un archivo, reintentando si otro proceso lo tiene bloqueado.
+
+    Hace ``retry_attempts`` intentos en total. El último no se protege: si falla, el error llega
+    a quien llama.
+    """
+    for _ in range(settings.retry_attempts - 1):
         try:
             return sha256_file(path)
         except OSError:
-            if attempt == settings.retry_attempts:
-                raise
             time.sleep(settings.retry_delay_s)
-    raise RuntimeError("retry_attempts debe ser al menos 1")
+    return sha256_file(path)
 
 
 def _hash_identity_file(origin: Path, relative: str, settings: ReceptionSettings) -> str:

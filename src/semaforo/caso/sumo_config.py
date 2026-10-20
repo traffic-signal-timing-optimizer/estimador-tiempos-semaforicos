@@ -19,6 +19,8 @@ OUTPUT = "output"
 _ROOT_TAGS = frozenset({"configuration", "sumoConfiguration"})
 _FILE_OPTION_SUFFIXES = ("-file", "-files")
 _OUTPUT_OPTION_SUFFIX = "-output"
+# Opciones de <input> que son archivos y no terminan en -file ni -files (SUMO 1.27.1).
+_INPUT_FILE_OPTIONS = frozenset({"load-state"})
 
 
 @dataclass(frozen=True)
@@ -57,9 +59,10 @@ def read_config_references(path: Path, max_bytes: int) -> ConfigReferences:
     """Lee los archivos que declara un .sumocfg.
 
     Una opción cuenta como archivo de entrada o de vista si su nombre termina en ``-file`` o
-    ``-files`` (``net-file``, ``route-files``...), y como salida si termina en ``-output``.
-    Los valores separados por comas se tratan como archivos distintos. Las opciones que no son
-    archivos (``delay``, ``seed``, ``tripinfo-output.write-unfinished``...) se ignoran.
+    ``-files`` (``net-file``, ``route-files``...) o, en ``<input>``, es ``load-state``; y como
+    salida si termina en ``-output``. Los valores separados por comas se tratan como archivos
+    distintos. Las opciones que no son archivos (``delay``, ``seed``, ``load-state.offset``,
+    ``tripinfo-output.write-unfinished``...) se ignoran.
 
     Args:
         path: ruta del .sumocfg.
@@ -102,7 +105,9 @@ def read_config_references(path: Path, max_bytes: int) -> ConfigReferences:
 
 
 def _declares_files(section: str, option: str) -> bool:
-    if section in (INPUT, GUI_ONLY):
+    if section == INPUT:
+        return option.endswith(_FILE_OPTION_SUFFIXES) or option in _INPUT_FILE_OPTIONS
+    if section == GUI_ONLY:
         return option.endswith(_FILE_OPTION_SUFFIXES)
     return section == OUTPUT and option.endswith(_OUTPUT_OPTION_SUFFIX)
 

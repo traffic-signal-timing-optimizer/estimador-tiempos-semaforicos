@@ -125,6 +125,31 @@ def test_an_unreadable_file_needs_a_reason_and_cannot_be_in_the_snapshot() -> No
         FileRecord.model_validate(_record(sha256=None, in_snapshot=True, reason="x"))
 
 
+def test_a_readable_file_cannot_have_an_unreadable_reason() -> None:
+    with pytest.raises(ValidationError, match="con hash"):
+        FileRecord.model_validate(_record(sha256=HASH_1, in_snapshot=False, reason="x"))
+
+
+def test_only_identity_roles_can_be_in_the_snapshot() -> None:
+    with pytest.raises(ValidationError, match="solo entry_config e input"):
+        FileRecord.model_validate(_record(role="output", sha256=HASH_1, in_snapshot=True))
+
+
+@pytest.mark.parametrize(
+    "identity",
+    [["net.xml", "entry.sumocfg"], ["entry.sumocfg", "entry.sumocfg", "net.xml"]],
+    ids=["unsorted", "repeated"],
+)
+def test_identity_files_must_be_sorted_and_unique(identity: list[str]) -> None:
+    with pytest.raises(ValidationError, match="ordenada y sin repetidos"):
+        SnapshotManifest.model_validate(_manifest(identity_files=identity))
+
+
+def test_every_in_snapshot_file_must_be_listed_as_identity() -> None:
+    with pytest.raises(ValidationError, match="debe coincidir con los archivos in_snapshot"):
+        SnapshotManifest.model_validate(_manifest(identity_files=["entry.sumocfg"]))
+
+
 def test_unknown_fields_are_rejected() -> None:
     with pytest.raises(ValidationError):
         SnapshotManifest.model_validate(_manifest(extra_field=1))

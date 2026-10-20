@@ -55,6 +55,26 @@ def test_ignores_options_that_are_not_files(tmp_path: Path) -> None:
     assert "tripinfo-output.write-unfinished" not in options
 
 
+def test_reads_the_load_state_file_but_not_its_companion_options(tmp_path: Path) -> None:
+    text = CONFIG.replace(
+        "<additional-files",
+        '<load-state value="state.xml"/><load-state.offset value="100"/>'
+        '<load-state.remove-vehicles value="a b"/><additional-files',
+    )
+    result = read_config_references(_write(tmp_path, text), MAX_BYTES)
+    assert "state.xml" in _paths(result.files, "input")
+    assert {ref.option for ref in result.files}.isdisjoint(
+        {"load-state.offset", "load-state.remove-vehicles"}
+    )
+
+
+def test_ignores_options_without_a_value(tmp_path: Path) -> None:
+    text = CONFIG.replace('<net-file value="a.net.xml"/>', "<net-file/>")
+    result = read_config_references(_write(tmp_path, text), MAX_BYTES)
+    assert "net-file" not in {ref.option for ref in result.files}
+    assert _paths(result.files, "input") == ["r1.rou.xml", "r2.rou.xml", "x.add.xml"]
+
+
 def test_reports_the_option_name(tmp_path: Path) -> None:
     result = read_config_references(_write(tmp_path, CONFIG), MAX_BYTES)
     first = result.files[0]
