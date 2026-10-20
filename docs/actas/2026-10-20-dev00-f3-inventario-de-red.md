@@ -4,7 +4,7 @@
 - **Fecha:** 2026-10-20
 - **Autorización:** el Product Owner autorizó F3 («ejecuta F3») tras la revisión posterior de F2.
 - **Código y pruebas:** commit `8e3b987`.
-- **Siguiente fase:** F4 (auditoría de rutas, demanda y comportamiento), a la espera de la autorización expresa del Product Owner.
+- **Siguiente fase:** F4 (auditoría de rutas, demanda y comportamiento), completada: ver `docs/actas/2026-10-20-dev00-f4-auditoria-de-simulacion.md`.
 
 ## Qué se implementó
 
@@ -47,7 +47,7 @@ Según ADR09, el detalle de la red (conteos, fases y hallazgos) queda en `datos/
 
 ## Limitaciones conocidas
 
-- Solo se lee la red. Los programas semafóricos que se definan en archivos adicionales o por TraCI, y los detectores, no aparecen. El `.sumocfg` de Frutales no carga archivos adicionales.
-- El inventario no describe la geometría ni los movimientos por carril: eso es de `caso/network_map.py` (DEV03).
+- Solo se lee la red. Los programas semafóricos que se definan en archivos adicionales o por TraCI, y los detectores, no aparecen. El `.sumocfg` de Frutales no carga archivos adicionales. Desde F4, la auditoría avisa si un archivo adicional declara semáforos o detectores.
+- El inventario no describe la geometría ni los movimientos por carril: eso es de `caso/network_map.py` (DEV03). El Product Owner aprobó añadir a F8 una tabla de movimientos por carril para QA23.
 - La cantidad de nodos que une un semáforo agrupado (DEC02) no figura en la red; su identificador sigue el formato que netconvert da a los nodos unidos, y el número real se confirma en netedit.
 - Los enlaces con `linkIndex2` (cruces peatonales) no se tratan de forma especial.

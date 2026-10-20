@@ -61,7 +61,7 @@
 
 ## Limitaciones conocidas
 
-- Las referencias dentro de archivos adicionales (por ejemplo, `file=` en un detector) no se siguen: las revisan F3 y F4.
+- Las referencias dentro de archivos adicionales (por ejemplo, `file=` en un detector) no se siguen. F4 avisa de los detectores y de los `file=` con ruta absoluta.
 - Una copia es de solo lectura: para borrarla hay que quitar el atributo (existe `remove_tree`).
 - Que el informe publicado no contenga rutas absolutas se verifica en F8, que es donde se genera.
 - Las opciones de archivo fuera de `<input>` no se siguen, porque ADR09 limita la identidad a esa sección: las tablas de `astar`, `phemlight-path`, el archivo de `fcd-replay` y `configuration-file` (una configuración anidada). Ninguna aparece en la configuración de Frutales (R0).

@@ -59,4 +59,4 @@ Nombres propuestos; se concretan al implementar cada fase:
 - F8: el informe publicado no contiene rutas absolutas.
 - F9: QA09 (réplica con la misma semilla).
 
-**Aceptada por el Product Owner el 2026-10-19.** Implementada en F2 (copia, identidad y manifiesto) y F3 (inventario de red y semáforos); F4 a F8 la completan.
+**Aceptada por el Product Owner el 2026-10-19.** Implementada en F2 (copia, identidad y manifiesto), F3 (inventario de red y semáforos) y F4 (auditoría de rutas, demanda y comportamiento); F5 a F8 la completan.
