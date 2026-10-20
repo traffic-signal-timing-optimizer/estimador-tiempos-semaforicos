@@ -12,8 +12,9 @@ Encadena las piezas de DEV00 dentro de un espacio de trabajo (``datos/``):
 
 El registro guarda la huella SHA-256 del manifiesto de la corrida base, para acreditar después
 que la corrida no se rehízo (ADR03: un hash guardado junto a un archivo modificable no basta), y
-lista las ejecuciones incompletas que dejó una caída anterior. ``publish_public_report`` copia el
-informe público a ``docs/recepcion/`` tras verificar la recepción.
+lista las ejecuciones incompletas que dejó una caída anterior. ``read_reception`` comprueba la
+carpeta de la recepción, la corrida base y esa huella; ``publish_public_report`` copia el informe
+público a ``docs/recepcion/`` solo si esa verificación pasa.
 """
 
 import re
@@ -46,7 +47,7 @@ from semaforo.simulacion.summary import Mode, SimulationSummary
 from semaforo.trazabilidad.fs import publish_files
 from semaforo.trazabilidad.hashing import sha256_bytes, sha256_file
 from semaforo.trazabilidad.manifest import Artifact, RunManifest
-from semaforo.trazabilidad.store import MANIFEST, TEMP_PREFIX, RunSpec, utc_now
+from semaforo.trazabilidad.store import MANIFEST, TEMP_PREFIX, RunSpec, read_run, utc_now
 
 __all__ = [
     "DomainError",
@@ -216,12 +217,16 @@ def receive_case(  # noqa: PLR0913  (los opcionales son de solo palabra clave)
 
 
 def read_reception(workspace: Path, reception_id: str) -> ReceptionRecord:
-    """Lee una recepción publicada y comprueba que su carpeta coincide con su registro.
+    """Lee una recepción publicada y comprueba que coincide con su registro.
+
+    Comprueba la carpeta de la recepción, la corrida base (cada archivo frente a su manifiesto) y
+    la huella de ese manifiesto guardada en el registro.
 
     Raises:
         DomainError: PATH_NOT_ALLOWED si el identificador no es válido; INPUT_SCHEMA si la
-            recepción no existe o su registro no es válido; HASH_MISMATCH si un artefacto falta,
-            sobra o fue modificado.
+            recepción o su corrida base no existen o su registro no es válido; HASH_MISMATCH si un
+            artefacto o un archivo de la corrida falta, sobra o fue modificado, o si el manifiesto
+            de la corrida no es el que se registró.
     """
     folder = reception_folder(workspace, reception_id)
     path = folder / RECORD
@@ -253,7 +258,20 @@ def read_reception(workspace: Path, reception_id: str) -> ReceptionRecord:
                 "un artefacto de la recepción fue modificado",
                 artifact.path,
             )
+    _verify_base_run(workspace, record)
     return record
+
+
+def _verify_base_run(workspace: Path, record: ReceptionRecord) -> None:
+    """La corrida base debe estar intacta y ser la misma que registró la recepción."""
+    run = record.base_run
+    read_run(workspace / RUNS, run.run_id)
+    if sha256_file(workspace / RUNS / run.run_id / MANIFEST) != run.manifest_sha256:
+        raise DomainError(
+            ErrorCode.HASH_MISMATCH,
+            "el manifiesto de la corrida base no es el que registró la recepción",
+            run.run_id,
+        )
 
 
 def reception_folder(workspace: Path, reception_id: str) -> Path:

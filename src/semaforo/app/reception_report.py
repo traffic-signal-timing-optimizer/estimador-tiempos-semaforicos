@@ -7,7 +7,10 @@
 - ``findings_markdown``: detalle de los hallazgos (``hallazgos.md``), que queda en ``datos/``
   hasta que el Product Owner autorice publicarlo.
 - ``qa23_csv`` y ``qa24_csv``: planillas de revisión para Excel, separadas por punto y coma
-  (configuración regional es-PE) y en UTF-8 con BOM para que se vean las tildes.
+  (configuración regional es-PE) y en UTF-8 con BOM para que se vean las tildes. Los
+  identificadores de SUMO van como fórmula de texto (``="…"``): Excel convertiría una arista como
+  ``-1185174556`` en un número y la mostraría como ``-1.185E+09`` (medido con Excel 16). Al
+  guardar, Excel escribe el texto sin la fórmula.
 """
 
 import csv
@@ -25,6 +28,8 @@ from semaforo.simulacion.summary import SimulationSummary
 from semaforo.trazabilidad.manifest import Artifact
 
 CSV_DELIMITER = ";"
+# Excel no admite textos de más de 255 caracteres dentro de una fórmula.
+MAX_EXCEL_FORMULA_TEXT = 255
 REVIEW_COLUMNS = ["Resultado (Correcto/Discrepancia)", "Nota"]
 SIGNATURE_ROWS: list[list[str]] = [[], ["Revisado por:"], ["Fecha:"]]
 CLASS_NAMES = {"passenger": "auto", "bus": "bus", "truck": "camión", "motorcycle": "moto"}
@@ -52,6 +57,13 @@ def find_machine_paths(text: str) -> list[str]:
 
 def _number(value: float | None) -> str:
     return "" if value is None else f"{value:g}"
+
+
+def _excel_text(identifier: str) -> str:
+    """Celda que Excel muestra tal cual: ni número, ni fecha, ni fórmula ejecutada."""
+    if len(identifier) > MAX_EXCEL_FORMULA_TEXT:
+        return identifier
+    return '="' + identifier.replace('"', '""') + '"'
 
 
 def _csv(rows: Iterable[Sequence[str]]) -> bytes:
@@ -82,11 +94,11 @@ def qa23_csv(movements: Sequence[Movement]) -> bytes:
     rows = [
         [
             f"QA23-{movement.id}",
-            movement.tls_id,
+            _excel_text(movement.tls_id),
             str(movement.link_index),
-            movement.from_edge,
+            _excel_text(movement.from_edge),
             str(movement.from_lane),
-            movement.to_edge,
+            _excel_text(movement.to_edge),
             str(movement.to_lane),
             movement.direction,
             _classes(movement.classes),
@@ -138,7 +150,7 @@ def qa24_csv(
                 rows.append(
                     [
                         f"{prefix}-F{phase.index:02d}",
-                        tls.id,
+                        _excel_text(tls.id),
                         program.program_id,
                         program.type,
                         active,
@@ -157,7 +169,7 @@ def qa24_csv(
             rows.append(
                 [
                     f"{prefix}-CICLO",
-                    tls.id,
+                    _excel_text(tls.id),
                     program.program_id,
                     program.type,
                     active,
@@ -291,7 +303,8 @@ def findings_markdown(  # noqa: PLR0913  (todos son de solo palabra clave)
             "",
             "Abra `revision_qa23.csv` y `revision_qa24.csv` con Excel. En cada fila escriba",
             "`Correcto` o `Discrepancia` y, si hay diferencia, una nota breve. Al final, su nombre",
-            "y la fecha. Abra la red en SUMO-GUI sobre una copia, nunca sobre la carpeta original.",
+            "y la fecha. Compare con la red abierta en netedit (el editor de redes de SUMO) sobre",
+            "una copia, nunca sobre la carpeta original, y sin guardar cambios.",
             "",
         ]
     )

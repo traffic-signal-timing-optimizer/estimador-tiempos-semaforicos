@@ -218,6 +218,19 @@ def test_empty_but_well_formed_outputs_are_invalid(tmp_path: Path) -> None:
     assert raised.value.code is ErrorCode.OUTPUT_INVALID
 
 
+@pytest.mark.parametrize("truncated", ["statistics.xml", "tripinfo.xml"])
+def test_truncated_outputs_are_invalid(tmp_path: Path, truncated: str) -> None:
+    """QA08: una salida XML cortada (por ejemplo, por un disco lleno) no produce métricas."""
+    folder = write_outputs(tmp_path / "out")
+    path = folder / truncated
+    data = path.read_bytes()
+    path.write_bytes(data[: len(data) // 2])
+    with pytest.raises(DomainError) as raised:
+        summarize_outputs(folder, None)
+    assert raised.value.code is ErrorCode.OUTPUT_INVALID
+    assert raised.value.field == truncated
+
+
 @pytest.mark.parametrize("missing", ["statistics.xml", "tripinfo.xml"])
 def test_missing_outputs_are_invalid(tmp_path: Path, missing: str) -> None:
     folder = write_outputs(tmp_path / "out")

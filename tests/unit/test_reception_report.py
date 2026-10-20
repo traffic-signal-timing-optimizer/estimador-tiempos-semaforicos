@@ -61,6 +61,11 @@ def rows(data: bytes) -> list[list[str]]:
     return list(csv.reader(io.StringIO(data.decode("utf-8-sig")), delimiter=";"))
 
 
+def excel(value: str) -> str:
+    """Celda que Excel muestra como el texto ``value`` (fórmula de texto)."""
+    return f'="{value}"'
+
+
 def test_qa23_has_one_row_per_movement_and_room_for_the_review(
     demo: tuple[NetworkInventory, list[Movement], SimulationAudit],
 ) -> None:
@@ -68,10 +73,48 @@ def test_qa23_has_one_row_per_movement_and_room_for_the_review(
     assert table[0][0] == "ID"
     assert table[0][-2:] == ["Resultado (Correcto/Discrepancia)", "Nota"]
     assert [row[0] for row in table[1:3]] == ["QA23-M01", "QA23-M02"]
-    assert table[1][1:9] == ["DEMO_TLS", "0", "demo_N", "0", "demo_S", "0", "recto", "auto, bus"]
+    assert table[1][1:9] == [
+        excel("DEMO_TLS"),
+        "0",
+        excel("demo_N"),
+        "0",
+        excel("demo_S"),
+        "0",
+        "recto",
+        "auto, bus",
+    ]
     assert table[1][-2:] == ["", ""]
     assert ["Revisado por:"] in table
     assert ["Fecha:"] in table
+
+
+@pytest.mark.parametrize(
+    ("identifier", "cell"),
+    [
+        # Excel convertiría estos en números o fechas: -1185174556 se vería como -1.185E+09.
+        ("-1185174556", '="-1185174556"'),
+        ("563085958", '="563085958"'),
+        ("1-2", '="1-2"'),
+        # Ni ejecuta una fórmula ni rompe la celda con comillas.
+        ("=SUMA(1)", '="=SUMA(1)"'),
+        ('a"b', '="a""b"'),
+        # Excel no admite textos de más de 255 caracteres en una fórmula: queda tal cual.
+        ("x" * 256, "x" * 256),
+    ],
+)
+def test_identifiers_stay_text_in_excel(
+    demo: tuple[NetworkInventory, list[Movement], SimulationAudit], identifier: str, cell: str
+) -> None:
+    inventory, movements, audit = demo
+    movement = movements[0].model_copy(
+        update={"tls_id": identifier, "from_edge": identifier, "to_edge": identifier}
+    )
+    row = rows(qa23_csv([movement]))[1]
+    assert (row[1], row[3], row[5]) == (cell, cell, cell)
+    tls = inventory.traffic_lights[0].model_copy(update={"id": identifier})
+    renamed = inventory.model_copy(update={"traffic_lights": [tls]})
+    phase = next(r for r in rows(qa24_csv(renamed, [movement], audit)) if "-F" in r[0])
+    assert phase[1] == cell
 
 
 def test_qa24_lists_each_phase_with_the_movements_it_lets_through(
@@ -82,6 +125,7 @@ def test_qa24_lists_each_phase_with_the_movements_it_lets_through(
     phases = [row for row in table if row and row[0].startswith("QA24-S1-demo-F")]
     assert len(phases) == 6
     first = phases[0]
+    assert first[1] == excel("DEMO_TLS")
     assert first[5:11] == ["0", "30", "", "", "M01", "-"]
     assert phases[1][9:11] == ["-", "M01"]
     assert phases[3][9] == "M02"
@@ -155,3 +199,4 @@ def test_the_private_findings_list_every_finding(
     assert "`.tmp-abc`" in text
     assert "ninguna clase de la demanda puede usar: 1 de 3 (M09)" in text
     assert "revision_qa23.csv" in text
+    assert "netedit" in text  # la herramienta para revisar enlaces y fases

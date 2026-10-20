@@ -229,6 +229,42 @@ def test_a_tampered_reception_is_not_published(
     assert not (tmp_path / "docs").exists()
 
 
+def test_a_tampered_base_run_is_not_published(
+    workspace: Path, sumo_binary: Path, tmp_path: Path
+) -> None:
+    record = receive(workspace, sumo_binary)
+    tripinfo = workspace / record.base_run.path / "outputs" / "tripinfo.xml"
+    os.chmod(tripinfo, stat.S_IWRITE | stat.S_IREAD)
+    tripinfo.write_text("<tripinfos/>", encoding="utf-8")
+    with pytest.raises(DomainError) as raised:
+        publish_public_report(workspace, record.reception_id, tmp_path / "docs")
+    assert raised.value.code is ErrorCode.HASH_MISMATCH
+    assert not (tmp_path / "docs").exists()
+
+
+def test_a_rewritten_base_run_manifest_is_detected_by_its_fingerprint(
+    workspace: Path, sumo_binary: Path
+) -> None:
+    """La corrida sigue siendo coherente consigo misma, pero no es la que registró la recepción."""
+    record = receive(workspace, sumo_binary)
+    path = workspace / record.base_run.path / "manifest.json"
+    manifest = read_run(workspace / "ejecuciones", record.base_run.run_id)
+    os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+    path.write_text(manifest.model_dump_json(), encoding="utf-8")
+    read_run(workspace / "ejecuciones", record.base_run.run_id)  # la corrida por sí sola pasa
+    with pytest.raises(DomainError) as raised:
+        read_reception(workspace, record.reception_id)
+    assert raised.value.code is ErrorCode.HASH_MISMATCH
+
+
+def test_a_reception_without_its_base_run_is_rejected(workspace: Path, sumo_binary: Path) -> None:
+    record = receive(workspace, sumo_binary)
+    remove_tree(workspace / record.base_run.path)
+    with pytest.raises(DomainError) as raised:
+        read_reception(workspace, record.reception_id)
+    assert raised.value.code is ErrorCode.INPUT_SCHEMA
+
+
 def test_a_report_with_machine_paths_is_not_published(
     workspace: Path, sumo_binary: Path, tmp_path: Path
 ) -> None:
