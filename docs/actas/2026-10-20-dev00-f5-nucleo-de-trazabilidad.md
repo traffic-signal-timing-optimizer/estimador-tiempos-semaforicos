@@ -4,7 +4,7 @@
 - **Fecha:** 2026-10-20
 - **Autorización:** el Product Owner autorizó F5 («ejecuta F5»).
 - **Código y pruebas:** commit `f3c9bf2`.
-- **Siguiente fase:** F6 (runner mínimo de SUMO), a la espera de la autorización expresa del Product Owner.
+- **Siguiente fase:** F6 (runner mínimo de SUMO), completada: ver `docs/actas/2026-10-20-dev00-f6-runner-de-sumo.md`. F6 acortó el nombre de la carpeta temporal (ver abajo).
 
 ## Qué se implementó
 
@@ -19,7 +19,7 @@
 
 Sigue el diseño técnico, apartado «Integración y transacciones»:
 
-1. **Al crearla:** se toma un lock exclusivo `.lock-<run_id>` y se crea la carpeta temporal `.tmp-<run_id>-…` con un manifiesto provisional en estado `running`. Si la ejecución ya existe o se está escribiendo, se rechaza.
+1. **Al crearla:** se toma un lock exclusivo `.lock-<run_id>` y se crea la carpeta temporal `.tmp-<8 caracteres>` con un manifiesto provisional en estado `running`, que contiene el `run_id`. El nombre se acortó en F6 porque SUMO no abre rutas de más de 257 caracteres en Windows. Si la ejecución ya existe o se está escribiendo, se rechaza.
 2. **Mientras se escribe:** las entradas se copian a `inputs/` con su hash (se comprueba que el origen no cambie durante la copia) y las salidas se escriben en `outputs/`.
 3. **Al publicar:** se rechazan enlaces, entradas sin registrar y archivos sueltos. Se comprueba que las entradas no cambiaron, se calculan los hashes de las salidas, se valida el contrato y se escribe el manifiesto final. Después la carpeta se marca de solo lectura y se publica con un renombrado.
 4. **Si algo falla antes de publicar:** la carpeta temporal queda incompleta, sigue marcada `running` y el lock se libera. Ninguna lectura la toma por una ejecución publicada.
