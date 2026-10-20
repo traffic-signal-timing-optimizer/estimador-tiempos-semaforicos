@@ -4,7 +4,7 @@
 - **Fecha:** 2026-10-20
 - **Autorización:** el Product Owner autorizó F8 («Ejecuta F8»).
 - **Código y pruebas:** commit `cd58da2`.
-- **Siguiente fase:** F9 (recepción R0 provisional de punta a punta en `datos/` e informe en `docs/recepcion/`), a la espera de la autorización expresa del Product Owner.
+- **Siguiente fase:** F9 (recepción R0 provisional de punta a punta en `datos/` e informe en `docs/recepcion/`), completada: ver `docs/actas/2026-10-20-dev00-f9-recepcion-de-r0.md`.
 
 ## Qué se implementó
 
