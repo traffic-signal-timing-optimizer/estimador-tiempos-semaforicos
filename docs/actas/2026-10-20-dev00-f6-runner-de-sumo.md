@@ -4,7 +4,7 @@
 - **Fecha:** 2026-10-20
 - **Autorización:** el Product Owner autorizó F6 («ejecuta F6»).
 - **Código y pruebas:** commit `5d9c1f5`.
-- **Siguiente fase:** F7 (servicio de recepción y CLI `python -m semaforo case receive`), a la espera de la autorización expresa del Product Owner.
+- **Siguiente fase:** F7 (servicio de recepción y CLI `python -m semaforo case receive`), completada: ver `docs/actas/2026-10-20-dev00-f7-servicio-y-cli.md`.
 
 ## Qué se implementó
 

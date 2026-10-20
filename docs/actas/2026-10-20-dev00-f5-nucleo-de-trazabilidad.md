@@ -55,7 +55,7 @@ Las tres entradas reales de la copia inmutable de R0 se empaquetaron como ejecuc
 
 ## Limitaciones conocidas
 
-- **Autenticidad:** `read_run` comprueba la coherencia entre la carpeta y su propio manifiesto. Quien pueda escribir en la carpeta puede rehacer ambos. ADR03 lo advierte: un hash guardado junto a un archivo modificable no acredita por sí solo autenticidad. La recepción de F7 deberá registrar el hash del manifiesto en su propio artefacto.
+- **Autenticidad:** `read_run` comprueba la coherencia entre la carpeta y su propio manifiesto. Quien pueda escribir en la carpeta puede rehacer ambos. ADR03 lo advierte: un hash guardado junto a un archivo modificable no acredita por sí solo autenticidad. Desde F7, el registro de la recepción guarda la huella del manifiesto de la corrida base, y F8 la publicará en `docs/recepcion/`.
 - **Lock tras una caída abrupta:** si el proceso muere sin ejecutar su limpieza, el lock queda y bloquea ese `run_id`. Como los `run_id` son únicos, no afecta a ejecuciones nuevas.
-- **Carpetas incompletas:** las carpetas `.tmp-` que deja una caída no se borran solas. Se conservan como evidencia; listarlas o limpiarlas es trabajo posterior.
+- **Carpetas incompletas:** las carpetas `.tmp-` que deja una caída no se borran solas. Se conservan como evidencia; desde F7 el registro de la recepción las lista, y borrarlas lo decide el Product Owner.
 - La carpeta publicada es de solo lectura contra accidentes, no contra quien tenga permisos sobre ella.
