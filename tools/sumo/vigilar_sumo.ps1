@@ -1,15 +1,20 @@
 ﻿# Vigila cambios en la carpeta de demos de SUMO comparando hashes SHA256
 # contra una línea base guardada.
 #
-# Uso:
-#   powershell -ExecutionPolicy Bypass -File vigilar_sumo.ps1 -Init     # crea/actualiza la línea base
-#   powershell -ExecutionPolicy Bypass -File vigilar_sumo.ps1           # compara y muestra cambios
+# Uso (la carpeta se indica con -Carpeta o con la variable de entorno SUMO_WATCH_DIR):
+#   powershell -ExecutionPolicy Bypass -File vigilar_sumo.ps1 -Carpeta <ruta> -Init   # crea/actualiza la línea base
+#   powershell -ExecutionPolicy Bypass -File vigilar_sumo.ps1 -Carpeta <ruta>         # compara y muestra cambios
 
 param(
     [switch]$Init,
-    [string]$Carpeta = "D:\SUMO_demos\2026-10-14-16-22-34",
+    [string]$Carpeta = $env:SUMO_WATCH_DIR,
     [string]$Baseline = "$PSScriptRoot\vigilar_sumo_baseline.json"
 )
+
+if (-not $Carpeta) {
+    Write-Error "Indique la carpeta con -Carpeta o defina la variable de entorno SUMO_WATCH_DIR."
+    exit 1
+}
 
 if (-not (Test-Path $Carpeta)) {
     Write-Error "No existe la carpeta: $Carpeta"

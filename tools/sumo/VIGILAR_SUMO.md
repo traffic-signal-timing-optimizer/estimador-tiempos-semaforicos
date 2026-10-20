@@ -1,6 +1,6 @@
 # Vigilar cambios en la carpeta de demos de SUMO
 
-Carpeta vigilada: `D:\SUMO_demos\2026-10-14-16-22-34` (fuera del repositorio).
+La carpeta vigilada es la de la simulación de SUMO, que está fuera del repositorio. Su ruta es propia de cada equipo y no se versiona: se indica con `-Carpeta` o con la variable de entorno `SUMO_WATCH_DIR`.
 
 ## Qué hay aquí
 
@@ -9,22 +9,22 @@ Carpeta vigilada: `D:\SUMO_demos\2026-10-14-16-22-34` (fuera del repositorio).
 
 ## Acceso de Claude a la carpeta
 
-Se añadió `D:\SUMO_demos\2026-10-14-16-22-34` a `permissions.additionalDirectories` en `C:\Users\crc19\.claude\settings.json`, para que Claude pueda leerla en todas las sesiones.
+Para que Claude pueda leer la carpeta en todas las sesiones, se añade a `permissions.additionalDirectories` en el `settings.json` de Claude Code del equipo (`.claude\settings.json` dentro del perfil de usuario).
 
 ## Uso
 
-Los comandos se ejecutan en PowerShell desde la raíz del repositorio.
+Los comandos se ejecutan en PowerShell desde la raíz del repositorio. Los ejemplos escriben `<carpeta>` donde va la ruta de la simulación; si se define `SUMO_WATCH_DIR` se puede omitir `-Carpeta`.
 
 ### 1. Crear la línea base (la primera vez, o después de aceptar cambios)
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\sumo\vigilar_sumo.ps1 -Init
+powershell -ExecutionPolicy Bypass -File .\tools\sumo\vigilar_sumo.ps1 -Carpeta <carpeta> -Init
 ```
 
 ### 2. Revisar cambios
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\tools\sumo\vigilar_sumo.ps1
+powershell -ExecutionPolicy Bypass -File .\tools\sumo\vigilar_sumo.ps1 -Carpeta <carpeta>
 ```
 
 Salidas posibles:
