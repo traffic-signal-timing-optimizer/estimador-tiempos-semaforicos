@@ -8,6 +8,7 @@ semafóricos y detectores en archivos adicionales. Lo que no interpreta lo repor
 """
 
 import itertools
+import math
 import posixpath
 import re
 from collections import defaultdict
@@ -67,6 +68,7 @@ NOT_DEMAND_ATTRIBUTES = frozenset(
 DEPART_KEYWORDS = frozenset({"triggered", "containerTriggered", "now", "split", "begin"})
 EXPONENTIAL_PERIOD = re.compile(r"^exp\((.+)\)$")
 SECONDS_PER_HOUR = 3600.0
+COUNT_DECIMALS = 9
 
 
 def audit_simulation(
@@ -267,8 +269,12 @@ class _Network:
             if lane == index
         )
 
+    def lanes_for(self, edge: str, vclass: str) -> int:
+        """Carriles de ``edge`` que admiten ``vclass``."""
+        return sum(_permits(allow, disallow, vclass) for _, allow, disallow in self.lanes[edge])
+
     def edge_permits(self, edge: str, vclass: str) -> bool:
-        return any(_permits(allow, disallow, vclass) for _, allow, disallow in self.lanes[edge])
+        return self.lanes_for(edge, vclass) > 0
 
     def connected(self, origin: str, target: str, vclass: str) -> bool:
         return any(
@@ -366,7 +372,11 @@ def _depart(element: Element) -> float | None:
 def _flow_rate(
     element: Element, begin: float, end: float | None
 ) -> tuple[float | None, float | None]:
-    """(tasa en veh/h, vehículos declarados) de un flujo."""
+    """(tasa en veh/h, vehículos declarados) de un flujo.
+
+    En los flujos de intervalo fijo la cantidad es la que emite SUMO 1.27.1; en los aleatorios
+    (``probability`` y ``period="exp(…)"``), la media.
+    """
     duration = None if end is None else end - begin
     for name in RATE_ATTRIBUTES:
         text = element.get(name)
@@ -376,21 +386,38 @@ def _flow_rate(
             count = to_number(element, name, text)
             rate = count * SECONDS_PER_HOUR / duration if duration else None
             return rate, count
-        if name == "period":
-            exponential = EXPONENTIAL_PERIOD.match(text)
-            if exponential:
-                per_second = to_number(element, name, exponential.group(1))
-            else:
-                period = to_number(element, name, text)
-                if period <= 0:
-                    raise invalid(f"period debe ser positivo en <{element.tag}>", "flow.period")
-                per_second = 1 / period
+        exponential = EXPONENTIAL_PERIOD.match(text) if name == "period" else None
+        random = name == "probability" or exponential is not None
+        if exponential is not None:
+            per_second = to_number(element, name, exponential.group(1))
+        elif name == "period":
+            period = to_number(element, name, text)
+            if period <= 0:
+                raise invalid(f"period debe ser positivo en <{element.tag}>", "flow.period")
+            per_second = 1 / period
         elif name == "probability":
             per_second = to_number(element, name, text)
         else:
             per_second = to_number(element, name, text) / SECONDS_PER_HOUR
-        return per_second * SECONDS_PER_HOUR, None if duration is None else per_second * duration
+        if duration is None:
+            expected = None
+        elif random:
+            expected = per_second * duration
+        else:
+            expected = _fixed_interval_count(duration, per_second)
+        return per_second * SECONDS_PER_HOUR, expected
     return None, None
+
+
+def _fixed_interval_count(duration: float, per_second: float) -> float:
+    """Vehículos de un flujo de intervalo fijo: techo(duración / intervalo), final excluido.
+
+    Es la regla medida con SUMO 1.27.1 (``tests/integration/test_audit_sumo.py``). El redondeo
+    previo a 9 decimales evita que un error de coma flotante (7,000000000000001) sume uno más.
+    """
+    if duration <= 0:
+        return 0.0
+    return float(math.ceil(round(duration * per_second, COUNT_DECIMALS)))
 
 
 @dataclass(frozen=True)
@@ -538,17 +565,18 @@ class _Auditor:
 
 
 def _entry_loads(demand: list[DemandItem], network: _Network | None) -> list[EntryLoad]:
-    loads: dict[str, float] = defaultdict(float)
+    loads: dict[tuple[str, str], float] = defaultdict(float)
     for item in demand:
         if item.rate_veh_h is not None and item.from_edge is not None:
-            loads[item.from_edge] += item.rate_veh_h
+            loads[(item.from_edge, item.vclass)] += item.rate_veh_h
     return [
         EntryLoad(
             edge=edge,
-            lanes=len(network.lanes[edge])
+            vclass=vclass,
+            lanes=network.lanes_for(edge, vclass)
             if network is not None and edge in network.lanes
             else None,
             flow_veh_h=rate,
         )
-        for edge, rate in sorted(loads.items())
+        for (edge, vclass), rate in sorted(loads.items())
     ]

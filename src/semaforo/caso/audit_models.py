@@ -69,7 +69,8 @@ class DemandItem(FrozenModel):
     """Un flujo, vehículo o viaje.
 
     ``rate_veh_h`` es la tasa declarada en vehículos por hora (None en vehículos y viajes
-    sueltos). ``expected_vehicles`` es la cantidad que declara el archivo; SUMO puede insertar
+    sueltos). ``expected_vehicles`` es la cantidad que declara el archivo: en los flujos de
+    intervalo fijo, la que SUMO 1.27.1 carga; en los aleatorios, la media. SUMO puede insertar
     menos si la red se satura o la simulación termina antes. ``attributes`` son los demás
     atributos declarados, por ejemplo ``departLane``.
     """
@@ -90,12 +91,15 @@ class DemandItem(FrozenModel):
 
 
 class EntryLoad(FrozenModel):
-    """Tasa declarada que entra por una arista, sumando los flujos que empiezan en ella.
+    """Tasa declarada de una clase de vehículo que entra por una arista.
 
-    ``lanes`` es None si la arista no está en la red o no se pudo leer la red.
+    Suma los flujos de esa clase que empiezan en la arista. ``lanes`` son los carriles de la
+    arista que admiten la clase (un carril exclusivo de bus no cuenta para los autos); es None si
+    la arista no está en la red o no se pudo leer la red.
     """
 
     edge: str
+    vclass: str
     lanes: int | None
     flow_veh_h: float
 

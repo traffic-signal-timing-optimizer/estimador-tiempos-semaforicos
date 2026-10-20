@@ -88,9 +88,10 @@ def test_audits_the_demo_fixture() -> None:
     ]
     assert audit.expected_vehicles_total == 150
     assert audit.expected_vehicles_by_class == {"bus": 10, "passenger": 140}
-    assert [(e.edge, e.lanes, e.flow_veh_h) for e in audit.entry_loads] == [
-        ("demo_E", 1, 200),
-        ("demo_N", 1, 400),
+    assert [(e.edge, e.vclass, e.lanes, e.flow_veh_h) for e in audit.entry_loads] == [
+        ("demo_E", "passenger", 1, 200),
+        ("demo_N", "bus", 1, 40),
+        ("demo_N", "passenger", 1, 360),
     ]
     assert codes(audit) == [("NO_END_TIME", "demo.sumocfg")]
 
@@ -101,25 +102,49 @@ def test_records_every_config_option() -> None:
     assert options["report"]["duration-log.statistics"] == "true"
 
 
+# id: (atributos del flujo, tasa en veh/h, vehículos esperados). Los flujos de intervalo fijo
+# cuentan como SUMO 1.27.1: techo(duración / intervalo), con el final excluido (medido con SUMO
+# y fijado en tests/integration/test_audit_sumo.py). Los aleatorios dan la media.
+FLOW_CASES: dict[str, tuple[str, float, float]] = {
+    "per_hour": ('begin="0" end="1800" perHour="600"', 600, 300),
+    "legacy": ('begin="0" end="1800" vehsPerHour="600"', 600, 300),
+    "period": ('begin="0" end="100" period="10"', 360, 10),
+    "number": ('begin="0" end="900" number="7"', 28, 7),
+    "late_start": ('begin="6" end="3600" perHour="200"', 200, 200),
+    "period_7": ('begin="0" end="100" period="7"', 3600 / 7, 15),
+    "per_hour_700": ('begin="0" end="1800" perHour="700"', 700, 350),
+    "float_error": ('begin="0" end="1.1" period="0.1"', 36000, 11),
+    "ends_before_it_begins": ('begin="100" end="50" perHour="3600"', 3600, 0),
+    "probability": ('begin="0" end="10" probability="0.25"', 900, 2.5),
+    "poisson": ('begin="0" end="10" period="exp(0.25)"', 900, 2.5),
+}
+
+
 def test_rates_and_expected_vehicles_for_each_kind_of_flow(tmp_path: Path) -> None:
-    flows = [
-        '<flow id="per_hour" route="r" begin="0" end="1800" perHour="600"/>',
-        '<flow id="legacy" route="r" begin="0" end="1800" vehsPerHour="600"/>',
-        '<flow id="period" route="r" begin="0" end="100" period="10"/>',
-        '<flow id="probability" route="r" begin="0" end="100" probability="0.5"/>',
-        '<flow id="number" route="r" begin="0" end="900" number="7"/>',
-    ]
+    flows = [f'<flow id="{name}" route="r" {attrs}/>' for name, (attrs, _, _) in FLOW_CASES.items()]
     audit = audit_simulation(
         make_case(tmp_path, routes('<route id="r" edges="a b"/>', *flows)), ENTRY
     )
-    found = {d.id: (d.rate_veh_h, d.expected_vehicles) for d in audit.demand}
-    assert found == {
-        "per_hour": (600, 300),
-        "legacy": (600, 300),
-        "period": (360, 10),
-        "probability": (1800, 50),
-        "number": (28, 7),
-    }
+    rates = {d.id: d.rate_veh_h for d in audit.demand}
+    expected = {d.id: d.expected_vehicles for d in audit.demand}
+    assert rates == pytest.approx({name: rate for name, (_, rate, _) in FLOW_CASES.items()})
+    assert expected == pytest.approx({name: count for name, (_, _, count) in FLOW_CASES.items()})
+
+
+def test_entry_loads_count_only_the_lanes_of_each_class(tmp_path: Path) -> None:
+    text = routes(
+        '<vType id="bus" vClass="bus"/>',
+        '<route id="r" edges="a b"/>',
+        '<route id="r_bus" edges="a f"/>',
+        '<flow id="cars" route="r" begin="0" end="3600" perHour="100"/>',
+        '<flow id="more_cars" route="r" begin="0" end="3600" perHour="50"/>',
+        '<flow id="buses" type="bus" route="r_bus" begin="0" end="3600" perHour="10"/>',
+    )
+    loads = audit_simulation(make_case(tmp_path, text), ENTRY).entry_loads
+    assert [(e.edge, e.vclass, e.lanes, e.flow_veh_h) for e in loads] == [
+        ("a", "bus", 2, 10),
+        ("a", "passenger", 1, 150),
+    ]
 
 
 def test_a_flow_without_end_has_no_expected_count(tmp_path: Path) -> None:

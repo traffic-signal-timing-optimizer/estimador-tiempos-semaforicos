@@ -5,7 +5,6 @@ Esta prueba lo comprueba ejecutando SUMO sobre una copia del fixture. Se salta s
 instalado (variable ``SUMO_HOME``).
 """
 
-import os
 import re
 import shutil
 import subprocess
@@ -24,17 +23,6 @@ TLS_EVENTS = (
 )
 
 
-def sumo_binary() -> Path | None:
-    home = os.environ.get("SUMO_HOME")
-    if home:
-        for name in ("sumo.exe", "sumo"):
-            candidate = Path(home) / "bin" / name
-            if candidate.is_file():
-                return candidate
-    found = shutil.which("sumo")
-    return Path(found) if found else None
-
-
 def net_with_two_programs(original: str, *, alternative_first: bool) -> str:
     block = re.search(r"<tlLogic .*?</tlLogic>", original, re.S)
     assert block is not None
@@ -51,11 +39,8 @@ def net_with_two_programs(original: str, *, alternative_first: bool) -> str:
     ids=["alt-last", "demo-last"],
 )
 def test_sumo_runs_the_program_the_inventory_calls_active(
-    tmp_path: Path, *, alternative_first: bool, expected: str
+    tmp_path: Path, sumo_binary: Path, *, alternative_first: bool, expected: str
 ) -> None:
-    binary = sumo_binary()
-    if binary is None:
-        pytest.skip("SUMO no está instalado (SUMO_HOME)")
     run = tmp_path / "run"
     shutil.copytree(DEMO, run)
     net = run / "demo.net.xml"
@@ -73,7 +58,7 @@ def test_sumo_runs_the_program_the_inventory_calls_active(
         encoding="utf-8",
     )
     result = subprocess.run(  # noqa: S603
-        [str(binary), "-c", "demo.sumocfg", "--end", "5", "--no-step-log"],
+        [str(sumo_binary), "-c", "demo.sumocfg", "--end", "5", "--no-step-log"],
         cwd=run,
         capture_output=True,
         text=True,
