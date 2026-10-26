@@ -28,7 +28,7 @@
 
 - **Configuración (HU04):** todas las opciones del `.sumocfg` tal como están escritas; además, inicio, final, paso y semilla.
 - **Comportamiento:** cada `vType` con su clase y sus parámetros declarados, y los atributos de salida de cada flujo (por ejemplo `departLane`).
-- **Demanda:** cada flujo, vehículo y viaje con su tasa en veh/h, los vehículos que declara y la carga por arista de entrada y clase, con los carriles que admiten esa clase. Reconoce `perHour`, `vehsPerHour`, `period` (también `exp(…)`), `probability` y `number`. En los flujos de intervalo fijo cuenta como SUMO 1.27.1: techo(duración ÷ intervalo), con el final excluido (medido en nueve casos y fijado en `tests/integration/test_audit_sumo.py`); en los aleatorios da la media.
+- **Demanda:** cada flujo, vehículo y viaje con su tasa en veh/h, los vehículos que declara y la carga por arista de entrada y clase, con los carriles que admiten esa clase. Reconoce `perHour`, `vehsPerHour`, `period` (también `exp(…)`), `probability` y `number`. En los flujos de intervalo fijo cuenta como SUMO 1.27.1 (fijado en `tests/integration/test_audit_sumo.py`; regla corregida el 2026-10-25, ver al final); en los aleatorios da la media.
 - **Rutas, por clase de vehículo:** que cada arista exista, que tenga algún carril para la clase y que haya una conexión permitida para la clase entre aristas consecutivas (permisos del carril de origen, del de destino y de la propia conexión).
 - **Coherencia:** rutas y tipos usados sin definir, definidos sin usar, y demanda que empieza después del final o termina después de él.
 - **Archivos adicionales:** programas semafóricos (`tlLogic`, `WAUT`), detectores y atributos `file=` con ruta absoluta.
@@ -74,3 +74,11 @@ Al revisar el impacto de las limitaciones, el Product Owner aprobó dos correcci
 2. **Carga de entrada por clase.** La carga se separa por clase de vehículo y cuenta solo los carriles que admiten la clase. Antes, un carril exclusivo de bus contaba también para los autos.
 
 Esta vez las pruebas sí fallaron antes del cambio. Las 35 mutaciones aplicadas se detectan; dos sobrevivieron al principio (un flujo aleatorio con media entera y dos flujos de la misma clase por la misma entrada) y se cerraron con pruebas. Quedan 254 pruebas que pasan y 1 que se salta de forma declarada.
+
+## Corrección del conteo (2026-10-25)
+
+La regla de la revisión anterior, techo(duración ÷ intervalo) con el final excluido, acertaba solo cuando el intervalo entre vehículos es un número exacto de milisegundos. Al repartir la demanda por tipo de vehículo (ver `docs/actas/2026-10-25-propuesta-clases-vehiculares.md`), un flujo de 420 veh/h cargó 421 vehículos en SUMO y la auditoría declaraba 420.
+
+SUMO 1.27.1 guarda el inicio, el final y el intervalo en milisegundos redondeados y emite un vehículo en inicio + i·intervalo mientras sea anterior al final. Con 420 veh/h el intervalo pasa de 8,5714 s a 8571 ms y cabe un vehículo más. La regla nueva coincide con SUMO en los 15 casos medidos, incluidos dos que la distinguen de truncar los milisegundos (7 y 11 veh/h) y dos con finales de fracciones de milisegundo. Las pruebas nuevas fallaron antes de la corrección; las 7 mutaciones no equivalentes se detectan. Commit `9ae453a`.
+
+En R0 no cambia nada: sus flujos de 600 y 200 veh/h tienen intervalos exactos (6 s y 18 s) y siguen declarando 2520 vehículos.
