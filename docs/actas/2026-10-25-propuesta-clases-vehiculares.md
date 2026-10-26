@@ -56,3 +56,31 @@ Según ADR09, la composición, las tasas y los resultados detallados quedan en e
 2. Con el aviso «SUMO listo» y su autorización, F10 hace la recepción oficial R1, y QA23 se repite sobre ella.
 
 La composición es un supuesto provisional, sin aforos. Si el Product Owner obtiene conteos de campo, basta con cambiar las fracciones del generador.
+
+## Cambios de red de QA23 (2026-10-25)
+
+El Product Owner ordenó ejecutar los cambios de red que salieron de su primera pasada de QA23. Se hicieron en otra copia, `datos/propuestas/2026-10-25-clases-y-red-qa23/` (candidata a R1), que parte de la propuesta de clases. La carpeta original no se modificó.
+
+| Tipo de observación | Cambio en la red |
+|---|---|
+| Giros que no existen en el cruce real | 11 conexiones eliminadas |
+| Tramo de servicio que se debe eliminar | tramo eliminado; con él desaparecen los 7 giros que llevaban a él |
+| Por Los Frutales no pasan buses | bus prohibido en los carriles de dos entradas y una salida de Los Frutales, sin tocar sus demás permisos |
+
+No se cambiaron dos tipos de observación que no son cambios claros de la red: orígenes con un solo destino y cambio de carril después del cruce. Quedan para decidir.
+
+Los cambios se aplicaron con `netconvert` sobre la red existente, con las mismas opciones con que ya se había corregido antes. Problema encontrado: al quitar conexiones, `netconvert` **borró `minDur` y `maxDur`** de las fases del semáforo actuado y dejó columnas sin uso en su programa. Se corrigió dándole el programa explícito, generado desde el original. La comparación de la red anterior con la nueva muestra:
+
+- solo cambia lo pedido;
+- los 35 movimientos que siguen conservan exactamente su secuencia de colores en las 12 fases;
+- duraciones, `minDur` y `maxDur` iguales al original.
+
+Efecto lateral aceptado: al cambiar la forma del cruce, cuatro giros pasan de «suave» a normal, con el mismo control.
+
+Validación con una recepción completa en un espacio temporal:
+
+- los movimientos del semáforo pasan de 53 a 35;
+- la auditoría no encuentra ninguna ruta afectada;
+- la corrida base termina bien, sin teletransportes ni colisiones.
+
+En R1 la planilla QA23 se renumera (M01 a M35). El detalle está en el `LEEME.md` de la copia, junto con los archivos aplicados y la red anterior.
