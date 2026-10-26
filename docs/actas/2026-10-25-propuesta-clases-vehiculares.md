@@ -52,7 +52,7 @@ Según ADR09, la composición, las tasas y los resultados detallados quedan en e
 
 ## Siguientes pasos
 
-1. El Product Owner revisa la propuesta en SUMO-GUI y, si la acepta, copia los dos archivos a su carpeta, junto con los cambios de red que salieron de QA23.
+1. El Product Owner revisa la propuesta en SUMO-GUI y, si la acepta, copia a su carpeta los tres archivos de la candidata a R1 (red, demanda y configuración; ver «Cambios de red de QA23»).
 2. Con el aviso «SUMO listo» y su autorización, F10 hace la recepción oficial R1, y QA23 se repite sobre ella.
 
 La composición es un supuesto provisional, sin aforos. Si el Product Owner obtiene conteos de campo, basta con cambiar las fracciones del generador.
