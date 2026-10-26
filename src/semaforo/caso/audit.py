@@ -69,7 +69,7 @@ NOT_DEMAND_ATTRIBUTES = frozenset(
 DEPART_KEYWORDS = frozenset({"triggered", "containerTriggered", "now", "split", "begin"})
 EXPONENTIAL_PERIOD = re.compile(r"^exp\((.+)\)$")
 SECONDS_PER_HOUR = 3600.0
-COUNT_DECIMALS = 9
+MILLISECONDS_PER_SECOND = 1000
 
 
 def audit_simulation(
@@ -395,20 +395,28 @@ def _flow_rate(
         elif random:
             expected = per_second * duration
         else:
-            expected = _fixed_interval_count(duration, per_second)
+            expected = _fixed_interval_count(begin, begin + duration, per_second)
         return per_second * SECONDS_PER_HOUR, expected
     return None, None
 
 
-def _fixed_interval_count(duration: float, per_second: float) -> float:
-    """Vehículos de un flujo de intervalo fijo: techo(duración / intervalo), final excluido.
+def _milliseconds(seconds: float) -> int:
+    return math.floor(seconds * MILLISECONDS_PER_SECOND + 0.5)
 
-    Es la regla medida con SUMO 1.27.1 (``tests/integration/test_audit_sumo.py``). El redondeo
-    previo a 9 decimales evita que un error de coma flotante (7,000000000000001) sume uno más.
+
+def _fixed_interval_count(begin: float, end: float, per_second: float) -> float:
+    """Vehículos de un flujo de intervalo fijo, como los carga SUMO 1.27.1.
+
+    SUMO guarda el inicio, el final y el intervalo en milisegundos redondeados y emite un vehículo
+    en inicio + i·intervalo mientras sea anterior al final. Con 420 veh/h el intervalo pasa de
+    8,5714 s a 8571 ms y cabe un vehículo más: 421, no 420. Regla medida en
+    ``tests/integration/test_audit_sumo.py``.
     """
-    if duration <= 0:
+    span = _milliseconds(end) - _milliseconds(begin)
+    if span <= 0:
         return 0.0
-    return float(math.ceil(round(duration * per_second, COUNT_DECIMALS)))
+    interval = max(1, _milliseconds(1 / per_second))
+    return float(-(-span // interval))
 
 
 @dataclass(frozen=True)

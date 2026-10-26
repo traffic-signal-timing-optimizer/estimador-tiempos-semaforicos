@@ -114,6 +114,14 @@ FLOW_CASES: dict[str, tuple[str, float, float]] = {
     "period_7": ('begin="0" end="100" period="7"', 3600 / 7, 15),
     "per_hour_700": ('begin="0" end="1800" perHour="700"', 700, 350),
     "float_error": ('begin="0" end="1.1" period="0.1"', 36000, 11),
+    # SUMO redondea el intervalo al milisegundo: 3600/420 s pasa a 8571 ms y cabe un vehículo más.
+    "per_hour_420": ('begin="0" end="3600" perHour="420"', 420, 421),
+    "per_hour_13": ('begin="0" end="3600" perHour="13"', 13, 14),
+    "per_hour_7": ('begin="0" end="3600" perHour="7"', 7, 7),
+    "period_third": ('begin="0" end="10" period="0.3333"', 3600 / 0.3333, 31),
+    # El final también se redondea al milisegundo: 10,0004 s es 10000 ms y 10,0006 s, 10001 ms.
+    "end_rounded_down": ('begin="0" end="10.0004" period="1"', 3600, 10),
+    "end_rounded_up": ('begin="0" end="10.0006" period="1"', 3600, 11),
     "ends_before_it_begins": ('begin="100" end="50" perHour="3600"', 3600, 0),
     "probability": ('begin="0" end="10" probability="0.25"', 900, 2.5),
     "poisson": ('begin="0" end="10" period="exp(0.25)"', 900, 2.5),

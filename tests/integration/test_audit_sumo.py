@@ -1,7 +1,9 @@
 """Los vehículos que la auditoría espera de un flujo son los que SUMO carga.
 
-SUMO 1.27.1 emite techo(duración / intervalo) vehículos en un flujo de intervalo fijo, con el
-final excluido. Esta prueba lo comprueba ejecutando SUMO sobre una copia del fixture.
+SUMO 1.27.1 guarda el inicio, el final y el intervalo de un flujo de intervalo fijo en
+milisegundos redondeados, y emite un vehículo en inicio + i·intervalo mientras sea anterior al
+final. Con 420 veh/h el intervalo pasa de 8,5714 s a 8571 ms y cabe un vehículo más (421). Esta
+prueba lo comprueba ejecutando SUMO sobre una copia del fixture.
 """
 
 import shutil
@@ -25,6 +27,13 @@ FLOWS = {
     "period-7": 'begin="0" end="100" period="7"',
     "period-late-start": 'begin="5" end="50" period="3"',
     "number": 'begin="0" end="900" number="7"',
+    "per-hour-420": 'begin="0" end="3600" perHour="420"',
+    "per-hour-140": 'begin="0" end="3600" perHour="140"',
+    "per-hour-13": 'begin="0" end="3600" perHour="13"',
+    "per-hour-7": 'begin="0" end="3600" perHour="7"',
+    "period-third": 'begin="0" end="10" period="0.3333"',
+    "end-rounded-down": 'begin="0" end="10.0004" period="1"',
+    "end-rounded-up": 'begin="0" end="10.0006" period="1"',
 }
 
 
