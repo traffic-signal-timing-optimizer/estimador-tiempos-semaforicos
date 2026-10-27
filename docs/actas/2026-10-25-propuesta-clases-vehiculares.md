@@ -90,3 +90,27 @@ En R1 la planilla QA23 se renumera (M01 a M35). El detalle está en el `LEEME.md
 Al revisar la red en netedit, el Product Owner indicó tres movimientos de Javier Prado que no tenían ruta: la derecha de este a oeste y la derecha y la izquierda de oeste a este. Se agregaron como rutas, con las conexiones que ya tiene el semáforo. Javier Prado conserva su total por sentido: los giros salen de él, y los buses siguen solo en recto. Las cantidades son un supuesto, sin aforos.
 
 Validación: las rutas están conectadas para todas las clases, la auditoría no encuentra hallazgos nuevos y, en la corrida, todos sus vehículos entran y llegan. Queda un aviso para el Product Owner: SUMO registra dos frenados de emergencia en el giro a la izquierda de oeste a este.
+
+## Semáforo de tiempo fijo (2026-10-26)
+
+El Product Owner dio los tiempos reales de Javier Prado y decidió:
+
+1. El semáforo pasa a **tiempo fijo**. Antes era actuado y no tenía detectores, que era el punto pendiente DEC06.
+2. Las dos entradas de Javier Prado se ponen en verde a la vez, en todos sus carriles.
+3. El giro a la izquierda de oeste a este tiene una flecha propia que se enciende después. Mientras tanto, los que giran avanzan y esperan dentro del cruce.
+4. En el contexto peruano se gira a la izquierda desde los carriles 1, 2 y 3 de esa entrada; el carril 0 es el de la derecha.
+5. Los tiempos de Los Frutales se están tomando en campo. Mientras tanto, el equipo pone unos provisionales.
+
+Los tiempos dados cuadran sin ajustes: los dos sentidos tienen el mismo ciclo y la flecha solo cabe entre el fin del ámbar del sentido contrario y el fin del verde recto. Los supuestos son dos: el ámbar de la flecha y la ausencia de rojo total entre esas dos señales. La espera dentro del cruce se modeló con una segunda señal en el punto de espera de cada giro (`linkIndex2` de SUMO). Según ADR09, los tiempos, el reparto provisional y los resultados por flujo quedan en el `LEEME.md` de la candidata.
+
+| Comprobación | Resultado |
+|---|---|
+| Cambios en la red | solo las 2 conexiones de giro agregadas y el programa; aristas, nodos y prioridades sin cambios |
+| Programa de la red frente al archivo cargado | idéntico |
+| Giros a la izquierda de oeste a este | todos cruzan solo con la flecha y antes esperan dentro del cruce |
+| Frenados de emergencia en ese giro | desaparecen |
+| Recepción completa en un espacio temporal | corrida `succeeded`; el inventario cuenta todas las señales, sin hallazgos |
+
+Efecto que debe conocer el Product Owner: Javier Prado mejora y Los Frutales empeora mucho. Con el ciclo fijo, a Los Frutales le queda poco verde para la demanda supuesta de R0; antes el semáforo actuado alargaba sus verdes. Aparecen dos teletransportes por atasco y aumentan los vehículos que no llegan a entrar. Con los tiempos y aforos de campo de Los Frutales, esto puede cambiar.
+
+Vacío encontrado en el código: la tabla de movimientos de F8 (QA23 y QA24) salta las conexiones internas y no muestra las señales de la flecha. Por eso QA24 presenta los giros a la izquierda como verdes desde la primera fase. Se propone corregirlo antes de F10, con la autorización del Product Owner.
