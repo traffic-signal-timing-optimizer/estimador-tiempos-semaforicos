@@ -84,3 +84,9 @@ Validación con una recepción completa en un espacio temporal:
 - la corrida base termina bien, sin teletransportes ni colisiones.
 
 En R1 la planilla QA23 se renumera (M01 a M35). El detalle está en el `LEEME.md` de la copia, junto con los archivos aplicados y la red anterior.
+
+## Rutas agregadas a la candidata a R1 (2026-10-26)
+
+Al revisar la red en netedit, el Product Owner indicó tres movimientos de Javier Prado que no tenían ruta: la derecha de este a oeste y la derecha y la izquierda de oeste a este. Se agregaron como rutas, con las conexiones que ya tiene el semáforo. Javier Prado conserva su total por sentido: los giros salen de él, y los buses siguen solo en recto. Las cantidades son un supuesto, sin aforos.
+
+Validación: las rutas están conectadas para todas las clases, la auditoría no encuentra hallazgos nuevos y, en la corrida, todos sus vehículos entran y llegan. Queda un aviso para el Product Owner: SUMO registra dos frenados de emergencia en el giro a la izquierda de oeste a este.
