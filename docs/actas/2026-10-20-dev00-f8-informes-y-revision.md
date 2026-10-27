@@ -95,3 +95,23 @@ Según ADR09, el detalle no se publica aquí.
 - Las planillas suponen el separador de listas de este equipo (punto y coma). En un Excel con otra configuración regional se abren con «Datos → Desde texto/CSV».
 - Los movimientos se identifican por orden (`M01`, `M02`…). Si R1 cambia los enlaces del semáforo, los números pueden no coincidir con los de R0; la comparación compara fases y conteos, no movimientos uno a uno.
 - La detección de rutas de un equipo cubre las formas habituales de Windows y POSIX. No reconoce rutas que alguien escriba de forma deliberadamente distinta.
+
+## Corrección: punto de espera dentro del cruce (2026-10-26)
+
+El Product Owner autorizó corregir un vacío hallado al poner el semáforo de tiempo fijo en la candidata a R1 (ver `docs/actas/2026-10-25-propuesta-clases-vehiculares.md`). Un giro puede tener dos señales: la de su enlace, con la que entra al cruce, y la de su punto de espera dentro del cruce (`linkIndex2` de SUMO), con la que lo cruza. La tabla de movimientos saltaba las conexiones internas, y con ellas esa segunda señal. Por eso QA24 mostraba el giro en verde aunque su flecha estuviera en rojo. El inventario sí contaba todas las señales.
+
+| Dónde | Cambio |
+|---|---|
+| `movements.json` | cada movimiento lleva `waiting_link_index`, la señal de su punto de espera, si la tiene; `schema_version` pasa a 1.1.0 (ningún módulo vuelve a leer este archivo) |
+| QA23 | columna nueva «Enlace del punto de espera», después de «Enlace» |
+| QA24 | el punto de espera aparece como `M18-espera` en las fases en que está en verde o en amarillo; la fila `QA24-ESPERA` explica cómo leerlo y solo aparece si algún movimiento lo tiene |
+
+Las IDs de los movimientos no cambian: la señal del punto de espera no es un movimiento nuevo.
+
+Verificación:
+
+- Las pruebas nuevas fallaron antes del cambio.
+- Una prueba de integración genera con `netconvert` 1.27.1 un cruce con un giro de flecha y fija el formato que se lee.
+- Las 8 mutaciones aplicadas se detectan.
+- Con la candidata a R1, las planillas muestran los tres puntos de espera y Excel 16 los presenta como texto.
+- Quedan 460 pruebas que pasan y 1 que se salta de forma declarada.

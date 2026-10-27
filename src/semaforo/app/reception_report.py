@@ -31,6 +31,8 @@ CSV_DELIMITER = ";"
 # Excel no admite textos de más de 255 caracteres dentro de una fórmula.
 MAX_EXCEL_FORMULA_TEXT = 255
 REVIEW_COLUMNS = ["Resultado (Correcto/Discrepancia)", "Nota"]
+# Sufijo del punto de espera de un movimiento en QA24 (sin espacios: las IDs van separadas por uno).
+WAITING_POINT = "-espera"
 SIGNATURE_ROWS: list[list[str]] = [[], ["Revisado por:"], ["Fecha:"]]
 CLASS_NAMES = {"passenger": "auto", "bus": "bus", "truck": "camión", "motorcycle": "moto"}
 ROLE_NAMES = {
@@ -83,6 +85,7 @@ def qa23_csv(movements: Sequence[Movement]) -> bytes:
         "ID",
         "Semáforo",
         "Enlace",
+        "Enlace del punto de espera",
         "Desde (arista)",
         "Carril desde",
         "Hacia (arista)",
@@ -96,6 +99,7 @@ def qa23_csv(movements: Sequence[Movement]) -> bytes:
             f"QA23-{movement.id}",
             _excel_text(movement.tls_id),
             str(movement.link_index),
+            "" if movement.waiting_link_index is None else str(movement.waiting_link_index),
             _excel_text(movement.from_edge),
             str(movement.from_lane),
             _excel_text(movement.to_edge),
@@ -113,10 +117,18 @@ def qa23_csv(movements: Sequence[Movement]) -> bytes:
 def qa24_csv(
     inventory: NetworkInventory, movements: Sequence[Movement], audit: SimulationAudit
 ) -> bytes:
-    """Planilla QA24: cada fase de cada programa con los movimientos en verde y en amarillo."""
+    """Planilla QA24: cada fase de cada programa con los movimientos en verde y en amarillo.
+
+    El punto de espera de un movimiento aparece como ``M18-espera``: con su enlace en verde y el
+    punto de espera en rojo, el vehículo entra al cruce y espera dentro.
+    """
     by_link: dict[tuple[str, int], list[str]] = {}
     for movement in movements:
         by_link.setdefault((movement.tls_id, movement.link_index), []).append(movement.id)
+        if movement.waiting_link_index is not None:
+            by_link.setdefault((movement.tls_id, movement.waiting_link_index), []).append(
+                f"{movement.id}{WAITING_POINT}"
+            )
     header = [
         "ID",
         "Semáforo",
@@ -185,6 +197,18 @@ def qa24_csv(
             )
     rows.extend([[], ["ID", "Elemento a revisar", "Dato de la simulación", *REVIEW_COLUMNS]])
     rows.extend(_general_rows(inventory, audit))
+    waiting = [movement.id for movement in movements if movement.waiting_link_index is not None]
+    if waiting:
+        rows.append(
+            [
+                "QA24-ESPERA",
+                "Movimientos con punto de espera dentro del cruce (por ejemplo, una flecha)",
+                f"{', '.join(waiting)}: entran al cruce con su enlace, esperan dentro y lo "
+                f"cruzan cuando su punto de espera ({waiting[0]}{WAITING_POINT}…) está en verde",
+                "",
+                "",
+            ]
+        )
     return _csv([*rows, *SIGNATURE_ROWS])
 
 

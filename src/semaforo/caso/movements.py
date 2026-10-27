@@ -31,11 +31,15 @@ class Movement(FrozenModel):
 
     ``id`` numera los movimientos (``M01``…) por semáforo y ``linkIndex``. ``classes`` son las
     clases, de las pedidas, que admiten el carril de entrada, el de salida y la propia conexión.
+    ``waiting_link_index`` es la señal del punto de espera dentro del cruce (``linkIndex2`` de
+    SUMO, por ejemplo la flecha de un giro a la izquierda), si la tiene: el vehículo entra con
+    ``link_index`` y espera ahí hasta que esa señal le dé paso.
     """
 
     id: str
     tls_id: str
     link_index: int = Field(ge=0)
+    waiting_link_index: int | None = Field(default=None, ge=0)
     from_edge: str
     from_lane: int = Field(ge=0)
     to_edge: str
@@ -47,7 +51,7 @@ class Movement(FrozenModel):
 class MovementTable(FrozenModel):
     """Tabla de movimientos de una red (``movements.json`` de una recepción)."""
 
-    schema_version: Literal["1.0.0"] = "1.0.0"
+    schema_version: Literal["1.1.0"] = "1.1.0"
     classes: list[str]
     movements: list[Movement]
 
@@ -66,7 +70,15 @@ def read_movements(
         for edge in root.findall("edge")
         for lane in edge.findall("lane")
     }
-    rows: list[tuple[str, int, str, int, str, int, str, list[str]]] = []
+    # Señal del punto de espera: la lleva la conexión que sale del primer tramo interno del giro,
+    # que es la vía (``via``) de la conexión del carril de entrada.
+    waiting: dict[tuple[str, str], int] = {}
+    for connection in root.findall("connection"):
+        tls_id, origin = connection.get("tl"), required(connection, "from")
+        if tls_id is not None and origin.startswith(":"):
+            lane_id = f"{origin}_{integer(connection, 'fromLane')}"
+            waiting[tls_id, lane_id] = integer(connection, "linkIndex")
+    rows: list[tuple[str, int, int | None, str, int, str, int, str, list[str]]] = []
     for connection in root.findall("connection"):
         tls_id, origin = connection.get("tl"), required(connection, "from")
         if tls_id is None or origin.startswith(":"):
@@ -83,10 +95,12 @@ def read_movements(
             and permits(connection.get("allow"), connection.get("disallow"), vclass)
         ]
         code = connection.get("dir", "")
+        via = connection.get("via")
         rows.append(
             (
                 tls_id,
                 integer(connection, "linkIndex"),
+                None if via is None else waiting.get((tls_id, via)),
                 origin,
                 from_lane,
                 target,
@@ -96,12 +110,13 @@ def read_movements(
             )
         )
     order = {tls: position for position, tls in enumerate(dict.fromkeys(row[0] for row in rows))}
-    rows.sort(key=lambda row: (order[row[0]], row[1], row[2], row[3], row[4], row[5]))
+    rows.sort(key=lambda row: (order[row[0]], row[1], row[3], row[4], row[5], row[6]))
     return [
         Movement(
             id=f"M{number:02d}",
             tls_id=tls_id,
             link_index=link_index,
+            waiting_link_index=waiting_link_index,
             from_edge=origin,
             from_lane=from_lane,
             to_edge=target,
@@ -112,6 +127,7 @@ def read_movements(
         for number, (
             tls_id,
             link_index,
+            waiting_link_index,
             origin,
             from_lane,
             target,

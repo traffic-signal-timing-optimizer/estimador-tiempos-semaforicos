@@ -113,4 +113,4 @@ Los tiempos dados cuadran sin ajustes: los dos sentidos tienen el mismo ciclo y 
 
 Efecto que debe conocer el Product Owner: Javier Prado mejora y Los Frutales empeora mucho. Con el ciclo fijo, a Los Frutales le queda poco verde para la demanda supuesta de R0; antes el semáforo actuado alargaba sus verdes. Aparecen dos teletransportes por atasco y aumentan los vehículos que no llegan a entrar. Con los tiempos y aforos de campo de Los Frutales, esto puede cambiar.
 
-Vacío encontrado en el código: la tabla de movimientos de F8 (QA23 y QA24) salta las conexiones internas y no muestra las señales de la flecha. Por eso QA24 presenta los giros a la izquierda como verdes desde la primera fase. Se propone corregirlo antes de F10, con la autorización del Product Owner.
+Vacío encontrado en el código: la tabla de movimientos de F8 (QA23 y QA24) saltaba las conexiones internas y no mostraba las señales de la flecha. Por eso QA24 presentaba los giros a la izquierda como verdes desde la primera fase. El Product Owner autorizó corregirlo y quedó corregido; ver «Corrección: punto de espera dentro del cruce» en el acta de F8.

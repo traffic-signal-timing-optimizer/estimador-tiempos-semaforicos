@@ -73,9 +73,11 @@ def test_qa23_has_one_row_per_movement_and_room_for_the_review(
     assert table[0][0] == "ID"
     assert table[0][-2:] == ["Resultado (Correcto/Discrepancia)", "Nota"]
     assert [row[0] for row in table[1:3]] == ["QA23-M01", "QA23-M02"]
-    assert table[1][1:9] == [
+    assert table[0][2:4] == ["Enlace", "Enlace del punto de espera"]
+    assert table[1][1:10] == [
         excel("DEMO_TLS"),
         "0",
+        "",
         excel("demo_N"),
         "0",
         excel("demo_S"),
@@ -110,7 +112,7 @@ def test_identifiers_stay_text_in_excel(
         update={"tls_id": identifier, "from_edge": identifier, "to_edge": identifier}
     )
     row = rows(qa23_csv([movement]))[1]
-    assert (row[1], row[3], row[5]) == (cell, cell, cell)
+    assert (row[1], row[4], row[6]) == (cell, cell, cell)
     tls = inventory.traffic_lights[0].model_copy(update={"id": identifier})
     renamed = inventory.model_copy(update={"traffic_lights": [tls]})
     phase = next(r for r in rows(qa24_csv(renamed, [movement], audit)) if "-F" in r[0])
@@ -136,6 +138,39 @@ def test_qa24_lists_each_phase_with_the_movements_it_lets_through(
     ids = {row[0] for row in table if row}
     assert {"QA24-PEATONES", "QA24-FRONTERA"} <= ids
     assert "QA24-DETECTORES" not in ids  # el programa del fixture es fijo, no actuado
+    assert "QA24-ESPERA" not in ids  # ningún movimiento del fixture tiene punto de espera
+
+
+def test_the_waiting_point_inside_the_junction_has_its_own_signal(
+    demo: tuple[NetworkInventory, list[Movement], SimulationAudit],
+) -> None:
+    # Giro a la izquierda con flecha: M02 entra con el enlace 1 y cruza con el 2 (linkIndex2).
+    inventory, movements, audit = demo
+    left = movements[1].model_copy(update={"waiting_link_index": 2})
+    assert rows(qa23_csv([movements[0], left]))[2][2:4] == ["1", "2"]
+    tls = inventory.traffic_lights[0]
+    program = tls.programs[0]
+    phases = [
+        phase.model_copy(update={"state": state})
+        for phase, state in zip(program.phases, ["GGr", "GgG", "ryy"], strict=False)
+    ]
+    changed = inventory.model_copy(
+        update={
+            "traffic_lights": [
+                tls.model_copy(update={"programs": [program.model_copy(update={"phases": phases})]})
+            ]
+        }
+    )
+    table = rows(qa24_csv(changed, [movements[0], left], audit))
+    lit = [(row[9], row[10]) for row in table if row and row[0].startswith("QA24-S1-demo-F")]
+    assert lit == [
+        ("M01 M02", "-"),
+        ("M01 M02 M02-espera", "-"),
+        ("-", "M02 M02-espera"),
+    ]
+    (waiting,) = [row for row in table if row and row[0] == "QA24-ESPERA"]
+    assert "M02" in waiting[2]
+    assert "M01" not in waiting[2]
 
 
 def test_the_public_report_only_has_what_adr09_allows(

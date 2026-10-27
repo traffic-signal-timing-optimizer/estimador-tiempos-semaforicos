@@ -62,6 +62,21 @@ def test_lanes_turns_and_classes_per_movement(tmp_path: Path) -> None:
         ("M02", 1, 0, 0, "izquierda", ["passenger"]),
         ("M03", 2, 1, 0, "derecha", []),
     ]
+    # La conexión interna con semáforo no es de ningún movimiento: ninguna la tiene como vía.
+    assert all(m.waiting_link_index is None for m in movements)
+
+
+def test_the_waiting_point_signal_belongs_to_its_movement(tmp_path: Path) -> None:
+    # Como escribe netconvert un giro con linkIndex2: la conexión del carril de entrada va por la
+    # vía :j_0_0, y la conexión que sale de esa vía hacia el punto de espera tiene su propia señal.
+    path = tmp_path / "net.xml"
+    path.write_text(NET.replace('dir="l"', 'dir="l" via=":j_0_0"'), encoding="utf-8")
+    movements = read_movements(path, ["passenger", "bus"])
+    assert [(m.id, m.link_index, m.waiting_link_index) for m in movements] == [
+        ("M01", 0, None),
+        ("M02", 1, 5),
+        ("M03", 2, None),
+    ]
 
 
 def test_an_unknown_turn_code_is_kept(tmp_path: Path) -> None:
