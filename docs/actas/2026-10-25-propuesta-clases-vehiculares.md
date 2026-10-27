@@ -140,3 +140,26 @@ Quedan dos observaciones para el Product Owner:
 
 - **Choques dentro del cruce.** La corrida base no activa la detección completa de choques dentro del cruce (`--collision.check-junctions`). Con ella activada aparecen entre 1 y 3 choques por corrida, que antes no se veían porque la red dejaba sin entrar a casi 300 vehículos.
 - **Una moto atascada.** En algunas semillas, una moto que gira a la izquierda queda detenida dentro del cruce, desplazada hacia un lado, y causa la mayoría de los teletransportes. Es un problema del modelo de subcarriles, no del semáforo.
+
+## Detección de choques dentro del cruce (2026-10-27)
+
+El Product Owner corroboró en campo dos decisiones de la sección anterior: las dos entradas de Los Frutales empiezan en verde a la vez, y el giro a la izquierda no cede el paso. Los conductores conocen la zona y cruzan con cuidado de no chocar. Según su conocimiento, en el cruce hay unos 3 o 4 choques al año. Eso equivale a prácticamente ninguno en una corrida de 2 horas, así que todo choque de la simulación es un defecto del modelo.
+
+Decisión: la candidata activa la detección completa de choques dentro del cruce (`collision.check-junctions`).
+
+- **Dónde va.** En `frutales_solo.sumocfg`, no en el runner. La opción cambia la simulación, porque SUMO teletransporta al vehículo que choca, y el diseño técnico pide ejecutar el caso sin modificarlo.
+- **Qué no cambia.** R0 queda igual.
+- **Qué mostraban las validaciones anteriores.** Las de esta acta que dicen «sin colisiones» se midieron sin esta detección.
+
+Se descartó ajustar los parámetros de conducta en el cruce (`jm*` de SUMO): solo actúan en enlaces que ceden el paso. Además, la revisión uno por uno de los choques mostró que ninguno es un giro a la izquierda contra el tráfico de frente. Las causas encontradas son tres:
+
+1. Enlaces que cambian de carril en diagonal dentro del cruce, entre vehículos del mismo sentido. Es la observación tipo E de QA23 («cambio de carril después del cruce»), pendiente de decisión.
+2. Con el modelo de subcarriles, vehículos que van lado a lado en un mismo carril y toman tramos internos que se separan.
+3. La moto atascada.
+
+Como diagnóstico se corrió sin subcarriles: los choques casi desaparecen, y el que queda está en un enlace diagonal. El detalle está en el `LEEME.md` de la candidata.
+
+| Comprobación | Resultado |
+|---|---|
+| La opción se lee desde la configuración | mismos choques y teletransportes que pasándola por línea de comandos |
+| Recepción completa en un espacio temporal | corrida `succeeded`, con los hallazgos de colisiones y teletransportes; inventario y auditoría sin hallazgos nuevos |
