@@ -111,6 +111,32 @@ Los tiempos dados cuadran sin ajustes: los dos sentidos tienen el mismo ciclo y 
 | Frenados de emergencia en ese giro | desaparecen |
 | Recepción completa en un espacio temporal | corrida `succeeded`; el inventario cuenta todas las señales, sin hallazgos |
 
-Efecto que debe conocer el Product Owner: Javier Prado mejora y Los Frutales empeora mucho. Con el ciclo fijo, a Los Frutales le queda poco verde para la demanda supuesta de R0; antes el semáforo actuado alargaba sus verdes. Aparecen dos teletransportes por atasco y aumentan los vehículos que no llegan a entrar. Con los tiempos y aforos de campo de Los Frutales, esto puede cambiar.
+Efecto que debe conocer el Product Owner, con los tiempos provisionales de Los Frutales de esta primera versión (corregidos en la sección siguiente): Javier Prado mejora y Los Frutales empeora mucho. Con el ciclo fijo, a Los Frutales le queda poco verde para la demanda supuesta de R0; antes el semáforo actuado alargaba sus verdes. Aparecen dos teletransportes por atasco y aumentan los vehículos que no llegan a entrar. Con los tiempos y aforos de campo de Los Frutales, esto puede cambiar.
 
 Vacío encontrado en el código: la tabla de movimientos de F8 (QA23 y QA24) saltaba las conexiones internas y no mostraba las señales de la flecha. Por eso QA24 presentaba los giros a la izquierda como verdes desde la primera fase. El Product Owner autorizó corregirlo y quedó corregido; ver «Corrección: punto de espera dentro del cruce» en el acta de F8.
+
+## Tiempos de Los Frutales y velocidad (2026-10-26)
+
+El Product Owner dio los tiempos de las dos entradas de Los Frutales y decidió, hasta corroborarlo en campo:
+
+1. Las dos entradas empiezan en verde a la vez, en todos sus carriles, y desde el primer segundo se puede ir de frente, a la derecha y a la izquierda.
+2. Quien gira a la izquierda no cede el paso, como ocurre en Lima.
+3. La velocidad máxima de todas las avenidas es 50 km/h.
+4. Los 4 s en que los tiempos de Los Frutales no completan el ciclo de Javier Prado son un todo rojo.
+
+Las entradas menores quedan siempre en rojo, como propuso el equipo: no tienen tiempo propio en el ciclo dado ni demanda en la simulación.
+
+Ajuste del modelo: en el ámbar de oeste a este, el punto de espera del giro a la izquierda sigue en verde. Con ámbar, SUMO no hacía arrancar al vehículo que ya esperaba dentro del cruce, y quedaba atrapado en el camino de Los Frutales.
+
+| Comprobación | Resultado |
+|---|---|
+| Cambios en la red | solo la velocidad de los tramos que superaban 50 km/h y el programa; programa idéntico al archivo |
+| Recepción completa en un espacio temporal | corrida `succeeded`; entran todos los vehículos declarados |
+| Ceder o no ceder en el giro a la izquierda | mismos choques dentro del cruce en tres semillas: la decisión no empeora la seguridad |
+
+Efecto: Los Frutales deja de saturarse y Javier Prado pierde algo de lo ganado con la primera versión. Según ADR09, las cifras quedan en el `LEEME.md` de la candidata.
+
+Quedan dos observaciones para el Product Owner:
+
+- **Choques dentro del cruce.** La corrida base no activa la detección completa de choques dentro del cruce (`--collision.check-junctions`). Con ella activada aparecen entre 1 y 3 choques por corrida, que antes no se veían porque la red dejaba sin entrar a casi 300 vehículos.
+- **Una moto atascada.** En algunas semillas, una moto que gira a la izquierda queda detenida dentro del cruce, desplazada hacia un lado, y causa la mayoría de los teletransportes. Es un problema del modelo de subcarriles, no del semáforo.
