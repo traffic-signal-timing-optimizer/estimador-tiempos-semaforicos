@@ -163,3 +163,29 @@ Como diagnóstico se corrió sin subcarriles: los choques casi desaparecen, y el
 |---|---|
 | La opción se lee desde la configuración | mismos choques y teletransportes que pasándola por línea de comandos |
 | Recepción completa en un espacio temporal | corrida `succeeded`, con los hallazgos de colisiones y teletransportes; inventario y auditoría sin hallazgos nuevos |
+
+## Cada carril a su mismo carril (2026-10-27)
+
+Decisión del Product Owner sobre la observación tipo E de QA23 («cambio de carril después del cruce»). En su revisión anotó que en la realidad se puede llegar a cualquier carril de la salida después de cruzar. La red, en cambio, hacía ese cambio dentro del cruce, con enlaces en diagonal entre vehículos que tenían verde al mismo tiempo.
+
+Lo decidido: cada carril cruza a su mismo carril, y el cambio de carril se hace después, en la salida, donde SUMO respeta los espacios entre vehículos. Cambian 8 conexiones en tres accesos:
+
+- **Javier Prado de este a oeste.** Cada carril va a su mismo carril, incluido el del bus. Además, el carril 2 recupera su paso recto: no tenía ninguna conexión desde QA23.
+- **Los Frutales de sur a norte.** El carril 1 deja de abrirse hacia dos carriles de la salida.
+- **Los Frutales de norte a sur.** La derecha entra al carril más cercano de Javier Prado.
+
+Los giros a la izquierda y las entradas menores no cambian. El detalle está en el `LEEME.md` de la candidata.
+
+| Comprobación | Resultado |
+|---|---|
+| Cambios en la red | solo esas 8 conexiones; los movimientos que siguen conservan su secuencia de colores en las 9 fases, y el programa de la red es idéntico al archivo |
+| Choques dentro del cruce, tres semillas | ninguno, y sin frenados de emergencia |
+| Demoras por flujo | ninguno empeora; llegan todos los vehículos |
+| Recepción completa en un espacio temporal | corrida `succeeded`, sin hallazgo de colisiones |
+
+En R1, QA23 y QA24 tendrán 35 movimientos, más las 3 señales de la flecha.
+
+Quedan dos puntos para el Product Owner:
+
+- **La moto atascada sigue.** Causa pocos teletransportes por corrida y ningún choque. Se detiene sola, sin nada delante, al final del tramo interno del giro. Cambiar su alineación lateral la destraba, pero genera choques, así que no se aplicó.
+- **La salida norte de Los Frutales.** Su primer tramo mide menos de un metro, y su carril derecho solo lleva a una calle lateral. Quien sigue al norte desde ese carril tiene que cambiarse de carril sin espacio para hacerlo. Se probó dejar que ese carril también siga al norte, pero empeora: habilita un giro a la izquierda cuyos vehículos, mientras esperan, invaden el recto de al lado. No se aplicó.
