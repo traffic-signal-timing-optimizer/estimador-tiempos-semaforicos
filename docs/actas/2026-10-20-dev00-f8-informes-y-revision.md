@@ -115,3 +115,14 @@ Verificación:
 - Las 8 mutaciones aplicadas se detectan.
 - Con la candidata a R1, las planillas muestran los tres puntos de espera y Excel 16 los presenta como texto.
 - Quedan 460 pruebas que pasan y 1 que se salta de forma declarada.
+
+## Dónde se guardan las planillas completadas (2026-10-26)
+
+Al revisar lo avanzado antes de F10, la recepción `20261020T210623Z_be52433f` dejó de verificarse. Dentro estaban las dos planillas QA23 que completó el Product Owner, y una recepción no admite archivos de más. Esta acta no decía dónde guardar la planilla completada. Lo decidió el equipo, por encargo del Product Owner:
+
+- **Las planillas completadas van en `datos/revisiones/<recepción>/`**, fuera de la recepción, que no se modifica. `datos/` sigue ignorada por git.
+- Las dos planillas se movieron ahí sin cambios (misma huella SHA-256).
+- `hallazgos.md` lo indica junto a las instrucciones de QA23 y QA24.
+- El error de una recepción con archivos de más o de menos ahora dice cuáles son y dónde va la planilla.
+
+Las pruebas nuevas fallaron antes del cambio. Quedan 462 pruebas que pasan y 1 que se salta de forma declarada.

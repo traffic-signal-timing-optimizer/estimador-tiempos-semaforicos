@@ -257,6 +257,29 @@ def test_a_rewritten_base_run_manifest_is_detected_by_its_fingerprint(
     assert raised.value.code is ErrorCode.HASH_MISMATCH
 
 
+def test_an_extra_file_in_the_reception_is_named(workspace: Path, sumo_binary: Path) -> None:
+    # Una planilla completada guardada dentro de la recepción la invalida: el error dice cuál.
+    record = receive(workspace, sumo_binary)
+    folder = workspace / "derivados" / "recepcion" / record.reception_id
+    (folder / "revision_qa23_revisada.csv").write_text("x", encoding="utf-8")
+    with pytest.raises(DomainError) as raised:
+        read_reception(workspace, record.reception_id)
+    assert raised.value.code is ErrorCode.HASH_MISMATCH
+    assert "sobra revision_qa23_revisada.csv" in raised.value.message
+    assert f"revisiones/{record.reception_id}" in raised.value.message
+
+
+def test_a_missing_artifact_is_named(workspace: Path, sumo_binary: Path) -> None:
+    record = receive(workspace, sumo_binary)
+    path = workspace / "derivados" / "recepcion" / record.reception_id / "hallazgos.md"
+    os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+    path.unlink()
+    with pytest.raises(DomainError) as raised:
+        read_reception(workspace, record.reception_id)
+    assert raised.value.code is ErrorCode.HASH_MISMATCH
+    assert "falta hallazgos.md" in raised.value.message
+
+
 def test_a_reception_without_its_base_run_is_rejected(workspace: Path, sumo_binary: Path) -> None:
     record = receive(workspace, sumo_binary)
     remove_tree(workspace / record.base_run.path)

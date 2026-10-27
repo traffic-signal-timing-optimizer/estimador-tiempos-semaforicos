@@ -330,6 +330,10 @@ def findings_markdown(  # noqa: PLR0913  (todos son de solo palabra clave)
             "y la fecha. Compare con la red abierta en netedit (el editor de redes de SUMO) sobre",
             "una copia, nunca sobre la carpeta original, y sin guardar cambios.",
             "",
+            f"Guarde la planilla completada en `datos/revisiones/{reception_id}/`, no en esta",
+            "carpeta: una recepción no se modifica, y un archivo de más hace que deje de",
+            "verificarse.",
+            "",
         ]
     )
     return "\n".join(lines)

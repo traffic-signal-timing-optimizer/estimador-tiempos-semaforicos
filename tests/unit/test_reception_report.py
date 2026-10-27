@@ -237,3 +237,5 @@ def test_the_private_findings_list_every_finding(
     assert "ninguna clase de la demanda puede usar: 1 de 3 (M09)" in text
     assert "revision_qa23.csv" in text
     assert "netedit" in text  # la herramienta para revisar enlaces y fases
+    # La planilla completada va fuera de la recepción, que no se modifica.
+    assert "`datos/revisiones/R/`" in text

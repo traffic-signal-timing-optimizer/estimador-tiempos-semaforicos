@@ -245,10 +245,15 @@ def read_reception(workspace: Path, reception_id: str) -> ReceptionRecord:
     if record.reception_id != reception_id:
         raise DomainError(ErrorCode.HASH_MISMATCH, "el registro es de otra recepción", RECORD)
     present = {p.name for p in folder.iterdir()}
-    if present != {artifact.path for artifact in record.artifacts} | {RECORD}:
+    expected = {artifact.path for artifact in record.artifacts} | {RECORD}
+    if present != expected:
+        differences = [f"falta {name}" for name in sorted(expected - present)]
+        differences += [f"sobra {name}" for name in sorted(present - expected)]
         raise DomainError(
             ErrorCode.HASH_MISMATCH,
-            "la carpeta no tiene exactamente los artefactos del registro",
+            "la carpeta no tiene exactamente los artefactos del registro "
+            f"({', '.join(differences)}); una recepción no se modifica: las planillas "
+            f"completadas van en revisiones/{reception_id}/ del espacio de trabajo",
             reception_id,
         )
     for artifact in record.artifacts:
