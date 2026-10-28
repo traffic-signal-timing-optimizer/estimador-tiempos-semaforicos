@@ -16,10 +16,11 @@
 import csv
 import io
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 
 from semaforo.app.reception_models import BaseRunRecord, IncompleteRun
+from semaforo.caso.audit import DEFAULT_TYPE
 from semaforo.caso.audit_models import SimulationAudit
 from semaforo.caso.inventory_models import NetworkInventory
 from semaforo.caso.movements import Movement
@@ -75,12 +76,38 @@ def _csv(rows: Iterable[Sequence[str]]) -> bytes:
     return buffer.getvalue().encode("utf-8-sig")
 
 
-def _classes(classes: Sequence[str]) -> str:
-    return ", ".join(CLASS_NAMES.get(vclass, vclass) for vclass in classes) or "ninguna"
+def demand_types(audit: SimulationAudit) -> dict[str, list[str]]:
+    """Tipos de vehículo de la demanda por clase de SUMO, en orden alfabético."""
+    types: dict[str, set[str]] = {}
+    for item in audit.demand:
+        types.setdefault(item.vclass, set()).add(item.type_id)
+    return {vclass: sorted(names) for vclass, names in sorted(types.items())}
 
 
-def qa23_csv(movements: Sequence[Movement]) -> bytes:
-    """Planilla QA23: un movimiento por fila (carril de entrada y salida, giro y clases)."""
+def _classes(classes: Sequence[str], vehicle_types: Mapping[str, Sequence[str]]) -> str:
+    """Vehículos que pueden usar un movimiento: los tipos de la demanda o, si no hay, la clase.
+
+    Una clase puede agrupar varios tipos (autos y camionetas son ``passenger``): nombrar solo la
+    clase hacía creer que la planilla dejaba fuera a las camionetas. El tipo por defecto de SUMO
+    se muestra con el nombre de su clase.
+    """
+    labels: list[str] = []
+    for vclass in classes:
+        name = CLASS_NAMES.get(vclass, vclass)
+        types = [name if t == DEFAULT_TYPE else t for t in vehicle_types.get(vclass, ())]
+        labels.extend(dict.fromkeys(types or [name]))
+    return ", ".join(labels) or "ninguna"
+
+
+def qa23_csv(
+    movements: Sequence[Movement], vehicle_types: Mapping[str, Sequence[str]] | None = None
+) -> bytes:
+    """Planilla QA23: un movimiento por fila (carril de entrada y salida, giro y vehículos).
+
+    ``vehicle_types`` son los tipos de la demanda por clase (``demand_types``); sin ellos, la
+    columna nombra solo las clases.
+    """
+    types = vehicle_types or {}
     header = [
         "ID",
         "Semáforo",
@@ -91,7 +118,7 @@ def qa23_csv(movements: Sequence[Movement]) -> bytes:
         "Hacia (arista)",
         "Carril hacia",
         "Giro",
-        "Clases de la demanda que pueden usarlo",
+        "Vehículos de la demanda que pueden usarlo",
         *REVIEW_COLUMNS,
     ]
     rows = [
@@ -105,7 +132,7 @@ def qa23_csv(movements: Sequence[Movement]) -> bytes:
             _excel_text(movement.to_edge),
             str(movement.to_lane),
             movement.direction,
-            _classes(movement.classes),
+            _classes(movement.classes, types),
             "",
             "",
         ]

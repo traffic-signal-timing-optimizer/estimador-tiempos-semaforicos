@@ -31,6 +31,7 @@ from semaforo.app.reception_models import (
     ReceptionRecord,
 )
 from semaforo.app.reception_report import (
+    demand_types,
     find_machine_paths,
     findings_markdown,
     public_report,
@@ -158,7 +159,7 @@ def receive_case(  # noqa: PLR0913  (los opcionales son de solo palabra clave)
     if inventory is not None and movements is not None:
         files["inventory.json"] = _json(inventory)
         files["movements.json"] = _json(MovementTable(classes=classes, movements=movements))
-        files["revision_qa23.csv"] = qa23_csv(movements)
+        files["revision_qa23.csv"] = qa23_csv(movements, demand_types(audit))
         files["revision_qa24.csv"] = qa24_csv(inventory, movements, audit)
     files["hallazgos.md"] = findings_markdown(
         reception_id=reception_id,

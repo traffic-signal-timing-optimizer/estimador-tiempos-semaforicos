@@ -126,3 +126,23 @@ Al revisar lo avanzado antes de F10, la recepción `20261020T210623Z_be52433f` d
 - El error de una recepción con archivos de más o de menos ahora dice cuáles son y dónde va la planilla.
 
 Las pruebas nuevas fallaron antes del cambio. Quedan 462 pruebas que pasan y 1 que se salta de forma declarada.
+
+Aclaración (2026-10-27, revisión de todo lo hecho sobre R0): las planillas completadas salieron de la primera recepción, `20261020T210623Z_be52433f`, y no de `20261020T215129Z_be52433f`, que es la que indica el acta de F9. Las dos recepciones tienen la misma copia de R0 y los mismos 53 movimientos. Se comprobó, movimiento por movimiento, que las columnas que no llena el Product Owner coinciden con las de la segunda recepción; solo cambió el orden de las filas. La revisión vale para las dos.
+
+## Corrección: tipos de vehículo en QA23 (2026-10-27)
+
+En R0 el Product Owner marcó 17 filas de QA23 con «No solo pueden ser autos». La columna de clases nombraba la clase de SUMO: `passenger` se mostraba como «auto», aunque en la candidata a R1 esa clase la usan autos y camionetas, y `truck` agrupa los camiones ligeros y medianos. En R1 se habría repetido la misma observación.
+
+| Dónde | Cambio |
+|---|---|
+| QA23 | la columna pasa a llamarse «Vehículos de la demanda que pueden usarlo» y nombra los tipos de vehículo de la demanda (por ejemplo, `auto, camioneta, camion_ligero, camion_mediano, moto`); una clase sin tipos en la demanda se nombra por la clase, y el tipo por defecto de SUMO, por el nombre de su clase |
+| `reception_report.demand_types` | tipos de vehículo de la demanda por clase, tomados de la auditoría (F4) |
+
+`movements.json` no cambia: sigue guardando las clases.
+
+Verificación:
+
+- Las pruebas nuevas fallaron antes del cambio.
+- Las 2 mutaciones aplicadas se detectan.
+- Con la candidata a R1, en una recepción completa en un espacio temporal, la planilla nombra los seis tipos de la demanda.
+- Quedan 465 pruebas que pasan y 1 que se salta de forma declarada.

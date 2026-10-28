@@ -10,6 +10,7 @@ import pytest
 
 from semaforo.app.reception_models import BaseRunRecord, IncompleteRun
 from semaforo.app.reception_report import (
+    demand_types,
     find_machine_paths,
     findings_markdown,
     public_report,
@@ -88,6 +89,38 @@ def test_qa23_has_one_row_per_movement_and_room_for_the_review(
     assert table[1][-2:] == ["", ""]
     assert ["Revisado por:"] in table
     assert ["Fecha:"] in table
+
+
+def test_qa23_names_the_vehicle_types_of_the_demand(
+    demo: tuple[NetworkInventory, list[Movement], SimulationAudit],
+) -> None:
+    # Autos y camionetas son passenger: nombrar solo la clase («auto») ocultaba las camionetas.
+    movement = demo[1][0].model_copy(update={"classes": ["passenger", "truck", "motorcycle"]})
+    types = {
+        "passenger": ["auto", "camioneta"],
+        "truck": ["camion_ligero", "camion_mediano"],
+    }
+    table = rows(qa23_csv([movement], types))
+    assert table[0][9] == "Vehículos de la demanda que pueden usarlo"
+    # Una clase sin tipos en la demanda se nombra por la clase.
+    assert table[1][9] == "auto, camioneta, camion_ligero, camion_mediano, moto"
+
+
+def test_qa23_shows_the_sumo_default_type_by_its_class(
+    demo: tuple[NetworkInventory, list[Movement], SimulationAudit],
+) -> None:
+    movement = demo[1][0].model_copy(update={"classes": ["passenger", "bus"]})
+    types = {"passenger": ["DEFAULT_VEHTYPE", "auto"], "bus": ["bus_urbano"]}
+    assert rows(qa23_csv([movement], types))[1][9] == "auto, bus_urbano"
+    unusable = movement.model_copy(update={"classes": []})
+    assert rows(qa23_csv([unusable], types))[1][9] == "ninguna"
+
+
+def test_demand_types_groups_the_vehicle_types_by_class(
+    demo: tuple[NetworkInventory, list[Movement], SimulationAudit],
+) -> None:
+    # El fixture declara tres flujos: dos de tipo car (passenger) y uno de tipo bus.
+    assert demand_types(demo[2]) == {"bus": ["bus"], "passenger": ["car"]}
 
 
 @pytest.mark.parametrize(
