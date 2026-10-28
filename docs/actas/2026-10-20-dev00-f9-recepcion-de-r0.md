@@ -4,7 +4,7 @@
 - **Fecha:** 2026-10-20
 - **Autorización:** el Product Owner autorizó F9 («ejecuta F9»).
 - **Código y pruebas:** F9 ejecuta las herramientas de F2 a F8 con la simulación real de R0. La revisión posterior corrigió el código en `dcf4b77` y `46eb6ba` (ver «Revisión posterior»).
-- **Recepción que revisa el Product Owner (QA23 y QA24):** `20261020T215129Z_be52433f`, generada con las planillas corregidas.
+- **Recepción que revisa el Product Owner (QA23 y QA24):** `20261020T215129Z_be52433f`, generada con las planillas corregidas. (El Product Owner completó la planilla de la primera recepción, que es equivalente: ver «Dónde se guardan las planillas completadas» en el acta de F8.)
 - **Siguiente fase:** F10 (recepción oficial R1, después de los cambios del Product Owner), a la espera de su aviso «SUMO listo» y de su autorización expresa.
 
 ## Qué se hizo

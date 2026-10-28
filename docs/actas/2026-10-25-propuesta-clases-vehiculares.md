@@ -179,13 +179,53 @@ Los giros a la izquierda y las entradas menores no cambian. El detalle está en 
 | Comprobación | Resultado |
 |---|---|
 | Cambios en la red | solo esas 8 conexiones; los movimientos que siguen conservan su secuencia de colores en las 9 fases, y el programa de la red es idéntico al archivo |
-| Choques dentro del cruce, tres semillas | ninguno, y sin frenados de emergencia |
+| Choques dentro del cruce, tres semillas | ninguno, y sin frenados de emergencia (con más semillas sí hay: ver «Revisión del 2026-10-27») |
 | Demoras por flujo | ninguno empeora; llegan todos los vehículos |
 | Recepción completa en un espacio temporal | corrida `succeeded`, sin hallazgo de colisiones |
 
-En R1, QA23 y QA24 tendrán 35 movimientos, más las 3 señales de la flecha.
+En R1, QA23 y QA24 tendrán 35 movimientos, más las 3 señales de la flecha. (Después, 23: ver «Revisión del 2026-10-27».)
 
 Quedan dos puntos para el Product Owner:
 
 - **La moto atascada sigue.** Causa pocos teletransportes por corrida y ningún choque. Se detiene sola, sin nada delante, al final del tramo interno del giro. Cambiar su alineación lateral la destraba, pero genera choques, así que no se aplicó.
 - **La salida norte de Los Frutales.** Su primer tramo mide menos de un metro, y su carril derecho solo lleva a una calle lateral. Quien sigue al norte desde ese carril tiene que cambiarse de carril sin espacio para hacerlo. Se probó dejar que ese carril también siga al norte, pero empeora: habilita un giro a la izquierda cuyos vehículos, mientras esperan, invaden el recto de al lado. No se aplicó.
+
+## Revisión del 2026-10-27
+
+Antes de R1, el Product Owner pidió revisar todo lo hecho sobre R0 y autorizó aplicar las correcciones encontradas. El código de R0, sus recepciones y sus pruebas no tenían errores; los hallazgos estaban en la documentación y en la candidata a R1. El detalle está en el `LEEME.md` de la candidata.
+
+### Decisiones del Product Owner
+
+- **La salida norte de Los Frutales.** En la realidad, su carril derecho sigue de frente hacia el norte. La red no lo modela así (ver la sección anterior). Se repitió la prueba de dejarlo seguir: 6, 5 y 5 choques con las semillas 2026, 1 y 2, todos del recto del carril 2 de oeste a este contra el que gira a la izquierda desde el carril 1. La explicación de la sección anterior se confirma. El Product Owner aceptó esta diferencia para R1.
+- **La moto atascada.** Aceptada como limitación de R1. No causa choques.
+
+### Observación tipo D de QA23: un solo destino por entrada menor
+
+En R0 el Product Owner anotó que desde cada una de las tres entradas menores solo se puede ir a una salida, a cualquiera de sus carriles, y solo en auto. La red les daba entre 4 y 5 salidas.
+
+- Se quitaron 11 giros de esas entradas. Queda uno por entrada, hacia el carril más cercano de su salida, y el cambio de carril se hace después, como en «Cada carril a su mismo carril».
+- Se quitó también el giro de Los Frutales de norte a sur hacia la vía de servicio `758735434#0` (M49 en R0). No está entre las salidas que enumeró el Product Owner, y los demás giros hacia esa vía ya se habían quitado.
+- **«Solo autos» no se aplicó.** Cambiar o ampliar el permiso de esos carriles hace que `netconvert` recalcule la forma del cruce y el largo de los tramos que llegan a él, y la simulación empeora (33 teletransportes en una semilla). Fijar la forma del cruce fue peor. Como esas entradas no tienen demanda, el permiso no cambia la simulación.
+- **Girar desde cualquier carril** (notas de QA23 en Los Frutales): cada giro se mantiene desde el carril de su lado. Girar desde el otro carril cruzaría en diagonal al que sigue recto.
+
+| Comprobación | Resultado |
+|---|---|
+| Cambios en la red | solo esas 12 conexiones; carriles, largos, permisos y demás conexiones iguales; los 23 movimientos que siguen conservan su secuencia de colores, y el programa de la red es idéntico al archivo |
+| Choques, 13 semillas | 16, unos 1,2 por corrida (la red anterior, 12 con las mismas semillas); la diferencia es del orden de la variación entre semillas |
+| Demoras por flujo, 3 semillas | cambian unos pocos segundos, en los dos sentidos; llegan todos los vehículos |
+| Recepción completa en un espacio temporal | corrida `succeeded`; QA23 con 23 movimientos y los tipos de vehículo de la demanda |
+
+En R1, QA23 y QA24 tendrán 23 movimientos (M01 a M23), más las 3 señales de la flecha. Los giros a la izquierda de oeste a este pasan a ser M14, M16 y M17.
+
+### Corrección: los choques no desaparecieron
+
+La sección «Cada carril a su mismo carril» registró 0 choques con tres semillas. Con 10 semillas más, esa red tiene 12 choques en 13 corridas, unos 0,9 por corrida. El cambio sí eliminó los choques de los enlaces en diagonal (la causa 1 de «Detección de choques dentro del cruce»). Los que quedan son casi todos de la causa 2: en el carril 1 de Los Frutales de norte a sur, el que sigue recto y el que gira a la izquierda van lado a lado con los subcarriles y se rozan al separarse.
+
+### Otras correcciones
+
+- QA23 nombra los tipos de vehículo de la demanda (por ejemplo, «auto, camioneta») y no solo la clase de SUMO. En R0 decía «auto» también para las camionetas. Ver el acta de F8.
+- Las planillas completadas salieron de la primera recepción de R0, que es equivalente a la que indica el acta de F9. Ver el acta de F8.
+
+### Pendiente antes de R1
+
+Los choques en Los Frutales de norte a sur (unos 1,2 por corrida; la referencia de campo es prácticamente 0) no son una limitación aceptada. El Product Owner decide cómo tratarlos.
