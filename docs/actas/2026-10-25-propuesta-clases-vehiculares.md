@@ -236,19 +236,19 @@ Los choques en Los Frutales de norte a sur (unos 1,2 por corrida; la referencia 
 
 **Decisiones del Product Owner.**
 - En la realidad, el carril 1 se usa para seguir recto y para girar a la izquierda; no se separan sus usos.
-- Opción A: nadie cambia de carril dentro del cruce principal, salvo los vehículos de emergencia. Se aplica a los 12 giros cuyo tramo interno tiene más de un carril (`cambios_cruce/sin_cambio_de_carril.con.xml` de la candidata). Las motos conservan su comportamiento.
+- Opción A: nadie cambia de carril dentro del cruce principal, salvo los vehículos de emergencia. Se aplica a los 12 giros cuyo tramo interno tiene más de un carril (`cambios_cruce/sin_cambio_de_carril.con.xml` de la candidata). Las motos conservan su comportamiento: en la semilla 2026, circulan entre carriles el 11 % del tiempo antes y el 10 % con esta opción.
 
-**Opción no elegida (B).** Además de A, centrar la moto en su carril. Elimina los atascos de la moto, pero las motos casi dejan de ir entre carriles (de 11 % a 0 % del tiempo) y deja 0,19 choques por corrida, casi todos entre motos lado a lado.
+**Opción no elegida (B).** Además de A, centrar la moto en su carril. Elimina los atascos de la moto, pero las motos casi dejan de ir entre carriles (de 11 % a 0 % del tiempo, en la semilla 2026) y deja 0,19 choques por corrida, todos entre motos lado a lado.
 
 | Comprobación | Resultado |
 |---|---|
 | Red | solo cambia el permiso de cambio de carril de esos 12 giros; la forma del cruce, los carriles, las conexiones y el semáforo no cambian; la red reconstruida es idéntica a la probada |
-| Choques, 26 semillas (2026, 1 a 25) | 2 (0,08 por corrida), ninguno en Los Frutales de norte a sur; la red anterior, 32 (1,23 por corrida) |
-| Atascos, 26 semillas | 51 (22 de la moto); la red anterior, 78 (22 de la moto). En 4 corridas el atasco de la moto se propaga, con entre 5 y 7 teletransportes |
+| Choques, 26 semillas (2026, 1 a 25) | 2 (0,08 por corrida): uno en otro cruce de Javier Prado y otro en el giro a la izquierda de Los Frutales de norte a sur, contra un camión que gira a la izquierda de oeste a este; la red anterior, 32 (1,23 por corrida) |
+| Atascos, 26 semillas | 51 (22 de la moto); la red anterior, 78 (22 de la moto). En 13 de 26 corridas hay además atascos de otros vehículos (9 con la red anterior); no se verificó que la moto los cause |
 | Frenados de emergencia, 26 semillas | 8; la red anterior, 14 |
 | Pérdida de tiempo media por flujo | baja en todos, entre 0,2 y 6,4 s, salvo la izquierda de Javier Prado de oeste a este (+0,4 s) |
 | Recepción completa en un espacio temporal | corrida `succeeded`, 23 movimientos, 7 teletransportes y 0 colisiones |
 
-Se probaron y descartaron: ajustar la conducta de los autos (cuatro parámetros), cambiar la resolución lateral, prohibir el cambio de carril solo en Los Frutales de norte a sur (el atasco de la moto se propagaba a todo el cruce en 2 de 13 semillas) y ubicar la moto del lado de su giro. El detalle está en el `LEEME.md` de la candidata.
+Se probaron y descartaron: ajustar la conducta de los autos (cuatro parámetros), cambiar la resolución lateral, prohibir el cambio de carril solo en Los Frutales de norte a sur (en 2 de 13 semillas hubo 40 y 32 teletransportes por atasco) y ubicar la moto del lado de su giro. El detalle está en el `LEEME.md` de la candidata.
 
-**Supuesto por confirmar.** La opción A supone que en la realidad tampoco se cambia de carril dentro del cruce.
+**Confirmado por el Product Owner (2026-10-27).** En la realidad, los vehículos no cambian de carril dentro del cruce.
