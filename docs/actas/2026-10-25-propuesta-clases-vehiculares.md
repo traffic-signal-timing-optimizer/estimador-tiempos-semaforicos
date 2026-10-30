@@ -244,7 +244,7 @@ Los choques en Los Frutales de norte a sur (unos 1,2 por corrida; la referencia 
 |---|---|
 | Red | solo cambia el permiso de cambio de carril de esos 12 giros; la forma del cruce, los carriles, las conexiones y el semáforo no cambian; la red reconstruida es idéntica a la probada |
 | Choques, 26 semillas (2026, 1 a 25) | 2 (0,08 por corrida): uno en otro cruce de Javier Prado y otro en el giro a la izquierda de Los Frutales de norte a sur, contra un camión que gira a la izquierda de oeste a este; la red anterior, 32 (1,23 por corrida) |
-| Atascos, 26 semillas | 51 (22 de la moto); la red anterior, 78 (22 de la moto). En 13 de 26 corridas hay además atascos de otros vehículos (9 con la red anterior); no se verificó que la moto los cause |
+| Atascos, 26 semillas | 51 (22 de la moto); la red anterior, 78 (22 de la moto). En 13 de 26 corridas hay además atascos de otros vehículos (9 con la red anterior); no se verificó que la moto los cause (verificado el 2026-10-29: ver «Atascos causados por la moto detenida») |
 | Frenados de emergencia, 26 semillas | 8; la red anterior, 14 |
 | Pérdida de tiempo media por flujo | baja en todos, entre 0,2 y 6,4 s, salvo la izquierda de Javier Prado de oeste a este (+0,4 s) |
 | Recepción completa en un espacio temporal | corrida `succeeded`, 23 movimientos, 7 teletransportes y 0 colisiones |
@@ -252,3 +252,22 @@ Los choques en Los Frutales de norte a sur (unos 1,2 por corrida; la referencia 
 Se probaron y descartaron: ajustar la conducta de los autos (cuatro parámetros), cambiar la resolución lateral, prohibir el cambio de carril solo en Los Frutales de norte a sur (en 2 de 13 semillas hubo 40 y 32 teletransportes por atasco) y ubicar la moto del lado de su giro. El detalle está en el `LEEME.md` de la candidata.
 
 **Confirmado por el Product Owner (2026-10-27).** En la realidad, los vehículos no cambian de carril dentro del cruce.
+
+## Atascos causados por la moto detenida (2026-10-29)
+
+El Product Owner pidió investigar los atascos de vehículos distintos de la moto (13 de 26 corridas). Todo se probó fuera de la candidata, que no cambió.
+
+**Causa.** La moto que gira a la izquierda de Javier Prado de oeste a este llega pegada al borde de su carril, a 1,5 m del centro, porque su alineación lateral es libre (`latAlignment="arbitrary"`). Se detiene al final del tramo interno del giro, sin nada delante ni rivales, hasta que SUMO la teletransporta a los 300 s. Si se la mueve 1 m hacia el centro con TraCI, sigue su viaje al instante. Mientras está detenida, se forman colas que terminan en atascos de autos y camionetas.
+
+| Prueba (26 semillas, salvo donde se indica) | Atascos | Choques |
+|---|---|---|
+| Candidata | 51: 22 de esta moto, 1 de otra moto, 28 de otros vehículos | 2 |
+| Sin motos (13 semillas) | 0 | 0 |
+| Motos cambiadas por autos, mismo volumen | 0 | 0 |
+| Moto centrada | 0 | 5 |
+
+En las 13 corridas con atascos de otros vehículos, antes hay un atasco de esta moto (el siguiente llega entre 30 y 105 s después). La opción A no causa la moto detenida. Sin la moto detenida (moto centrada), la pérdida de tiempo media baja hasta 19,3 s (Los Frutales de norte a sur, a la izquierda).
+
+Se probaron y descartaron: alargar el primer tramo de la salida norte de Los Frutales (64 y 146 atascos), tres ajustes de la conducta lateral de la moto sin centrarla (sin ningún efecto) y más disciplina de carril para la moto (44 atascos contra 17 en 13 semillas). Centrar la moto ya se había descartado el 2026-10-27. El detalle está en el `LEEME.md` de la candidata.
+
+**Decisión del Product Owner (2026-10-29).** Se acepta como limitación de R1: la moto detenida provoca atascos de otros vehículos en 13 de 26 corridas y aumenta la pérdida de tiempo de varios flujos.
