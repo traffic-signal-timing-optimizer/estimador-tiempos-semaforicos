@@ -39,6 +39,8 @@ __all__ = [
     "Range",
     "Slot",
     "State",
+    "cap_issues",
+    "omitted_issue",
     "parse_case",
 ]
 
@@ -234,6 +236,25 @@ def _message(error_type: str, context: Mapping[str, Any], fallback: str) -> str:
         return fallback
 
 
+def omitted_issue(count: int, rule_id: str) -> CaseIssue:
+    """Último problema de una lista recortada: dice cuántos no se muestran."""
+    noun = "problema" if count == 1 else "problemas"
+    return CaseIssue(rule_id, None, f"y {count} {noun} más sin mostrar")
+
+
+def cap_issues(issues: Sequence[CaseIssue]) -> list[CaseIssue]:
+    """Los primeros ``MAX_ISSUES`` problemas y, si hay más, uno final que cuenta los omitidos.
+
+    El problema final lleva la regla del primero omitido.
+    """
+    if len(issues) <= MAX_ISSUES:
+        return list(issues)
+    return [
+        *issues[:MAX_ISSUES],
+        omitted_issue(len(issues) - MAX_ISSUES, issues[MAX_ISSUES].rule_id),
+    ]
+
+
 def issues_of(error: ValidationError) -> list[CaseIssue]:
     """Problemas de un ``ValidationError``, con regla, campo y motivo en español.
 
@@ -246,14 +267,13 @@ def issues_of(error: ValidationError) -> list[CaseIssue]:
             _field_path(item["loc"]),
             _message(item["type"], item.get("ctx") or {}, item["msg"]),
         )
-        for item in found[:MAX_ISSUES]
+        for item in found[: MAX_ISSUES + 1]
     ]
     if len(found) > MAX_ISSUES:
-        issues.append(
-            CaseIssue(
-                STRUCTURE_RULE, None, f"y {len(found) - MAX_ISSUES} problemas más sin mostrar"
-            )
-        )
+        return [
+            *issues[:MAX_ISSUES],
+            omitted_issue(len(found) - MAX_ISSUES, issues[MAX_ISSUES].rule_id),
+        ]
     return issues
 
 

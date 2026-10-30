@@ -25,8 +25,8 @@ from semaforo.dominio.case import (
     Case,
     CaseInvalidError,
     CaseIssue,
-    parse_case,
 )
+from semaforo.dominio.case_rules import accept_case
 
 __all__ = ["MAX_CASE_BYTES", "read_case"]
 
@@ -109,9 +109,9 @@ def read_case(path: Path) -> Case:
         CasoError: PATH_NOT_ALLOWED si la ruta es un enlace o una unión; INPUT_SCHEMA si no existe,
             no es un archivo o no se puede leer.
         CaseInvalidError: si el archivo supera ``MAX_CASE_BYTES`` (CASE-S04), no es JSON o UTF-8
-            válido, o no cumple el contrato (CASE-S01 a S03).
+            válido, no cumple el contrato (CASE-S01 a S03) o es incoherente (CASE-C01 a C13).
     """
     content = _read_bytes(path)
     if len(content) > MAX_CASE_BYTES:
         raise _issue(f"el archivo pesa más de {MAX_CASE_BYTES} bytes", SIZE_RULE)
-    return parse_case(_parse_json(content))
+    return accept_case(_parse_json(content))

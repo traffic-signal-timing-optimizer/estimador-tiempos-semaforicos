@@ -331,7 +331,7 @@ def test_a_flood_of_problems_is_capped() -> None:
     issues = issues_of(data)
     assert len(issues) == MAX_ISSUES + 1
     assert issues[-1].field is None
-    assert issues[-1].message.endswith("problemas más sin mostrar")
+    assert issues[-1].message.endswith("más sin mostrar")
 
 
 @pytest.mark.parametrize(
@@ -344,7 +344,7 @@ def test_the_cap_is_exact(extra: int, listed: int, summary: bool) -> None:
     assert len(issues) == listed
     assert (issues[-1].field is None) is summary
     if summary:
-        assert issues[-1].message == "y 1 problemas más sin mostrar"
+        assert issues[-1].message == "y 1 problema más sin mostrar"
 
 
 def test_an_error_needs_at_least_one_problem() -> None:

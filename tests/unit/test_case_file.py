@@ -182,3 +182,10 @@ def test_the_contract_problems_of_the_content_are_listed(tmp_path: Path) -> None
         ("CASE-S03", "case_version"),
         ("CASE-S01", "slots"),
     }
+
+
+def test_the_consistency_rules_are_applied_to_the_file(tmp_path: Path) -> None:
+    data = json.loads(fixture_text())
+    data["slots"][2]["id"] = "s1"
+    error = invalid(write(tmp_path, json.dumps(data)))
+    assert [(i.rule_id, i.field) for i in error.issues] == [("CASE-C01", "slots[2].id")]
