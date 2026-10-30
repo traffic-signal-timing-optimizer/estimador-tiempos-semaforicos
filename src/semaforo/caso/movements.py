@@ -10,9 +10,9 @@ from typing import Literal
 
 from pydantic import Field
 
-from semaforo.caso.base_model import FrozenModel
 from semaforo.caso.permissions import permits
 from semaforo.caso.xml_input import integer, parse_root, required
+from semaforo.dominio.base_model import FrozenModel
 
 MAX_NET_BYTES = 64 * 1024 * 1024
 # Códigos de giro de SUMO (atributo dir de <connection>).

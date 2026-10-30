@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from semaforo.caso.base_model import FrozenModel
+from semaforo.dominio.base_model import FrozenModel
 from semaforo.simulacion.summary import SimulationSummary
 from semaforo.trazabilidad.manifest import Artifact
 

@@ -21,15 +21,13 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from semaforo.app.comparison import compare_receptions
+from semaforo.app.exit_codes import INTERNAL_ERROR_EXIT, exit_code_for
 from semaforo.app.reception import (
     DomainError,
-    exit_code_for,
     publish_public_report,
     receive_case,
 )
 from semaforo.cli.doctor import configure_doctor, run_doctor, summary
-
-INTERNAL_ERROR_EXIT = 1
 
 
 def build_parser() -> argparse.ArgumentParser:

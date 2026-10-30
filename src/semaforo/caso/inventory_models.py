@@ -8,7 +8,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from semaforo.caso.base_model import FrozenModel
+from semaforo.dominio.base_model import FrozenModel
 
 FindingCode = Literal[
     "PHASE_DURATION_BELOW_MIN",

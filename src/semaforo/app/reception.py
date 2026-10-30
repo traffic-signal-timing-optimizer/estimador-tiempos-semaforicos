@@ -24,6 +24,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ValidationError
 
+from semaforo.app.exit_codes import INTERNAL_ERROR_EXIT, exit_code_for
 from semaforo.app.reception_models import (
     BaseRunRecord,
     IncompleteRun,
@@ -54,7 +55,6 @@ __all__ = [
     "DomainError",
     "IncompleteRun",
     "ReceptionRecord",
-    "exit_code_for",
     "publish_public_report",
     "read_reception",
     "receive_case",
@@ -67,26 +67,6 @@ RECORD = "reception.json"
 PUBLIC_REPORT = "informe_publico.md"
 RECEPTION_ID_PATTERN = re.compile(r"\d{8}T\d{6}Z_[a-f0-9]{8}")
 MAX_RECORD_BYTES = 16 * 1024 * 1024
-INTERNAL_ERROR_EXIT = 1
-# Diseño técnico, «Errores y códigos de salida».
-EXIT_CODES: dict[ErrorCode, int] = {
-    ErrorCode.INPUT_SCHEMA: 2,
-    ErrorCode.DEPENDENCY_MISSING: 3,
-    ErrorCode.SIM_FAILED: 4,
-    ErrorCode.SIM_TIMEOUT: 4,
-    ErrorCode.OUTPUT_INVALID: 4,
-    ErrorCode.HASH_MISMATCH: 5,
-    ErrorCode.PATH_NOT_ALLOWED: 5,
-    ErrorCode.RUN_EXISTS: 5,
-}
-
-
-def exit_code_for(code: ErrorCode | str) -> int:
-    """Código de salida de la CLI para un código de error; 1 si no se reconoce."""
-    try:
-        return EXIT_CODES[ErrorCode(code)]
-    except (ValueError, KeyError):
-        return INTERNAL_ERROR_EXIT
 
 
 def receive_case(  # noqa: PLR0913  (los opcionales son de solo palabra clave)

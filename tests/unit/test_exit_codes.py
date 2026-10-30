@@ -2,7 +2,7 @@
 
 import pytest
 
-from semaforo.app.reception import exit_code_for
+from semaforo.app.exit_codes import exit_code_for
 from semaforo.dominio.errors import ErrorCode
 
 # Diseño técnico, «Errores y códigos de salida»: 2 sintaxis o archivo/esquema inválido;

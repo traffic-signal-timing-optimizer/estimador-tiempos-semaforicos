@@ -1,4 +1,4 @@
-"""Base común de los modelos de datos de caso."""
+"""Base común de los modelos de datos del proyecto."""
 
 from pydantic import BaseModel, ConfigDict
 

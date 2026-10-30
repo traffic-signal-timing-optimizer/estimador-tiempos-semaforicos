@@ -9,7 +9,7 @@ from typing import Literal, Self
 
 from pydantic import Field, field_validator, model_validator
 
-from semaforo.caso.base_model import FrozenModel
+from semaforo.dominio.base_model import FrozenModel
 from semaforo.trazabilidad.ids import content_id
 from semaforo.trazabilidad.paths import check_relative_path
 

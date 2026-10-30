@@ -4,7 +4,7 @@ from typing import Literal, Self
 
 from pydantic import model_validator
 
-from semaforo.caso.base_model import FrozenModel
+from semaforo.dominio.base_model import FrozenModel
 
 CheckStatus = Literal["ok", "warning", "error"]
 DoctorStatus = Literal["ok", "warnings", "failed"]

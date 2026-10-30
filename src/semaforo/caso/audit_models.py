@@ -8,7 +8,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from semaforo.caso.base_model import FrozenModel
+from semaforo.dominio.base_model import FrozenModel
 
 AuditCode = Literal[
     "INPUT_NOT_AVAILABLE",

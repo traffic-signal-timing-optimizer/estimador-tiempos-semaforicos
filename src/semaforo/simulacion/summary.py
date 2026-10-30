@@ -9,7 +9,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from semaforo.caso.base_model import FrozenModel
+from semaforo.dominio.base_model import FrozenModel
 
 FindingCode = Literal[
     "LOADED_BELOW_DECLARED",

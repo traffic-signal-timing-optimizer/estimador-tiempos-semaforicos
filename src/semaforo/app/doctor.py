@@ -21,7 +21,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from semaforo.app.doctor_models import Check, DoctorReport, DoctorStatus
-from semaforo.app.reception import exit_code_for
+from semaforo.app.exit_codes import exit_code_for
 from semaforo.dominio.errors import ErrorCode
 
 REQUIRED_PYTHON = (3, 12)
