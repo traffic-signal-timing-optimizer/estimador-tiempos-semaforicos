@@ -4,11 +4,14 @@ Solo traduce argumentos y resultados; la lógica vive en ``app`` (ADR01). La sal
 siempre un JSON: quien la consuma debe leer su estado, no solo el código de salida (diseño
 técnico, «Errores y códigos de salida»). La salida de error lleva un resumen para la persona.
 
-Comandos de ``case``:
+Comandos:
 
-- ``receive``: recibe una simulación (copia, inventario, auditoría, corrida base y registro).
-- ``publish-report``: copia el informe público de una recepción verificada a ``docs/recepcion``.
-- ``compare``: muestra qué cambió entre dos recepciones.
+- ``doctor``: diagnóstico del entorno (versiones, permisos y capacidad) para una carpeta de
+  trabajo (DEV01).
+- ``case receive``: recibe una simulación (copia, inventario, auditoría, corrida base y registro).
+- ``case publish-report``: copia el informe público de una recepción verificada a
+  ``docs/recepcion``.
+- ``case compare``: muestra qué cambió entre dos recepciones.
 """
 
 import argparse
@@ -24,6 +27,7 @@ from semaforo.app.reception import (
     publish_public_report,
     receive_case,
 )
+from semaforo.cli.doctor import configure_doctor, run_doctor, summary
 
 INTERNAL_ERROR_EXIT = 1
 
@@ -32,6 +36,10 @@ def build_parser() -> argparse.ArgumentParser:
     """Analizador de argumentos de ``python -m semaforo``."""
     parser = argparse.ArgumentParser(prog="python -m semaforo")
     groups = parser.add_subparsers(dest="group", required=True)
+    doctor = groups.add_parser(
+        "doctor", help="diagnóstico del entorno: versiones, permisos y capacidad (DEV01)"
+    )
+    configure_doctor(doctor)
     case = groups.add_parser("case", help="operaciones sobre el caso")
     actions = case.add_subparsers(dest="action", required=True)
     receive = actions.add_parser(
@@ -58,7 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
     compare = actions.add_parser("compare", help="qué cambió entre dos recepciones")
     compare.add_argument("--before", required=True, help="recepción anterior")
     compare.add_argument("--after", required=True, help="recepción posterior")
-    for command in (receive, publish, compare):
+    for command in (doctor, receive, publish, compare):
         command.add_argument(
             "--workspace",
             type=Path,
@@ -89,6 +97,12 @@ def _error(code: str, message: str, field: str | None) -> str:
 
 def _run(arguments: argparse.Namespace) -> int:
     workspace = Path(arguments.workspace)
+    if arguments.group == "doctor":
+        sumo = None if arguments.sumo_bin is None else Path(arguments.sumo_bin)
+        report = run_doctor(workspace, sumo)
+        _emit(report.model_dump_json(indent=2))
+        _say(summary(report))
+        return report.exit_code
     if arguments.action == "receive":
         record = receive_case(
             Path(arguments.source),
