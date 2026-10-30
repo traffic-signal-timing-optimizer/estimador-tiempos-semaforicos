@@ -16,6 +16,8 @@ Reglas de estructura (acta ``2026-10-29-dev02-f0-decisiones.md``):
 Los problemas se informan todos juntos, cada uno con su regla, su campo y su motivo.
 """
 
+import hashlib
+import json
 import re
 import unicodedata
 from collections.abc import Mapping, Sequence
@@ -39,6 +41,7 @@ __all__ = [
     "Range",
     "Slot",
     "State",
+    "canonical_sha256",
     "cap_issues",
     "omitted_issue",
     "parse_case",
@@ -287,3 +290,19 @@ def parse_case(data: object) -> Case:
         return Case.model_validate(data)
     except ValidationError as error:
         raise CaseInvalidError(issues_of(error)) from None
+
+
+def canonical_sha256(case: Case) -> str:
+    """Huella SHA-256 del contenido del caso en JSON canónico (claves ordenadas, sin espacios).
+
+    Dos archivos con el mismo contenido dan la misma huella aunque cambien los espacios, los saltos
+    de línea o el orden de las claves; cualquier cambio de valor la cambia.
+    """
+    canonical = json.dumps(
+        case.model_dump(mode="json"),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
