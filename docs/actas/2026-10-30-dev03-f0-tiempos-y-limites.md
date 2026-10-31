@@ -73,8 +73,23 @@ Se armó un caso de prueba con estos tramos, grupos y estados (los 26 enlaces de
 - **Más rango, más simulaciones.** Rangos amplios dan más espacio para mejorar, pero aumentan el tiempo de la búsqueda de referencias (DEV14). Rangos estrechos hacen lo contrario. Se eligió un punto medio.
 - **No es una verificación de campo.** Los límites deben revisarse con el especialista de tránsito antes de las comparaciones del caso, como pide el diseño técnico para Webster y el plan vigente.
 
-## Pendiente de F0
+## Decisiones de cierre de F0 (aprobadas por el Product Owner, 2026-10-30)
 
-- Formato del programa derivado y dónde se guarda, sin tocar la red original.
-- Política ante varios semáforos: el cruce actual tiene uno; si aparece otro, se bloquea con un error claro, como pide el diseño técnico.
-- Se presentarán al Product Owner en lenguaje sencillo antes de F1.
+**Dónde se guarda el programa derivado.** Dentro de `datos/derivados/programas/`, que ya prevé el diseño técnico (sección «Estructura de repositorio»). Cada corrida crea una carpeta nueva, con el mismo patrón que `datos/derivados/recepcion/`:
+
+```
+datos/derivados/programas/<identificador-del-caso>/<AAAAMMDDTHHMMSSZ>_<huella-corta>/
+    programa.tll.xml     programa de semáforo generado
+    tramos.json          duraciones y límites usados
+    manifiesto.json      huellas (SHA-256) del original y del derivado, versión de la herramienta
+```
+
+- El **identificador del caso** viene de la ficha del caso (DEV02), no del nombre del cruce. Así cada intersección nueva tiene su propia carpeta sin cambiar el código.
+- La **carpeta original nunca se escribe**: antes y después de generar, se compara su huella con la del manifiesto aprobado.
+- Una carpeta ya publicada no se modifica; una nueva generación crea otra carpeta.
+
+**Nombres dentro del código.** Los nombres de módulos, funciones y variables usan términos generales (`programa_derivado`, `tramo`, `grupo_verde`). Ni el código ni las plantillas llevan nombres de calles, del cruce ni del identificador del semáforo. Esos datos viven solo en la ficha del caso y en los archivos de entrada.
+
+**Varios semáforos.** La herramienta trabaja con un solo semáforo por caso. Si la red tiene más de uno, se detiene con un error claro que indica cuántos encontró, sin generar nada. Esto sigue el diseño técnico, que pide bloquear el caso incompatible hasta comprobar cómo se coordinan los semáforos.
+
+**Límites de F0.** Sin cambios: verdes variables, ámbares y todo rojo fijos, ciclo de 120 a 240 s.
