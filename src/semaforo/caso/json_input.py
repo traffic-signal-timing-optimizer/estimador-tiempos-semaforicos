@@ -12,7 +12,7 @@ from typing import Any, NoReturn
 
 from semaforo.caso.errors import CasoError, ErrorCode
 
-__all__ = ["MAX_JSON_BYTES", "read_json"]
+__all__ = ["MAX_JSON_BYTES", "read_json", "read_text_file"]
 
 MAX_JSON_BYTES = 4 * 1024 * 1024
 UTF8_BOM = b"\xef\xbb\xbf"
@@ -39,12 +39,12 @@ def _invalid(message: str, field: str) -> CasoError:
     return CasoError(ErrorCode.INPUT_SCHEMA, message, field)
 
 
-def read_json(path: Path, what: str, max_bytes: int = MAX_JSON_BYTES) -> object:
-    """Contenido JSON de ``path``. ``what`` nombra el archivo en los mensajes (``rutas``…).
+def read_text_file(path: Path, what: str, max_bytes: int) -> str:
+    """Texto UTF-8 de ``path`` (sin BOM). ``what`` nombra el archivo en los mensajes.
 
     Raises:
         CasoError: PATH_NOT_ALLOWED si es un enlace o una unión; INPUT_SCHEMA si no existe, no es
-            un archivo, supera ``max_bytes``, no está en UTF-8 o no es JSON válido.
+            un archivo, supera ``max_bytes`` o no está en UTF-8.
     """
     if path.is_symlink() or path.is_junction():
         raise CasoError(
@@ -60,9 +60,19 @@ def read_json(path: Path, what: str, max_bytes: int = MAX_JSON_BYTES) -> object:
     if len(content) > max_bytes:
         raise _invalid(f"{what}: el archivo supera el límite de {max_bytes} bytes", path.name)
     try:
-        text = content.removeprefix(UTF8_BOM).decode("utf-8")
+        return content.removeprefix(UTF8_BOM).decode("utf-8")
     except UnicodeDecodeError:
         raise _invalid(f"{what}: el archivo no está en UTF-8", path.name) from None
+
+
+def read_json(path: Path, what: str, max_bytes: int = MAX_JSON_BYTES) -> object:
+    """Contenido JSON de ``path``. ``what`` nombra el archivo en los mensajes (``rutas``…).
+
+    Raises:
+        CasoError: PATH_NOT_ALLOWED si es un enlace o una unión; INPUT_SCHEMA si no existe, no es
+            un archivo, supera ``max_bytes``, no está en UTF-8 o no es JSON válido.
+    """
+    text = read_text_file(path, what, max_bytes)
     try:
         return json.loads(
             text, object_pairs_hook=_object_without_repeats, parse_constant=_reject_constant
