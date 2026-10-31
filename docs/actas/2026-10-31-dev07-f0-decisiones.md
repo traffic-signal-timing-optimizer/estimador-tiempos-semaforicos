@@ -1,7 +1,7 @@
 # Acta 2026-10-31: DEV07 · F0 (decisiones de la ejecución de SUMO)
 
 - **Tipo:** fase F0 de DEV07 (HU04; P0, tamaño M). Dependencias: DEV06, cerrada en local.
-- **Autorización:** el Product Owner pidió analizar DEV07 y generar sus fases, y luego ejecutar F0 («ejecuta F0»).
+- **Autorización:** el Product Owner pidió analizar DEV07 y generar sus fases, y luego ejecutar F0 («ejecuta F0»). Después delegó las cuatro decisiones pendientes («analiza toda la situación y tú toma la decisión») y pidió analizar los recursos del equipo antes de ejecutar y liberar lo necesario. Este acta incluye esas decisiones y ese análisis.
 - **Alcance de F0:** solo decisiones por escrito. No hay código ni archivos de datos. DEV07 no toca código del modelo: el primer código del modelo es DEV16.
 
 ## Qué pide la documentación
@@ -33,6 +33,20 @@
 
 **Medido el 2026-10-31** con el caso real (1780 vehículos, 2100 s simulados): una corrida tarda entre 7,5 y 10,8 s reales. Las salidas pesan 0,85 MB (el `tripinfo` es casi todo: unos 470 bytes por vehículo) y las entradas 0,6 MB. Con el máximo de 200 000 vehículos de DEV06, el `tripinfo` sería de unos 100 MB.
 
+## Recursos del equipo (medidos el 2026-10-31)
+
+| Recurso | Medido | Lo que usa una corrida del caso real |
+|---|---|---|
+| Memoria | 15,4 GB en total; 4,6 GB libres (Chrome y VS Code ocupan unos 3 GB) | SUMO: 35 MB como máximo |
+| Procesador | AMD Ryzen 9 4900HS, 8 núcleos y 16 hilos | Una corrida usa un núcleo, de 7,5 a 10,8 s |
+| Disco | C: 133 GB libres; D: 429 GB libres | 0,6 MB de entradas y 0,85 MB de salidas |
+
+**Defecto encontrado en el código (no en el equipo).** La lectura con tope de tamaño (`read_bounded` de DEV00 y `read_text_file` de DEV06) pide de una vez toda la memoria del tope, aunque el archivo sea chico. Medido: leer un `tripinfo` de 0,8 MB con el tope de 512 MiB ocupa **512 MB**, y la planilla de cohorte con su tope ocupa 128 MB. En una corrida pasa al leer `statistics`, `tripinfo`, la planilla y otra vez el `tripinfo` en la conciliación. Leer el archivo por partes ocupa lo que mide el archivo (0,8 MB).
+
+**Segundo hallazgo.** El `tripinfo` se lee entero como árbol en memoria dos veces (resumen y conciliación): 4,4 MB para 1780 viajes, que con 200 000 vehículos serían unos 500 MB por lectura. Leído en flujo, guardando solo identificador, salida y llegada, ocupa 0,7 MB.
+
+**Liberado:** 129 MB de temporales que creó este trabajo (corridas de verificación de DEV06 y F0, y carpetas de pytest). No se cerró ningún programa del usuario ni se tocaron otros datos. Los 900 MB de experimentos anteriores de la sesión (investigación de la moto) se conservan: son evidencia y el disco tiene espacio de sobra.
+
 ## Decisiones
 
 | # | Tema | Decisión | Por qué |
@@ -53,26 +67,32 @@
 | D14 | Fuera de DEV07 | Corridas en paralelo y lotes (tareas posteriores de escenarios y búsqueda), respaldo y restauración (el resto de QA31), métricas (DEV19), réplica formal con comparación de huellas (QA09, DEV08) y cualquier cambio del contrato `run_manifest` | Cada una tiene su tarea en el plan |
 | D15 | Pruebas con SUMO real | Una corrida larga para probar cancelación y tiempo agotado se obtiene con un fin de simulación muy grande sobre la red de demostración. Salida truncada y red inválida: se prueban con las variantes defectuosas que ya existen | No depende del caso real, que está en `datos/` (fuera del repositorio) |
 | D16 | Riesgos que se miden en F2 | Que SUMO no deje procesos hijos al terminarlo; que Ctrl+C en Windows no llegue directo a SUMO; que el ciclo de vigilancia no encarezca la corrida. Si algo de esto falla, la decisión D5 se corrige con el Product Owner antes de seguir | Manejo de procesos en Windows: lo más delicado de la tarea |
+| D17 | Lectura con tope sin reservar el tope | `read_bounded` y `read_text_file` leen por partes de 1 MiB hasta el tope más 1 byte. La memoria usada es la del archivo, no la del tope. Mensajes y límites no cambian. Prueba: leer un archivo chico con tope grande no ocupa más de unos pocos MB | Defecto medido: 512 MB por lectura |
+| D18 | `tripinfo` en flujo y una sola vez | Un lector en flujo seguro (sin DTD ni entidades, con tope de bytes también para `.gz`) entrega cada viaje con su identificador, salida y llegada. Lo usan el resumen de la corrida y la conciliación, que hoy leen el archivo completo por separado | Memoria proporcional a los vehículos (unos bytes por viaje), no al tamaño del árbol |
+| D19 | Memoria al ejecutar | Antes de lanzar SUMO se exige 1 GiB de memoria disponible; si no hay, no se crea la corrida (código 4) y el mensaje pide cerrar programas. Durante la corrida se mide la memoria de SUMO (con la API de Windows, sin dependencias nuevas; en otros sistemas, con la del sistema) y se guarda el máximo en `tiempos.json`. Tope provisional: 4 GiB (una cuarta parte de la memoria del equipo); si se pasa, SUMO se termina y la corrida queda `failed` | Medido: SUMO usa 35 MB en el caso real. El tope protege al equipo sin estorbar corridas normales |
+| D20 | Recursos en pruebas y mutaciones | Las mutaciones se ejecutan de a una, nunca en paralelo. Las corridas temporales de verificación se borran al cerrar cada fase. No se cierran programas del usuario | Evita llenar memoria y disco durante el desarrollo |
 
 ## Fases siguientes
 
 | Fase | Qué se hace | Criterio de cierre | Complejidad | Modelo sugerido |
 |---|---|---|---|---|
-| F1 | Ejecutar desde la carpeta de entradas: comprobaciones previas (D2), fin y semilla del manifiesto (D3), conciliación y tabla antes de publicar (D10); `run_inputs` | Una corrida del ejemplo y del caso real se publica con su tabla; una carpeta alterada no se ejecuta; una conciliación fallida deja la corrida `failed` | Media | Sonnet |
-| F2 | Proceso controlado: `Popen` con ciclo de vigilancia, tiempo agotado, cancelación, topes de salida y espacio, `tiempos.json` (D4 a D7, D16) | Pruebas con SUMO real de tiempo agotado, cancelación, error de SUMO, salida truncada y tope de salidas: todas sin métricas y con registros conservados (QA08). Pruebas de DEV00 intactas | Media-alta | Opus |
+| F1 | Primero, lectura sin reservar el tope (D17) y `tripinfo` en flujo (D18). Después, ejecutar desde la carpeta de entradas: comprobaciones previas (D2), fin y semilla del manifiesto (D3), conciliación y tabla antes de publicar (D10); `run_inputs` | Leer un archivo chico ya no reserva el tope; una corrida del ejemplo y del caso real se publica con su tabla; una carpeta alterada no se ejecuta; una conciliación fallida deja la corrida `failed` | Media | Sonnet |
+| F2 | Proceso controlado: `Popen` con ciclo de vigilancia, tiempo agotado, cancelación, topes de salida, espacio y memoria, `tiempos.json` (D4 a D7, D16, D19) | Pruebas con SUMO real de tiempo agotado, cancelación, error de SUMO, salida truncada y tope de salidas: todas sin métricas y con registros conservados (QA08). Pruebas de DEV00 intactas | Media-alta | Opus |
 | F3 | Interrumpidas y reintentos: lock del sistema, `recover_interrupted`, `.incompletas` y reglas de `retry_of` (D8, D9) | Una corrida interrumpida de verdad (proceso terminado a la fuerza) nunca aparece como `succeeded` ni se pierde; el reintento no borra nada (parte de QA31) | Media | Sonnet |
 | F4 | Comando `simulate run` por la capa `app` (D12) — **opcional** | Se ejecuta una corrida con un solo comando y los códigos de salida del diseño | Baja | Sonnet |
 | F5 | Verificación con el caso real, mutaciones, inspección y cierre con la tabla de HU04 | HU04 completo en lo que toca a DEV07; QA08, QA10 y QA31 verificados; actas y CONTEXTO al día | Baja-media | Sonnet |
 
 Cada fase cierra, como en DEV06, con una inspección de lo desarrollado contra la documentación y el caso real.
 
-## Qué queda para el Product Owner
+## Decisiones que delegó el Product Owner
 
-1. **Incluir o no el comando `simulate run` (F4).** Se recomienda incluirlo: sin él, ejecutar una corrida depende de scripts.
-2. **Confirmar los límites provisionales:** 900 s de tiempo real, 512 MiB de salidas, 16 MiB por registro y el espacio libre exigido (D4 y D6). Se pueden ajustar sin cambiar el código.
-3. **Confirmar que una corrida cancelada sale con código 4** y se distingue por `status` en el JSON (D12), ya que el diseño no le asigna un código propio.
-4. **Aceptar que la duración vaya en `outputs/tiempos.json`** y no en el contrato `run_manifest` (D7), porque ese contrato viene de la documentación.
+| # | Pregunta | Decisión | Por qué |
+|---|---|---|---|
+| 1 | ¿Entra el comando `simulate run` (F4)? | **Sí** | Sin él, ejecutar una corrida depende de scripts. Es la fase más chica |
+| 2 | ¿Límites provisionales? | **Sí**: 900 s de tiempo real, 512 MiB de salidas, 16 MiB por registro, espacio libre del tope más el doble de las entradas; y, por el análisis del equipo, 1 GiB de memoria disponible para empezar y 4 GiB como tope de SUMO (D19) | Todos tienen más de 100 veces de margen sobre lo medido. Se ajustan sin cambiar el código |
+| 3 | ¿Código de salida de una cancelada? | **4**, con `status: cancelled` en el JSON | El 6 ya significa otra cosa en el diseño; la documentación pide leer el estado |
+| 4 | ¿Dónde va la duración? | **En `outputs/tiempos.json`**, sin tocar el contrato `run_manifest` | La documentación prevalece; el archivo queda protegido por su huella |
 
 ## Estado
 
-- Sin código, sin archivos de datos y sin commits de código en esta fase. Este acta es el único cambio.
+- Sin código ni archivos de datos en esta fase. Este acta es el único cambio del repositorio; se ajustó con las decisiones delegadas y el análisis de recursos.
