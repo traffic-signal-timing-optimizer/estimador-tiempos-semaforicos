@@ -20,7 +20,7 @@ from semaforo.caso.inventory import MAX_NET_BYTES, NET_ROOTS, read_network_inven
 from semaforo.caso.xml_input import parse_root
 from semaforo.dominio.case import Artifact, Case, CaseIssue, Movement, State, cap_issues
 
-__all__ = ["NetworkCheck", "check_network", "not_applicable_outcomes"]
+__all__ = ["NetworkCheck", "check_network", "not_applicable_outcomes", "verified_network_path"]
 
 INTEGRITY_RULE = "CASE-N01"
 COMPATIBILITY_RULE = "CASE-N02"
@@ -80,6 +80,16 @@ def check_network(artifact: Artifact, case: Case, case_dir: Path) -> NetworkChec
         issues = [CaseIssue(COMPATIBILITY_RULE, FIELD, error.message)]
     outcomes = [_outcome(INTEGRITY_RULE, []), _outcome(COMPATIBILITY_RULE, issues)]
     return NetworkCheck(outcomes, None)
+
+
+def verified_network_path(artifact: Artifact, case_dir: Path) -> Path:
+    """Ruta de la red declarada, comprobada como en CASE-N01 (DEV06 F2).
+
+    Raises:
+        CasoError: PATH_NOT_ALLOWED si sale de la carpeta del caso o pasa por un enlace;
+            DEPENDENCY_MISSING si no existe; HASH_MISMATCH si su huella no coincide.
+    """
+    return _verified_file(artifact, case_dir)
 
 
 def _outcome(rule_id: str, issues: list[CaseIssue]) -> RuleOutcome:
