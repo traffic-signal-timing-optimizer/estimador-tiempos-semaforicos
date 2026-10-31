@@ -84,8 +84,8 @@ Se releyó todo contra las decisiones de F0 (D2, D13, D20) y contra HU04, se pro
 Se cambió a propósito el código (condiciones, límites, claves, formatos) para comprobar que las pruebas fallan.
 
 - **Primera pasada** (49 cambios sobre la conciliación y la lectura segura): sobrevivieron 10.
-- **Después de agregar pruebas** (4 se omiten porque el texto ya no existe o la misma comprobación aparece dos veces): de 45 aplicadas, 40 detectadas y 5 sobreviven, todas justificadas.
-- **Más de diez cambios sobre `reconcile_run` y la comparación de archivos**, hechos aparte y repetidos tras las correcciones del hallazgo 2: todos detectados.
+- **Después de agregar pruebas** (4 se omiten porque el texto ya no existe o la misma comprobación aparece dos veces; una de ellas se probó a mano y se detectó): de 45 aplicadas, 40 detectadas y 5 sobreviven, todas justificadas.
+- **Diez cambios sobre `reconcile_run` y la comparación de archivos**, hechos aparte: dos sobrevivían al principio (faltaban pruebas de entradas cambiadas después de la corrida). Tras agregarlas, los diez quedan detectados.
 
 | Sobrevive | Por qué se acepta |
 |---|---|
