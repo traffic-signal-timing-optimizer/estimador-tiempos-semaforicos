@@ -102,6 +102,16 @@ def test_a_network_without_exactly_one_traffic_light_is_rejected(
     assert raised.value.code is ErrorCode.INPUT_SCHEMA, description
 
 
+def test_a_traffic_light_cited_only_in_a_connection_counts_as_a_second_one(tmp_path: Path) -> None:
+    ghost = (
+        '<connection from="demo_S" to="demo_N" fromLane="0" toLane="0" tl="OTRO" linkIndex="0"/>'
+    )
+    body = DEMO_NET.read_text(encoding="utf-8").replace("</net>", f"{ghost}</net>")
+    with pytest.raises(CasoError) as raised:
+        build_network_map(write_net(tmp_path, body), case_with(demo_movements()))
+    assert raised.value.code is ErrorCode.INPUT_SCHEMA
+
+
 def test_a_declared_link_without_connection_is_reported() -> None:
     movements = demo_movements()
     movements[0]["link_indices"] = [0, 5]

@@ -75,11 +75,9 @@ def build_network_map(path: Path, case: Case) -> NetworkMap:
     owner: dict[int, str] = {}
     mapped: list[MappedMovement] = []
     for index, movement in enumerate(case.movements):
-        rows = [
-            row
-            for row in connections
-            if row.tls_id == signal.id and row.link_index in movement.link_indices
-        ]
+        # Con un solo semáforo en la red (el inventario cuenta también los citados solo en
+        # conexiones), toda conexión controlada es de ese semáforo.
+        rows = [row for row in connections if row.link_index in movement.link_indices]
         issues.extend(_movement_issues(f"movements[{index}]", movement, rows, signal.id))
         waiting = sorted(
             {row.waiting_link_index for row in rows if row.waiting_link_index is not None}
