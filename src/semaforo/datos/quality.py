@@ -15,6 +15,7 @@ Compara un conteo principal con un conteo de control del mismo caso (decisiones 
 Los valores son exactos: el redondeo se aplica solo al mostrar un reporte.
 """
 
+import math
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -27,11 +28,13 @@ from semaforo.dominio.errors import DomainError, ErrorCode
 __all__ = [
     "ZERO_CONTROL_REASON",
     "CountComparison",
+    "Exclusion",
     "QualityComparison",
     "QualityError",
     "WindowComparison",
     "compare_files",
     "compare_with_control",
+    "find_exclusions",
 ]
 
 ZERO_CONTROL_REASON = "control cero"
@@ -214,4 +217,59 @@ def _count(movement: str, vclass: str, observed: int, control: int) -> CountComp
         )
     return CountComparison(
         movement, vclass, observed, control, difference, abs(difference) / control, None
+    )
+
+
+@dataclass(frozen=True)
+class Exclusion:
+    """Una comparación que supera el límite de error y por la que se excluye su ventana."""
+
+    observed_id: str | None
+    start: datetime
+    end: datetime
+    movement_id: str
+    vehicle_class: str
+    relative_error: float
+    threshold: float
+    reason: str
+
+
+def find_exclusions(
+    comparison: QualityComparison, max_relative_error: float | None = None
+) -> tuple[Exclusion, ...]:
+    """Comparaciones que superan ``max_relative_error`` (D5 del acta de F0).
+
+    Sin límite no se excluye nada: la herramienta solo informa. El límite es estricto: un error
+    igual al límite no excluye. Un error relativo nulo (control cero) no se puede evaluar contra un
+    límite relativo y no excluye; sigue visible en la comparación con su motivo. Solo se evalúan las
+    ventanas comparables. Cada exclusión lleva el valor que la causó.
+
+    Raises:
+        QualityError: si el límite no es un número finito no negativo.
+    """
+    if max_relative_error is None:
+        return ()
+    if not (math.isfinite(max_relative_error) and max_relative_error >= 0):
+        raise QualityError(
+            "el límite de error relativo debe ser un número finito no negativo",
+            "max_relative_error",
+        )
+    return tuple(
+        Exclusion(
+            observed_id=window.observed_id,
+            start=window.start,
+            end=window.end,
+            movement_id=count.movement_id,
+            vehicle_class=count.vehicle_class,
+            relative_error=count.relative_error,
+            threshold=max_relative_error,
+            reason=(
+                f"el error relativo {count.relative_error:.3f} de {count.movement_id}/"
+                f"{count.vehicle_class} supera el límite {max_relative_error:g}"
+            ),
+        )
+        for window in comparison.windows
+        if window.status == "comparable"
+        for count in window.counts
+        if count.relative_error is not None and count.relative_error > max_relative_error
     )

@@ -2,6 +2,7 @@
 
 import copy
 import json
+import math
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,7 @@ from semaforo.datos.quality import (
     QualityError,
     WindowComparison,
     compare_files,
+    find_exclusions,
 )
 from semaforo.dominio.case import Case, parse_case
 
@@ -232,3 +234,61 @@ def test_the_fingerprint_of_each_file_is_recorded(tmp_path: Path) -> None:
     assert result.case_id == "SYNTHETIC_DEMO"
     assert len(result.observed_sha256) == len(result.control_sha256) == 64
     assert result.observed_sha256 != result.control_sha256
+
+
+# F2: exclusiones por límite de error relativo. Sin límite no se excluye nada.
+
+
+def qa06(tmp_path: Path) -> QualityComparison:
+    observed = period("OBS", "CAMARA", W1, [90, 5, 50, 0])
+    control = period("CTL", "MANUAL", W1, [100, 0, 50, 0])
+    return compare(tmp_path, observed, control)
+
+
+def test_without_a_limit_nothing_is_excluded(tmp_path: Path) -> None:
+    assert find_exclusions(qa06(tmp_path)) == ()
+    assert find_exclusions(qa06(tmp_path), None) == ()
+
+
+def test_a_comparison_above_the_limit_is_excluded_with_its_value(tmp_path: Path) -> None:
+    [exclusion] = find_exclusions(qa06(tmp_path), 0.05)
+    assert (exclusion.movement_id, exclusion.vehicle_class) == ("N_S", "car")
+    assert (exclusion.relative_error, exclusion.threshold) == (0.1, 0.05)
+    assert exclusion.observed_id == "OBS"
+    assert exclusion.start.isoformat() == W1[0]
+    assert "N_S/car" in exclusion.reason
+    assert "0.100" in exclusion.reason
+    assert "0.05" in exclusion.reason
+
+
+def test_an_error_equal_to_the_limit_is_not_excluded(tmp_path: Path) -> None:
+    assert find_exclusions(qa06(tmp_path), 0.1) == ()
+
+
+def test_a_zero_control_has_no_relative_error_so_it_is_not_excluded(tmp_path: Path) -> None:
+    # El bus tiene control 0 y observado 5: su error relativo es nulo y no se evalúa.
+    assert all(e.vehicle_class != "bus" for e in find_exclusions(qa06(tmp_path), 0.0))
+
+
+def test_a_limit_of_zero_excludes_any_difference_but_not_a_perfect_match(tmp_path: Path) -> None:
+    same = period("OBS", "CAMARA", W1, [90, 10, 50, 0])
+    assert (
+        find_exclusions(compare(tmp_path, same, period("CTL", "MANUAL", W1, [90, 10, 50, 0])), 0)
+        == ()
+    )
+    assert len(find_exclusions(qa06(tmp_path), 0)) == 1
+
+
+def test_only_comparable_windows_are_evaluated(tmp_path: Path) -> None:
+    observed = period("OBS", "CAMARA", W1, [1, 1, 1], KEYS[:3])
+    control = period("CTL", "MANUAL", W1, [100, 100, 100, 100])
+    result = compare(tmp_path, observed, control)
+    assert result.windows[0].status == "not_comparable"
+    assert find_exclusions(result, 0.0) == ()
+
+
+@pytest.mark.parametrize("limit", [-0.1, math.nan, math.inf])
+def test_an_invalid_error_limit_is_rejected(tmp_path: Path, limit: float) -> None:
+    with pytest.raises(QualityError) as raised:
+        find_exclusions(qa06(tmp_path), limit)
+    assert raised.value.field == "max_relative_error"
