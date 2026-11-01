@@ -278,3 +278,33 @@ def test_the_folder_time_is_in_utc_whatever_the_zone_of_the_clock(tmp_path: Path
     assert report.folder_key.startswith("20261031T090000Z_")
     manifest = json.loads(report.files[MANIFEST_FILE])
     assert manifest["created_at"] == "2026-10-31T09:00:00+00:00"
+
+
+def test_qa06_the_catalog_case_with_known_gaps_gives_exact_errors_and_coverage(
+    tmp_path: Path,
+) -> None:
+    """Control 100/0 y observado 90/5, con una fila faltante conocida en el segundo periodo.
+
+    Error absoluto 10 y 5; relativo 0.1 y nulo; cobertura exacta: 900 s de una ventana de 1800 s.
+    """
+    observed = [
+        *period("OBS_1", "CAMARA", W1, [90, 5, 50, 0]),
+        *period("OBS_2", "CAMARA", W2, [80, 3, 40], KEYS[:3]),  # falta E_W / bus
+    ]
+    control = period("CTL_1", "MANUAL", W1, [100, 0, 50, 0])
+    inputs = pipeline(tmp_path, observed, control)
+
+    comparable = [window for window in inputs.comparison.windows if window.status == "comparable"]
+    [window] = comparable
+    found = {(c.movement_id, c.vehicle_class): c for c in window.counts}
+    car, bus = found["N_S", "car"], found["N_S", "bus"]
+    assert (car.absolute_value, car.relative_error) == (10, 0.1)
+    assert (bus.absolute_value, bus.relative_error) == (5, None)
+    assert bus.relative_reason == "control cero"
+
+    coverage = inputs.coverage
+    assert (coverage.window_s, coverage.covered_s, coverage.coverage) == (1800, 900, 0.5)
+    assert [(g.start, g.end) for g in coverage.gaps] == [(_at(15), _at(30))]
+    assert [(m.observation_id, m.movement_id, m.vehicle_class) for m in inputs.missing] == [
+        ("OBS_2", "E_W", "bus")
+    ]

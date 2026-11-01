@@ -3,6 +3,7 @@
 import copy
 import hashlib
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -255,3 +256,50 @@ def test_the_fixture_round_trips_to_the_recorded_expectations() -> None:
             if vclass in ("flow_vph",):
                 continue
             assert movement.composition[vclass] == share
+
+
+# QA04 (texto literal del catálogo): campo ausente, duplicado, -1, clase desconocida y fecha
+# inválida. Cada archivo se rechaza al importar y tampoco pasa por la normalización: ninguna
+# aceptación silenciosa. El reporte señala la fila y el campo.
+
+
+def qa04_missing_field(tmp_path: Path) -> Path:
+    return write(tmp_path, [row(source_id=""), *VALID_ROWS[1:]])
+
+
+def qa04_duplicate(tmp_path: Path) -> Path:
+    return write(tmp_path, [*VALID_ROWS, row(count="5")])
+
+
+def qa04_minus_one(tmp_path: Path) -> Path:
+    return write(tmp_path, [row(count="-1"), *VALID_ROWS[1:]])
+
+
+def qa04_unknown_class(tmp_path: Path) -> Path:
+    return write(tmp_path, [row(vehicle_class="truck"), *VALID_ROWS[1:]])
+
+
+def qa04_invalid_date(tmp_path: Path) -> Path:
+    return write(tmp_path, [row(start="2026-13-18T08:00:00-05:00"), *VALID_ROWS[1:]])
+
+
+@pytest.mark.parametrize(
+    ("build", "line", "field"),
+    [
+        (qa04_missing_field, 2, "source_id"),
+        (qa04_duplicate, 6, "observation_id"),
+        (qa04_minus_one, 2, "count"),
+        (qa04_unknown_class, 2, "vehicle_class"),
+        (qa04_invalid_date, 2, "start"),
+    ],
+    ids=["missing-field", "duplicate", "minus-one", "unknown-class", "invalid-date"],
+)
+def test_qa04_each_defect_of_the_catalog_is_identified_and_never_accepted(
+    tmp_path: Path, build: Callable[[Path], Path], line: int, field: str
+) -> None:
+    path = build(tmp_path)
+    assert issues_of(path) == [(line, field)]
+    with pytest.raises(CountImportError) as raised:
+        prepare_counts(path, make_case())
+    assert [(i.line, i.field) for i in raised.value.issues] == [(line, field)]
+    assert all(i.message for i in raised.value.issues)
