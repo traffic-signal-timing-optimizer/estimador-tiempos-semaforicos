@@ -16,6 +16,7 @@
 """
 
 import json
+import threading
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import datetime
@@ -232,18 +233,20 @@ def _conciliation(manifest: InputsManifest) -> Callable[[Path], Mapping[str, byt
     return finalize
 
 
-def run_inputs(
+def run_inputs(  # noqa: PLR0913  (los opcionales son de solo palabra clave)
     inputs_dir: Path,
     runs_root: Path,
     *,
     limits: RunLimits | None = None,
     sumo: Path | None = None,
     clock: Callable[[], datetime] = utc_now,
+    cancel: threading.Event | None = None,
 ) -> SimulationResult:
     """Ejecuta la carpeta de entradas ``inputs_dir`` y publica la corrida en ``runs_root``.
 
     El fin de la simulación sale del manifiesto: el ``end_s`` de ``limits`` no se usa. Los demás
-    límites (tiempo real, largo de rutas) sí.
+    límites (tiempo real, topes de salidas y de memoria, largo de rutas) sí. Con ``cancel`` se puede
+    cancelar la corrida: queda publicada como ``cancelled`` y sin conciliación.
 
     Raises:
         SimulacionError o CasoError: antes de ejecutar nada, si la carpeta no pasa
@@ -267,4 +270,5 @@ def run_inputs(
         declared_vehicles=manifest.vehicles.total,
         clock=clock,
         finalize=_conciliation(manifest),
+        cancel=cancel,
     )

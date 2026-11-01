@@ -1,14 +1,16 @@
-"""Runner mínimo de SUMO (decisión D3; adelanta el núcleo de DEV07).
+"""Runner de SUMO (decisión D3 de DEV00, ampliado en DEV07 F2).
 
 Ejecuta la configuración intacta de una simulación sobre una copia, dentro de una carpeta de
-ejecución de F5. SUMO se lanza con ``subprocess``, con lista de argumentos y sin shell (ADR04),
-con un límite de tiempo simulado (``--end``, D4) y otro de tiempo real. Las salidas se dirigen a
-``outputs/`` por línea de comandos, que tiene precedencia sobre el .sumocfg.
+ejecución de F5. SUMO se lanza como proceso controlado (``process.run_controlled``): lista de
+argumentos y sin shell (ADR04), con un límite de tiempo simulado (``--end``, D4) y uno de tiempo
+real, y vigilado hasta el final: se puede cancelar y tiene topes de salidas y de memoria. Las
+salidas se dirigen a ``outputs/`` por línea de comandos, que tiene precedencia sobre el .sumocfg.
 
 El éxito exige código de salida 0 y salidas coherentes (QA07). Si SUMO falla, se pasa del tiempo
-o sus salidas no son coherentes, la ejecución se publica como ``failed`` con su motivo y sin
-métricas (QA08). Una configuración con rutas absolutas no se ejecuta, porque SUMO escribiría fuera
-de la carpeta de la corrida (QA10).
+o de un tope, o sus salidas no son coherentes, la ejecución se publica como ``failed`` con su
+motivo y sin métricas (QA08); si se cancela, como ``cancelled``. Toda ejecución publicada lleva
+``outputs/tiempos.json`` con su duración y por qué terminó. Una configuración con rutas absolutas
+no se ejecuta, porque SUMO escribiría fuera de la carpeta de la corrida (QA10).
 """
 
 import os
@@ -16,6 +18,7 @@ import platform
 import re
 import shutil
 import subprocess
+import threading
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -25,10 +28,13 @@ from xml.etree.ElementTree import Element
 from semaforo.caso.sumo_config import GUI_ONLY, read_config_references
 from semaforo.caso.xml_input import integer, optional_number, parse_root
 from semaforo.dominio.errors import DomainError, ErrorCode
+from semaforo.simulacion.process import ProcessLimits, ProcessOutcome, run_controlled, tree_bytes
+from semaforo.simulacion.resources import available_memory_bytes, free_disk_bytes
 from semaforo.simulacion.summary import (
     UNMET_DEMAND,
     FindingCode,
     Mode,
+    RunTiming,
     SimulationFinding,
     SimulationSummary,
 )
@@ -44,11 +50,20 @@ SMOKE_END_S = 60.0
 VERSION_TIMEOUT_S = 30.0
 MAX_CONFIG_BYTES = 1024 * 1024
 MAX_OUTPUT_BYTES = 512 * 1024 * 1024
+# Topes de una corrida (DEV07 F0, D6 y D19). Provisionales: medidos con el caso real, que usa
+# 35 MB de memoria, escribe 0,85 MB y tarda unos 8 s, así que tienen más de 100 veces de margen.
+MAX_RUN_OUTPUT_BYTES = 512 * 1024 * 1024
+MAX_LOG_BYTES = 16 * 1024 * 1024
+MAX_MEMORY_BYTES = 4 * 1024**3
+MIN_FREE_MEMORY_BYTES = 1024**3
+POLL_S = 0.25
+MIB = 1024 * 1024
 VERSION_PATTERN = re.compile(r"^Eclipse SUMO \S+ (\S+)", re.MULTILINE)
 DECLARED_OUTPUTS = "config"
 STATISTICS = "statistics.xml"
 TRIPINFO = "tripinfo.xml"
 SUMMARY = "summary.json"
+TIMING = "tiempos.json"
 LOG = "sumo.log"
 TOLERANCE = 1e-9
 # SUMO 1.27.1 en Windows no abre una ruta de más de 257 caracteres (medido en F6). En otros
@@ -63,18 +78,48 @@ class SimulacionError(DomainError):
 
 @dataclass(frozen=True)
 class RunLimits:
-    """Límites de una corrida, en segundos. Valores provisionales, pendientes del piloto (D4)."""
+    """Límites de una corrida. Valores provisionales, pendientes del piloto (D4, D6 y D19).
+
+    Los tiempos van en segundos y los topes en bytes. ``min_free_memory_bytes`` es la memoria
+    disponible que se exige antes de empezar.
+    """
 
     end_s: float = END_S
     wall_timeout_s: float = WALL_TIMEOUT_S
     smoke_end_s: float = SMOKE_END_S
     max_path_chars: int | None = MAX_PATH_CHARS
+    max_output_bytes: int = MAX_RUN_OUTPUT_BYTES
+    max_log_bytes: int = MAX_LOG_BYTES
+    max_memory_bytes: int = MAX_MEMORY_BYTES
+    min_free_memory_bytes: int = MIN_FREE_MEMORY_BYTES
+    poll_s: float = POLL_S
 
     def __post_init__(self) -> None:
-        if min(self.end_s, self.wall_timeout_s, self.smoke_end_s) <= 0:
+        positive = (
+            self.end_s,
+            self.wall_timeout_s,
+            self.smoke_end_s,
+            self.max_output_bytes,
+            self.max_log_bytes,
+            self.max_memory_bytes,
+            self.poll_s,
+        )
+        if min(positive) <= 0:
             raise ValueError("los límites de la corrida deben ser positivos")
         if self.max_path_chars is not None and self.max_path_chars <= 0:
             raise ValueError("max_path_chars debe ser positivo")
+        if self.min_free_memory_bytes < 0:
+            raise ValueError("min_free_memory_bytes no puede ser negativo")
+
+    def process_limits(self) -> ProcessLimits:
+        """Los topes que vigila el proceso controlado."""
+        return ProcessLimits(
+            wall_timeout_s=self.wall_timeout_s,
+            max_output_bytes=self.max_output_bytes,
+            max_log_bytes=self.max_log_bytes,
+            max_memory_bytes=self.max_memory_bytes,
+            poll_s=self.poll_s,
+        )
 
 
 @dataclass(frozen=True)
@@ -83,14 +128,6 @@ class SimulationResult:
 
     manifest: RunManifest
     summary: SimulationSummary | None
-
-
-@dataclass(frozen=True)
-class _Outcome:
-    returncode: int | None
-    stdout: bytes
-    stderr: bytes
-    timed_out: bool
 
 
 def find_sumo(environment: Mapping[str, str] | None = None) -> Path:
@@ -179,42 +216,24 @@ def _base_arguments(entry: str, end_s: float) -> list[str]:
     ]
 
 
-def run_simulation(  # noqa: PLR0913  (los argumentos opcionales son de solo palabra clave)
-    source: Path,
-    entry_config: str,
-    runs_root: Path,
-    spec: RunSpec,
-    *,
-    mode: Mode = "base",
-    limits: RunLimits | None = None,
-    sumo: Path | None = None,
-    declared_vehicles: float | None = None,
-    clock: Callable[[], datetime] = utc_now,
-    finalize: Callable[[Path], Mapping[str, bytes]] | None = None,
-) -> SimulationResult:
-    """Ejecuta la simulación de ``source`` y publica la corrida en ``runs_root``.
+@dataclass(frozen=True)
+class _Plan:
+    """Lo que se decide antes de crear la corrida: nada de esto escribe en disco."""
 
-    Args:
-        source: carpeta de la simulación (normalmente la copia inmutable de F2). Solo se lee.
-        entry_config: .sumocfg de entrada, relativo a ``source``.
-        runs_root: carpeta de ejecuciones (``datos/ejecuciones``).
-        spec: identificación de la corrida en el manifiesto.
-        mode: ``base`` (hasta ``limits.end_s``) o ``smoke`` (hasta ``limits.smoke_end_s``).
-        limits: límites de tiempo; si es None, los provisionales.
-        sumo: ejecutable de SUMO; si es None, se busca con ``SUMO_HOME``.
-        declared_vehicles: vehículos que declara la demanda (auditoría de F4), para comparar.
-        clock: reloj con zona horaria, para la fecha del manifiesto.
-        finalize: paso previo a publicar una corrida exitosa (DEV07 F1). Recibe la carpeta de la
-            corrida (``inputs/`` y ``outputs/``) y devuelve archivos para agregar a ``outputs/``,
-            que no pueden reemplazar a ninguno existente. Si lanza ``DomainError``, la corrida se
-            publica ``failed`` con OUTPUT_INVALID y sin métricas.
+    entry: str
+    files: list[str]
+    binary: Path
+    arguments: list[str]
+    command: list[str]
+    environment: dict[str, str]
+    end_s: float
+    input_bytes: int
 
-    Raises:
-        DomainError: antes de ejecutar nada, PATH_NOT_ALLOWED si la entrada sale de la carpeta,
-            hay enlaces o el .sumocfg declara rutas absolutas; INPUT_SCHEMA si el .sumocfg no
-            existe o no es válido; DEPENDENCY_MISSING si no se encuentra SUMO.
-    """
-    limits = limits or RunLimits()
+
+def _plan(
+    source: Path, entry_config: str, mode: Mode, limits: RunLimits, sumo: Path | None
+) -> _Plan:
+    """Comprueba la entrada y arma el comando. Raises: ver ``run_simulation``."""
     entry = _checked_entry(entry_config)
     if not (source / entry).is_file():
         raise SimulacionError(
@@ -233,71 +252,236 @@ def run_simulation(  # noqa: PLR0913  (los argumentos opcionales son de solo pal
     end_s = limits.smoke_end_s if mode == "smoke" else limits.end_s
     gui_options = sorted({ref.option for ref in references.files if ref.section == GUI_ONLY})
     arguments = sumo_arguments(entry, end_s, gui_options=gui_options)
-    command = ["sumo", *arguments]
-    environment = {
-        "sumo": version,
-        "python": platform.python_version(),
-        "os": f"{platform.system()} {platform.release()}",
-    }
+    return _Plan(
+        entry=entry,
+        files=files,
+        binary=binary,
+        arguments=arguments,
+        command=["sumo", *arguments],
+        environment={
+            "sumo": version,
+            "python": platform.python_version(),
+            "os": f"{platform.system()} {platform.release()}",
+        },
+        end_s=end_s,
+        input_bytes=sum((source / relative).stat().st_size for relative in files),
+    )
+
+
+def _check_resources(runs_root: Path, input_bytes: int, limits: RunLimits) -> None:
+    """Exige espacio en disco y memoria antes de crear la corrida (DEV07 F0, D6 y D19).
+
+    Raises:
+        SimulacionError: SIM_FAILED si no hay espacio para el tope de salidas más el doble de las
+            entradas, o si la memoria disponible es menor que ``min_free_memory_bytes``.
+    """
+    needed = limits.max_output_bytes + 2 * input_bytes
+    free = free_disk_bytes(runs_root)
+    if free < needed:
+        raise SimulacionError(
+            ErrorCode.SIM_FAILED,
+            f"no hay espacio para la corrida: hacen falta {needed // MIB} MiB libres y quedan "
+            f"{free // MIB} MiB",
+            "runs_root",
+        )
+    available = available_memory_bytes()
+    if available is not None and available < limits.min_free_memory_bytes:
+        raise SimulacionError(
+            ErrorCode.SIM_FAILED,
+            f"no hay memoria para la corrida: hacen falta {limits.min_free_memory_bytes // MIB} "
+            f"MiB disponibles y quedan {available // MIB} MiB; cierre programas e intente de nuevo",
+            "memory",
+        )
+
+
+class _Execution:
+    """Una corrida en curso: sabe publicarse como exitosa, fallida o cancelada."""
+
+    def __init__(
+        self,
+        writer: RunWriter,
+        plan: _Plan,
+        limits: RunLimits,
+        clock: Callable[[], datetime],
+    ) -> None:
+        self._writer = writer
+        self._plan = plan
+        self._limits = limits
+        self._clock = clock
+        self._started_at = clock()
+
+    def _write_timing(self, outcome: ProcessOutcome | None) -> None:
+        timing = RunTiming(
+            started_at=self._started_at,
+            finished_at=self._clock(),
+            duration_s=0.0 if outcome is None else outcome.duration_s,
+            wall_timeout_s=self._limits.wall_timeout_s,
+            end_s=self._plan.end_s,
+            termination="not_started" if outcome is None else outcome.cause,
+            peak_memory_bytes=None if outcome is None else outcome.peak_memory_bytes,
+            output_bytes=0 if outcome is None else outcome.output_bytes,
+        )
+        self._writer.output_path(TIMING).write_text(timing.model_dump_json(indent=2), "utf-8")
+
+    def fail(
+        self,
+        code: ErrorCode,
+        message: str,
+        exit_code: int | None,
+        outcome: ProcessOutcome | None = None,
+    ) -> SimulationResult:
+        """Publica la corrida como ``failed`` con su motivo y sin métricas."""
+        self._write_timing(outcome)
+        error = Error(code=code.value, field=None, message=message)
+        manifest = self._writer.publish(
+            status="failed",
+            command=self._plan.command,
+            environment=self._plan.environment,
+            exit_code=exit_code,
+            error=error,
+        )
+        return SimulationResult(manifest=manifest, summary=None)
+
+    def cancel(self, outcome: ProcessOutcome) -> SimulationResult:
+        """Publica la corrida como ``cancelled``, con sus registros y sin métricas."""
+        self._write_timing(outcome)
+        manifest = self._writer.publish(
+            status="cancelled",
+            command=self._plan.command,
+            environment=self._plan.environment,
+            exit_code=None,
+        )
+        return SimulationResult(manifest=manifest, summary=None)
+
+    def succeed(
+        self, summary: SimulationSummary, extra: Mapping[str, bytes], outcome: ProcessOutcome
+    ) -> SimulationResult:
+        """Publica la corrida como ``succeeded`` con su resumen y las salidas del paso final."""
+        self._write_timing(outcome)
+        for name, data in extra.items():
+            self._writer.output_path(name).write_bytes(data)
+        self._writer.output_path(SUMMARY).write_text(summary.model_dump_json(indent=2), "utf-8")
+        manifest = self._writer.publish(
+            status="succeeded",
+            command=self._plan.command,
+            environment=self._plan.environment,
+            exit_code=0,
+        )
+        return SimulationResult(manifest=manifest, summary=summary)
+
+    def stopped(self, outcome: ProcessOutcome) -> SimulationResult | None:
+        """La corrida publicada si el proceso no terminó bien; ``None`` si terminó con código 0."""
+        detail = outcome.detail or ""
+        match outcome.cause:
+            case "cancelled":
+                return self.cancel(outcome)
+            case "timeout":
+                return self.fail(ErrorCode.SIM_TIMEOUT, detail, None, outcome)
+            case "output_budget" | "memory_budget":
+                return self.fail(ErrorCode.SIM_FAILED, detail, None, outcome)
+            case "sumo_error":
+                message = (
+                    f"SUMO terminó con código {outcome.returncode}; "
+                    "detalle en outputs/sumo.stderr.txt"
+                )
+                return self.fail(ErrorCode.SIM_FAILED, message, outcome.returncode, outcome)
+            case _:
+                return None
+
+
+def _launch(
+    writer: RunWriter, plan: _Plan, limits: RunLimits, cancel: threading.Event | None
+) -> ProcessOutcome:
+    """Lanza SUMO como proceso controlado dentro de la carpeta de la corrida."""
+    stdout = writer.output_path("sumo.stdout.txt")
+    stderr = writer.output_path("sumo.stderr.txt")
+    return run_controlled(
+        [str(plan.binary), *plan.arguments],
+        cwd=writer.path,
+        stdout_path=stdout,
+        stderr_path=stderr,
+        watched=writer.path,
+        baseline_bytes=tree_bytes(writer.path),
+        logs=[stdout, stderr, writer.path / "outputs" / LOG],
+        limits=limits.process_limits(),
+        cancel=cancel,
+    )
+
+
+def run_simulation(  # noqa: PLR0913  (los argumentos opcionales son de solo palabra clave)
+    source: Path,
+    entry_config: str,
+    runs_root: Path,
+    spec: RunSpec,
+    *,
+    mode: Mode = "base",
+    limits: RunLimits | None = None,
+    sumo: Path | None = None,
+    declared_vehicles: float | None = None,
+    clock: Callable[[], datetime] = utc_now,
+    finalize: Callable[[Path], Mapping[str, bytes]] | None = None,
+    cancel: threading.Event | None = None,
+) -> SimulationResult:
+    """Ejecuta la simulación de ``source`` y publica la corrida en ``runs_root``.
+
+    Args:
+        source: carpeta de la simulación (normalmente la copia inmutable de F2). Solo se lee.
+        entry_config: .sumocfg de entrada, relativo a ``source``.
+        runs_root: carpeta de ejecuciones (``datos/ejecuciones``).
+        spec: identificación de la corrida en el manifiesto.
+        mode: ``base`` (hasta ``limits.end_s``) o ``smoke`` (hasta ``limits.smoke_end_s``).
+        limits: límites de tiempo, salidas y memoria; si es None, los provisionales.
+        sumo: ejecutable de SUMO; si es None, se busca con ``SUMO_HOME``.
+        declared_vehicles: vehículos que declara la demanda (auditoría de F4), para comparar.
+        clock: reloj con zona horaria, para la fecha del manifiesto y de ``tiempos.json``.
+        finalize: paso previo a publicar una corrida exitosa (DEV07 F1). Recibe la carpeta de la
+            corrida (``inputs/`` y ``outputs/``) y devuelve archivos para agregar a ``outputs/``,
+            que no pueden reemplazar a ninguno existente. Si lanza ``DomainError``, la corrida se
+            publica ``failed`` con OUTPUT_INVALID y sin métricas.
+        cancel: evento que, al activarse, cancela la corrida: SUMO se termina, se conservan sus
+            registros y salidas parciales y la corrida se publica ``cancelled``. Ctrl+C en la
+            consola hace lo mismo. Una corrida cancelada no lanza excepción: se devuelve publicada.
+
+    Raises:
+        DomainError: antes de ejecutar nada, PATH_NOT_ALLOWED si la entrada sale de la carpeta,
+            hay enlaces o el .sumocfg declara rutas absolutas; INPUT_SCHEMA si el .sumocfg no
+            existe o no es válido; DEPENDENCY_MISSING si no se encuentra SUMO; SIM_FAILED si no
+            hay espacio en disco o memoria disponible para la corrida.
+    """
+    limits = limits or RunLimits()
+    plan = _plan(source, entry_config, mode, limits, sumo)
+    _check_resources(runs_root, plan.input_bytes, limits)
     with RunWriter(runs_root, spec, clock=clock) as writer:
-
-        def failed(code: ErrorCode, message: str, exit_code: int | None) -> SimulationResult:
-            error = Error(code=code.value, field=None, message=message)
-            manifest = writer.publish(
-                status="failed",
-                command=command,
-                environment=environment,
-                exit_code=exit_code,
-                error=error,
-            )
-            return SimulationResult(manifest=manifest, summary=None)
-
-        for relative in files:
+        run = _Execution(writer, plan, limits, clock)
+        for relative in plan.files:
             writer.add_input(source / relative, relative)
         longest = _longest_path(writer.path, [*writer.input_paths, *PLANNED_OUTPUTS])
         if limits.max_path_chars is not None and longest > limits.max_path_chars:
-            return failed(
+            return run.fail(
                 ErrorCode.PATH_NOT_ALLOWED,
                 f"una ruta de la corrida tiene {longest} caracteres y SUMO admite hasta "
                 f"{limits.max_path_chars}: use una carpeta de ejecuciones menos profunda",
                 None,
             )
-        outcome = _execute(binary, arguments, writer.path, limits.wall_timeout_s)
-        writer.output_path("sumo.stdout.txt").write_bytes(outcome.stdout)
-        writer.output_path("sumo.stderr.txt").write_bytes(outcome.stderr)
+        outcome = _launch(writer, plan, limits, cancel)
         _keep_declared_outputs(writer)
-        if outcome.timed_out:
-            return failed(
-                ErrorCode.SIM_TIMEOUT,
-                f"SUMO superó el límite de {_seconds(limits.wall_timeout_s)} s de tiempo real",
-                None,
-            )
-        if outcome.returncode != 0:
-            return failed(
-                ErrorCode.SIM_FAILED,
-                f"SUMO terminó con código {outcome.returncode}; detalle en outputs/sumo.stderr.txt",
-                outcome.returncode,
-            )
+        stopped = run.stopped(outcome)
+        if stopped is not None:
+            return stopped
         try:
             summary = summarize_outputs(
                 writer.path / "outputs",
                 declared_vehicles,
                 mode=mode,
-                end_limit_s=end_s,
-                sumo_version=version,
+                end_limit_s=plan.end_s,
+                sumo_version=plan.environment["sumo"],
             )
         except DomainError as invalid:
-            return failed(ErrorCode.OUTPUT_INVALID, invalid.message, outcome.returncode)
+            return run.fail(ErrorCode.OUTPUT_INVALID, invalid.message, outcome.returncode, outcome)
         extra, problem = _final_outputs(finalize, writer)
         if problem is not None:
-            return failed(ErrorCode.OUTPUT_INVALID, problem, outcome.returncode)
-        for name, data in extra.items():
-            writer.output_path(name).write_bytes(data)
-        writer.output_path(SUMMARY).write_text(summary.model_dump_json(indent=2), encoding="utf-8")
-        manifest = writer.publish(
-            status="succeeded", command=command, environment=environment, exit_code=0
-        )
-        return SimulationResult(manifest=manifest, summary=summary)
+            return run.fail(ErrorCode.OUTPUT_INVALID, problem, outcome.returncode, outcome)
+        return run.succeed(summary, extra, outcome)
 
 
 def _final_outputs(
@@ -343,27 +527,6 @@ def _longest_path(folder: Path, relatives: Iterable[str]) -> int:
     """Longitud de la ruta absoluta más larga que SUMO usará dentro de ``folder``."""
     base = len(str(folder.resolve()))
     return max((base + 1 + len(relative) for relative in relatives), default=base)
-
-
-def _execute(binary: Path, arguments: list[str], cwd: Path, timeout_s: float) -> _Outcome:
-    try:
-        completed = subprocess.run(  # noqa: S603  (lista de argumentos, sin shell: ADR04)
-            [str(binary), *arguments],
-            cwd=cwd,
-            capture_output=True,
-            timeout=timeout_s,
-            check=False,
-            stdin=subprocess.DEVNULL,
-        )
-    except subprocess.TimeoutExpired as expired:
-        return _Outcome(None, _as_bytes(expired.stdout), _as_bytes(expired.stderr), timed_out=True)
-    return _Outcome(completed.returncode, completed.stdout, completed.stderr, timed_out=False)
-
-
-def _as_bytes(value: bytes | str | None) -> bytes:
-    if value is None:
-        return b""
-    return value.encode("utf-8") if isinstance(value, str) else value
 
 
 def _keep_declared_outputs(writer: RunWriter) -> None:

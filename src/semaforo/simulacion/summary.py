@@ -5,6 +5,7 @@ métricas (QA08). Los hallazgos no invalidan la corrida; avisan de que sus resul
 efecto del semáforo con otros (por ejemplo, demanda que nunca entró a la red).
 """
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import Field
@@ -23,6 +24,16 @@ UNMET_DEMAND: frozenset[str] = frozenset(
     {"LOADED_BELOW_DECLARED", "DEMAND_NOT_INSERTED", "VEHICLES_STILL_RUNNING"}
 )
 Mode = Literal["smoke", "base"]
+# Por qué terminó una corrida (DEV07 F2, D7). ``not_started``: falló antes de lanzar SUMO.
+Termination = Literal[
+    "completed",
+    "sumo_error",
+    "timeout",
+    "cancelled",
+    "output_budget",
+    "memory_budget",
+    "not_started",
+]
 
 
 class SimulationFinding(FrozenModel):
@@ -61,3 +72,21 @@ class SimulationSummary(FrozenModel):
     declared_vehicles: float | None
     demand_unmet: bool
     findings: list[SimulationFinding]
+
+
+class RunTiming(FrozenModel):
+    """Tiempos de una corrida (``outputs/tiempos.json``; DEV07 F2, decisión D7).
+
+    Va en un archivo propio y no en el manifiesto porque el contrato ``run_manifest`` viene de la
+    documentación. Las horas y la duración no entran en comparaciones científicas (QA09).
+    """
+
+    schema_version: Literal["1.0.0"] = "1.0.0"
+    started_at: datetime
+    finished_at: datetime
+    duration_s: float = Field(ge=0)
+    wall_timeout_s: float = Field(gt=0)
+    end_s: float = Field(gt=0)
+    termination: Termination
+    peak_memory_bytes: int | None = Field(ge=0)
+    output_bytes: int = Field(ge=0)
