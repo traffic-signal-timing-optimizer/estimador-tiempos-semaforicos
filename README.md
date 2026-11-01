@@ -75,6 +75,17 @@ Ejecuta SUMO sobre una carpeta de entradas ya preparada y publica la corrida en 
 | 5 | carpeta de entradas alterada o ruta no permitida |
 | 1 | error interno; repita con `--debug` para ver el detalle |
 
+## Revisar y comparar corridas: `runs verify` y `runs compare`
+
+```powershell
+.venv\Scripts\python.exe -m semaforo runs verify [--workspace datos] [--run-id RUN_ID] [--debug]
+.venv\Scripts\python.exe -m semaforo runs compare --run-a RUN_ID --run-b RUN_ID [--workspace datos] [--tolerance 1e-9] [--debug]
+```
+
+- `runs verify` revisa todas las carpetas guardadas de `datos/` (corridas, recepciones, copias de originales, programas, entradas, reportes de calidad y de réplica) y dice cuáles están íntegras, alteradas, incompletas, en curso o no siguen un formato conocido. Solo lee: no mueve ni corrige nada. Código 0 si nada está alterado; 5 si algo lo está.
+- `runs verify --run-id` sigue una corrida hacia atrás: su carpeta de entradas, el programa derivado y el caso (o la copia de originales, en las corridas de recepción) y la corrida anterior si es un reintento. Código 0 si la cadena está completa; 5 si un eslabón está alterado; 3 si falta o cambió alguno.
+- `runs compare` dice si dos corridas son réplicas: mismas entradas y semilla, y mismos resultados sin contar la hora ni las duraciones. Publica el reporte en `datos/derivados/replicas/` y sale con código 0 tanto si son `equivalent` como `different` (mire `status`). `--tolerance` es la diferencia admitida en números con decimales.
+
 ## Desarrollo
 
 Verificaciones completas (estilo, tipos, pruebas y contratos):

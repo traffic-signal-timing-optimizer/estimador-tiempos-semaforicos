@@ -38,18 +38,25 @@ from semaforo.trazabilidad.manifest import RunManifest
 from semaforo.trazabilidad.store import INPUTS, MANIFEST, read_run, scan_files, utc_now
 
 __all__ = [
+    "BROKEN_CHAIN_EXIT",
     "CASES",
     "INPUT_FOLDERS",
+    "INTEGRITY_EXIT",
     "PROGRAMS",
     "QUALITY",
     "Link",
     "RunTrace",
     "WorkspaceItem",
     "WorkspaceReport",
+    "trace_exit_code",
     "trace_run",
     "verify_workspace",
+    "workspace_exit_code",
 ]
 
+# Códigos de salida (diseño técnico): 5 = fallo de integridad; 3 = artefacto o dependencia faltante.
+INTEGRITY_EXIT = 5
+BROKEN_CHAIN_EXIT = 3
 CASES = "casos"
 PROGRAMS = "derivados/programas"
 INPUT_FOLDERS = "derivados/entradas"
@@ -431,3 +438,17 @@ def verify_workspace(
         counts=counts,
         items=items,
     )
+
+
+def workspace_exit_code(report: WorkspaceReport) -> int:
+    """0 si nada está alterado; 5 (fallo de integridad) si algo lo está."""
+    return INTEGRITY_EXIT if report.status == "altered" else 0
+
+
+def trace_exit_code(trace: RunTrace) -> int:
+    """0 si la cadena está completa; 5 si un eslabón está alterado; 3 si falta o cambió alguno."""
+    if trace.status == "complete":
+        return 0
+    if any(link.status == "altered" for link in trace.links):
+        return INTEGRITY_EXIT
+    return BROKEN_CHAIN_EXIT

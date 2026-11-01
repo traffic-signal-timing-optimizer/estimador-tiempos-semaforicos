@@ -20,7 +20,14 @@ from semaforo.trazabilidad.hashing import sha256_bytes
 from semaforo.trazabilidad.store import utc_now
 from semaforo.trazabilidad.verify import read_verified
 
-__all__ = ["REPLICAS", "REPORT_FILE", "ReplicaManifest", "read_replica", "replicate"]
+__all__ = [
+    "REPLICAS",
+    "REPORT_FILE",
+    "ReplicaManifest",
+    "Tolerance",
+    "read_replica",
+    "replicate",
+]
 
 REPLICAS = "derivados/replicas"
 REPORT_FILE = "replica.json"

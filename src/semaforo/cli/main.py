@@ -15,6 +15,11 @@ Comandos:
 - ``simulate run``: ejecuta una carpeta de entradas de SUMO y publica la corrida (DEV07). Códigos
   de salida: 0 exitosa; 2 entradas inválidas; 3 SUMO ausente; 4 fallida, tiempo agotado o
   cancelada; 5 integridad o ruta no permitida. Hay que leer ``status`` del JSON, no solo el código.
+- ``runs verify``: revisa todas las carpetas publicadas del espacio de trabajo (0 íntegro, 5 algo
+  alterado); con ``--run-id``, la cadena de esa corrida (0 completa, 5 alterada, 3 falta o cambió
+  un eslabón) (DEV08).
+- ``runs compare``: compara dos corridas y publica el reporte de réplica (0 al registrarlo, sea
+  ``equivalent`` o ``different``: hay que leer ``status``) (DEV08).
 """
 
 import argparse
@@ -25,11 +30,20 @@ from pathlib import Path
 
 from semaforo.app.comparison import compare_receptions
 from semaforo.app.exit_codes import INTERNAL_ERROR_EXIT, exit_code_for
+from semaforo.app.integrity import (
+    RunTrace,
+    WorkspaceReport,
+    trace_exit_code,
+    trace_run,
+    verify_workspace,
+    workspace_exit_code,
+)
 from semaforo.app.reception import (
     DomainError,
     publish_public_report,
     receive_case,
 )
+from semaforo.app.replica import Tolerance, replicate
 from semaforo.app.simulate import RunReport, run_prepared
 from semaforo.cli.doctor import configure_doctor, run_doctor, summary
 
@@ -42,6 +56,17 @@ def _positive_seconds(text: str) -> float:
         raise argparse.ArgumentTypeError(f"no es un número: {text!r}") from error
     if not 0 < value < float("inf"):
         raise argparse.ArgumentTypeError("debe ser un número de segundos mayor que cero")
+    return value
+
+
+def _positive_number(text: str) -> float:
+    """Número mayor que cero para ``--tolerance``."""
+    try:
+        value = float(text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(f"no es un número: {text!r}") from error
+    if not 0 < value < float("inf"):
+        raise argparse.ArgumentTypeError("debe ser un número mayor que cero")
     return value
 
 
@@ -97,7 +122,24 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--retry-of", default=None, help="run_id de una corrida fallida, cancelada o interrumpida"
     )
-    for command in (doctor, receive, publish, compare, run):
+    runs = groups.add_parser("runs", help="revisa y compara corridas publicadas (DEV08)")
+    runs_actions = runs.add_subparsers(dest="action", required=True)
+    verify = runs_actions.add_parser(
+        "verify", help="revisa el espacio de trabajo, o la cadena de una corrida con --run-id"
+    )
+    verify.add_argument("--run-id", default=None, help="corrida cuya cadena se revisa")
+    compare_runs = runs_actions.add_parser(
+        "compare", help="compara dos corridas y publica el reporte de réplica"
+    )
+    compare_runs.add_argument("--run-a", required=True, help="primera corrida")
+    compare_runs.add_argument("--run-b", required=True, help="segunda corrida")
+    compare_runs.add_argument(
+        "--tolerance",
+        type=_positive_number,
+        default=None,
+        help="diferencia admitida en números con decimales, relativa y absoluta (por defecto 1e-9)",
+    )
+    for command in (doctor, receive, publish, compare, run, verify, compare_runs):
         command.add_argument(
             "--workspace",
             type=Path,
@@ -136,6 +178,61 @@ def _run_summary(report: RunReport) -> str:
     return "\n".join(lines)
 
 
+def _with_exit(data: dict[str, object], code: int) -> str:
+    return json.dumps({**data, "exit_code": code}, ensure_ascii=False, indent=2)
+
+
+def _workspace_summary(report: WorkspaceReport) -> str:
+    counts = report.counts
+    lines = [
+        f"Espacio de trabajo {report.status}: {counts['intact']} íntegras, {counts['altered']} "
+        f"alteradas, {counts['incomplete']} incompletas, {counts['temporary']} temporales, "
+        f"{counts['unknown']} desconocidas"
+    ]
+    lines += [
+        f"ALTERADA {item.path}: {item.detail}" for item in report.items if item.status == "altered"
+    ]
+    return "\n".join(lines)
+
+
+def _trace_summary(trace: RunTrace) -> str:
+    lines = [f"Corrida {trace.run_id}: cadena {trace.status}"]
+    lines += [f"[{link.status}] {link.kind}: {link.path or link.detail}" for link in trace.links]
+    return "\n".join(lines)
+
+
+def _runs(arguments: argparse.Namespace, workspace: Path) -> int:
+    if arguments.action == "verify" and arguments.run_id is None:
+        report = verify_workspace(workspace)
+        code = workspace_exit_code(report)
+        _emit(_with_exit(report.model_dump(mode="json"), code))
+        _say(_workspace_summary(report))
+        return code
+    if arguments.action == "verify":
+        trace = trace_run(workspace, str(arguments.run_id))
+        code = trace_exit_code(trace)
+        _emit(_with_exit(trace.model_dump(mode="json"), code))
+        _say(_trace_summary(trace))
+        return code
+    tolerance = (
+        None
+        if arguments.tolerance is None
+        else Tolerance(relative=arguments.tolerance, absolute=arguments.tolerance)
+    )
+    report, folder = replicate(
+        workspace, str(arguments.run_a), str(arguments.run_b), tolerance=tolerance
+    )
+    data: dict[str, object] = {
+        "status": report.verdict,
+        "path": folder.relative_to(workspace).as_posix(),
+        "report": report.model_dump(mode="json"),
+    }
+    _emit(_with_exit(data, 0))
+    reasons = "".join(f"\n- {reason}" for reason in report.reasons)
+    _say(f"Réplica {report.run_a} y {report.run_b}: {report.verdict}{reasons}")
+    return 0
+
+
 def _run(arguments: argparse.Namespace) -> int:
     workspace = Path(arguments.workspace)
     if arguments.group == "doctor":
@@ -144,6 +241,8 @@ def _run(arguments: argparse.Namespace) -> int:
         _emit(report.model_dump_json(indent=2))
         _say(summary(report))
         return report.exit_code
+    if arguments.group == "runs":
+        return _runs(arguments, workspace)
     if arguments.group == "simulate":
         report = run_prepared(
             Path(arguments.inputs),
