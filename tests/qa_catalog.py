@@ -11,6 +11,7 @@ Lo usan ``tests/unit/test_qa_catalog.py`` (vigila que el catálogo no se pudra) 
 
 import ast
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -183,6 +184,7 @@ CATALOG: tuple[Qa, ...] = (
 )
 
 
+@cache
 def list_tests(path: Path) -> list[str]:
     """Nombres de las pruebas (``test_*``) de un archivo, en el orden en que aparecen."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -193,6 +195,7 @@ def list_tests(path: Path) -> list[str]:
     ]
 
 
+@cache
 def resolve(entry: str) -> list[str]:
     """Identificadores de pytest (``archivo::función``) que cubre una entrada del catálogo.
 
