@@ -171,6 +171,10 @@ def read_counts(path: Path, case: Case, max_bytes: int = MAX_COUNTS_BYTES) -> Co
 
 
 def _read_bytes(path: Path, max_bytes: int) -> bytes:
+    if path.is_symlink() or path.is_junction():
+        raise CountImportError(
+            [CountIssue(None, None, "el archivo es un enlace o una unión y no se sigue")]
+        )
     try:
         with path.open("rb") as handle:
             data = read_at_most(handle, max_bytes + 1)

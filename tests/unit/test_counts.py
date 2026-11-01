@@ -3,6 +3,8 @@
 import copy
 import hashlib
 import json
+import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -303,3 +305,53 @@ def test_qa04_each_defect_of_the_catalog_is_identified_and_never_accepted(
         prepare_counts(path, make_case())
     assert [(i.line, i.field) for i in raised.value.issues] == [(line, field)]
     assert all(i.message for i in raised.value.issues)
+
+
+# QA10 al importar: un archivo de aforos que es un enlace o una unión no se sigue.
+
+
+def test_a_counts_file_that_is_a_symlink_is_not_followed(tmp_path: Path) -> None:
+    real = write(tmp_path, VALID_ROWS)
+    link = tmp_path / "enlace.csv"
+    try:
+        link.symlink_to(real)
+    except OSError:
+        pytest.skip("este equipo no permite crear enlaces simbólicos sin privilegios")
+    assert issues_of(link) == [(None, None)]
+    with pytest.raises(CountImportError) as raised:
+        read_counts(link, make_case())
+    assert "enlace" in raised.value.issues[0].message
+
+
+@pytest.mark.parametrize("kind", ["is_symlink", "is_junction"])
+def test_a_counts_file_that_the_system_reports_as_a_link_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str
+) -> None:
+    path = write(tmp_path, VALID_ROWS)
+
+    def reported(self: Path) -> bool:
+        return self == path
+
+    monkeypatch.setattr(Path, kind, reported)
+    with pytest.raises(CountImportError) as raised:
+        read_counts(path, make_case())
+    assert [(i.line, i.field) for i in raised.value.issues] == [(None, None)]
+    assert "enlace" in raised.value.issues[0].message
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="las uniones solo existen en Windows")
+def test_a_counts_path_inside_a_junction_to_a_folder_is_a_normal_file(tmp_path: Path) -> None:
+    """Solo el archivo en sí se comprueba; una carpeta intermedia no lo vuelve un enlace."""
+    real = tmp_path / "real"
+    real.mkdir()
+    write(real, VALID_ROWS)
+    link = tmp_path / "carpeta_enlazada"
+    subprocess.run(  # noqa: S603
+        ["cmd.exe", "/c", "mklink", "/J", str(link), str(real)],  # noqa: S607
+        check=True,
+        capture_output=True,
+    )
+    try:
+        assert len(read_counts(link / "aforos.csv", make_case()).rows) == 4
+    finally:
+        link.rmdir()
