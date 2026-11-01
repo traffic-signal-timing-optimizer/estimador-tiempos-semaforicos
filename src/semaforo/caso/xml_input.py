@@ -15,6 +15,7 @@ from defusedxml.common import DefusedXmlException
 from defusedxml.ElementTree import fromstring
 
 from semaforo.caso.errors import CasoError, ErrorCode
+from semaforo.trazabilidad.fs import read_at_most
 
 GZIP_MAGIC = b"\x1f\x8b"
 
@@ -33,7 +34,8 @@ def read_bounded(path: Path, max_bytes: int) -> bytes:
         with path.open("rb") as handle:
             compressed = handle.read(len(GZIP_MAGIC)) == GZIP_MAGIC
             handle.seek(0)
-            data = (gzip.GzipFile(fileobj=handle) if compressed else handle).read(max_bytes + 1)
+            source = gzip.GzipFile(fileobj=handle) if compressed else handle
+            data = read_at_most(source, max_bytes + 1)
     except (OSError, EOFError, zlib.error) as error:
         raise invalid(f"no se puede leer el archivo ({type(error).__name__})", path.name) from error
     if len(data) > max_bytes:

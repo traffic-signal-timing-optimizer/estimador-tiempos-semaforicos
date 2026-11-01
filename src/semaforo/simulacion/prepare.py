@@ -54,7 +54,7 @@ from semaforo.simulacion.demand_inputs import (
     route_issues,
     type_issues,
 )
-from semaforo.trazabilidad.fs import publish_files
+from semaforo.trazabilidad.fs import publish_files, read_at_most
 from semaforo.trazabilidad.hashing import sha256_bytes
 from semaforo.trazabilidad.ids import content_id
 from semaforo.trazabilidad.store import utc_now
@@ -402,7 +402,7 @@ def _network(case: Case, case_dir: Path) -> tuple[str, bytes, NetworkGraph]:
     path = verified_network_path(case.network, case_dir)
     try:
         with path.open("rb") as handle:
-            data = handle.read(MAX_NET_BYTES + 1)
+            data = read_at_most(handle, MAX_NET_BYTES + 1)
     except OSError as error:
         raise CasoError(
             ErrorCode.INPUT_SCHEMA, f"no se pudo leer la red ({type(error).__name__})", "network"

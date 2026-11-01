@@ -32,6 +32,7 @@ from semaforo.simulacion.summary import (
     SimulationFinding,
     SimulationSummary,
 )
+from semaforo.simulacion.tripinfo import read_trips
 from semaforo.trazabilidad.manifest import Error, RunManifest
 from semaforo.trazabilidad.paths import check_relative_path
 from semaforo.trazabilidad.store import RunSpec, RunWriter, utc_now
@@ -189,6 +190,7 @@ def run_simulation(  # noqa: PLR0913  (los argumentos opcionales son de solo pal
     sumo: Path | None = None,
     declared_vehicles: float | None = None,
     clock: Callable[[], datetime] = utc_now,
+    finalize: Callable[[Path], Mapping[str, bytes]] | None = None,
 ) -> SimulationResult:
     """Ejecuta la simulación de ``source`` y publica la corrida en ``runs_root``.
 
@@ -202,6 +204,10 @@ def run_simulation(  # noqa: PLR0913  (los argumentos opcionales son de solo pal
         sumo: ejecutable de SUMO; si es None, se busca con ``SUMO_HOME``.
         declared_vehicles: vehículos que declara la demanda (auditoría de F4), para comparar.
         clock: reloj con zona horaria, para la fecha del manifiesto.
+        finalize: paso previo a publicar una corrida exitosa (DEV07 F1). Recibe la carpeta de la
+            corrida (``inputs/`` y ``outputs/``) y devuelve archivos para agregar a ``outputs/``,
+            que no pueden reemplazar a ninguno existente. Si lanza ``DomainError``, la corrida se
+            publica ``failed`` con OUTPUT_INVALID y sin métricas.
 
     Raises:
         DomainError: antes de ejecutar nada, PATH_NOT_ALLOWED si la entrada sale de la carpeta,
@@ -282,11 +288,32 @@ def run_simulation(  # noqa: PLR0913  (los argumentos opcionales son de solo pal
             )
         except DomainError as invalid:
             return failed(ErrorCode.OUTPUT_INVALID, invalid.message, outcome.returncode)
+        extra, problem = _final_outputs(finalize, writer)
+        if problem is not None:
+            return failed(ErrorCode.OUTPUT_INVALID, problem, outcome.returncode)
+        for name, data in extra.items():
+            writer.output_path(name).write_bytes(data)
         writer.output_path(SUMMARY).write_text(summary.model_dump_json(indent=2), encoding="utf-8")
         manifest = writer.publish(
             status="succeeded", command=command, environment=environment, exit_code=0
         )
         return SimulationResult(manifest=manifest, summary=summary)
+
+
+def _final_outputs(
+    finalize: Callable[[Path], Mapping[str, bytes]] | None, writer: RunWriter
+) -> tuple[Mapping[str, bytes], str | None]:
+    """Archivos del paso final y, si falló, su motivo."""
+    if finalize is None:
+        return {}, None
+    try:
+        extra = finalize(writer.path)
+    except DomainError as invalid:
+        return {}, invalid.message
+    taken = [name for name in extra if name == SUMMARY or writer.output_path(name).exists()]
+    if taken:
+        return {}, f"el paso final quiso reemplazar la salida {taken[0]}"
+    return extra, None
 
 
 def _checked_entry(entry_config: str) -> str:
@@ -385,7 +412,7 @@ def summarize_outputs(
         stats = parse_root(
             folder / STATISTICS, MAX_OUTPUT_BYTES, frozenset({"statistics"}), STATISTICS
         )
-        trips = parse_root(folder / TRIPINFO, MAX_OUTPUT_BYTES, frozenset({"tripinfos"}), TRIPINFO)
+        trips = read_trips(folder / TRIPINFO, MAX_OUTPUT_BYTES)
         vehicles = _element(stats, "vehicles", STATISTICS)
         teleports = _element(stats, "teleports", STATISTICS)
         performance = stats.find("performance")
@@ -393,8 +420,7 @@ def summarize_outputs(
         trip_stats = stats.find("vehicleTripStatistics")
         loaded, inserted = integer(vehicles, "loaded"), integer(vehicles, "inserted")
         running, waiting = integer(vehicles, "running"), integer(vehicles, "waiting")
-        tripinfos = trips.findall("tripinfo")
-        unfinished = sum(1 for trip in tripinfos if (optional_number(trip, "arrival") or 0) < 0)
+        unfinished = sum(1 for trip in trips.values() if (trip.arrival or 0) < 0)
         counts = {
             "teleports_total": integer(teleports, "total"),
             "teleports_jam": integer(teleports, "jam"),
@@ -411,8 +437,8 @@ def summarize_outputs(
         raise _invalid(error.message, error.field or STATISTICS) from error
     if inserted > loaded:
         raise _invalid(f"se insertaron {inserted} vehículos de {loaded} cargados", "vehicles")
-    if len(tripinfos) != inserted:
-        raise _invalid(f"hay {len(tripinfos)} viajes y {inserted} vehículos insertados", TRIPINFO)
+    if len(trips) != inserted:
+        raise _invalid(f"hay {len(trips)} viajes y {inserted} vehículos insertados", TRIPINFO)
     if unfinished != running:
         raise _invalid(
             f"hay {unfinished} viajes sin terminar y {running} vehículos en la red", TRIPINFO
@@ -427,7 +453,7 @@ def summarize_outputs(
         vehicles_inserted=inserted,
         vehicles_running=running,
         vehicles_waiting=waiting,
-        trips_finished=len(tripinfos) - unfinished,
+        trips_finished=len(trips) - unfinished,
         trips_unfinished=unfinished,
         mean_depart_delay_s=depart_delay,
         declared_vehicles=declared_vehicles,

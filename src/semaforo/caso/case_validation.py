@@ -52,6 +52,7 @@ from semaforo.dominio.case_rules import (
     evaluate_rules,
     group_window,
 )
+from semaforo.trazabilidad.fs import read_at_most
 
 __all__ = ["MAX_CASE_BYTES", "read_case", "validate_case"]
 
@@ -103,7 +104,7 @@ def _read_bytes(path: Path) -> bytes:
         raise CasoError(ErrorCode.INPUT_SCHEMA, "la ruta del caso no es un archivo", FIELD)
     try:
         with path.open("rb") as handle:
-            return handle.read(MAX_CASE_BYTES + 1)
+            return read_at_most(handle, MAX_CASE_BYTES + 1)
     except OSError as error:
         raise CasoError(
             ErrorCode.INPUT_SCHEMA,

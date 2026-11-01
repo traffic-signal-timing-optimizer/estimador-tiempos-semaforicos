@@ -1,12 +1,40 @@
-"""Operaciones sobre carpetas de copias inmutables (solo lectura)."""
+"""Operaciones sobre carpetas de copias inmutables (solo lectura) y lectura acotada de archivos."""
 
 import shutil
 import stat
 import tempfile
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import Protocol
 
 from semaforo.trazabilidad.paths import check_relative_path
+
+# Tamaño de cada parte al leer con tope (DEV07 F0, D17).
+READ_CHUNK_BYTES = 1024 * 1024
+
+
+class Readable(Protocol):
+    """Algo de lo que se leen bytes: un archivo abierto en binario o un ``GzipFile``."""
+
+    def read(self, size: int = -1, /) -> bytes: ...
+
+
+def read_at_most(stream: Readable, limit: int) -> bytes:
+    """Hasta ``limit`` bytes de ``stream``, leídos por partes.
+
+    ``stream.read(limit)`` reserva de una vez memoria para ``limit`` bytes aunque el archivo sea
+    chico (medido en DEV07 F0: 512 MB para leer 0,8 MB). Por partes, la memoria es la del archivo.
+    Para saber si un archivo supera un tope, se pide ``tope + 1`` y se compara el largo.
+    """
+    parts: list[bytes] = []
+    remaining = limit
+    while remaining > 0:
+        chunk = stream.read(min(READ_CHUNK_BYTES, remaining))
+        if not chunk:
+            break
+        parts.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(parts)
 
 
 def make_read_only(folder: Path) -> None:

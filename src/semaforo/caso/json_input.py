@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 from semaforo.caso.errors import CasoError, ErrorCode
+from semaforo.trazabilidad.fs import read_at_most
 
 __all__ = ["MAX_JSON_BYTES", "read_json", "read_text_file"]
 
@@ -54,7 +55,7 @@ def read_text_file(path: Path, what: str, max_bytes: int) -> str:
         raise _invalid(f"{what}: no existe el archivo", path.name)
     try:
         with path.open("rb") as handle:
-            content = handle.read(max_bytes + 1)
+            content = read_at_most(handle, max_bytes + 1)
     except OSError as error:
         raise _invalid(f"{what}: no se pudo leer ({type(error).__name__})", path.name) from error
     if len(content) > max_bytes:

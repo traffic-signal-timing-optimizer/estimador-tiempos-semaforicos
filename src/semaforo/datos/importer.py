@@ -22,6 +22,7 @@ from pathlib import Path
 
 from semaforo.dominio.case import Case
 from semaforo.dominio.errors import DomainError, ErrorCode
+from semaforo.trazabilidad.fs import read_at_most
 
 __all__ = [
     "HEADER",
@@ -172,7 +173,7 @@ def read_counts(path: Path, case: Case, max_bytes: int = MAX_COUNTS_BYTES) -> Co
 def _read_bytes(path: Path, max_bytes: int) -> bytes:
     try:
         with path.open("rb") as handle:
-            data = handle.read(max_bytes + 1)
+            data = read_at_most(handle, max_bytes + 1)
     except OSError as error:
         raise CountImportError(
             [CountIssue(None, None, f"no se puede leer el archivo ({type(error).__name__})")]

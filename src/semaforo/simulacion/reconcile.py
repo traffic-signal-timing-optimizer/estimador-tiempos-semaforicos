@@ -27,7 +27,6 @@ from pydantic import Field, ValidationError
 
 from semaforo.caso.errors import CasoError
 from semaforo.caso.json_input import read_json, read_text_file
-from semaforo.caso.xml_input import optional_number, parse_root, required
 from semaforo.dominio.base_model import FrozenModel
 from semaforo.dominio.errors import DomainError, ErrorCode
 from semaforo.simulacion.cohort import SAFE_ID
@@ -37,6 +36,7 @@ from semaforo.simulacion.prepare import (
     MANIFEST_FILE,
     InputsManifest,
 )
+from semaforo.simulacion.tripinfo import read_trips
 from semaforo.trazabilidad.hashing import sha256_file
 from semaforo.trazabilidad.store import read_run
 
@@ -246,26 +246,10 @@ def _trips_by_id(tripinfo: Path) -> dict[str, tuple[float | None, float | None]]
             tripinfo.name,
         )
     try:
-        root = parse_root(tripinfo, MAX_TRIPINFO_BYTES, frozenset({"tripinfos"}), "tripinfo")
-        found = [
-            (
-                required(trip, "id"),
-                (optional_number(trip, "depart"), optional_number(trip, "arrival")),
-            )
-            for trip in root.findall("tripinfo")
-        ]
+        trips = read_trips(tripinfo, MAX_TRIPINFO_BYTES)
     except DomainError as invalid:
         raise _error(ErrorCode.OUTPUT_INVALID, invalid.message, tripinfo.name) from invalid
-    trips: dict[str, tuple[float | None, float | None]] = {}
-    for trip_id, times in found:
-        if trip_id in trips:
-            raise _error(
-                ErrorCode.OUTPUT_INVALID,
-                f"SUMO escribió dos viajes del vehículo «{trip_id}»",
-                tripinfo.name,
-            )
-        trips[trip_id] = times
-    return trips
+    return {trip_id: (trip.depart, trip.arrival) for trip_id, trip in trips.items()}
 
 
 def _apply_trips(vehicles: list[VehicleOutcome], tripinfo: Path) -> list[VehicleOutcome]:
