@@ -34,8 +34,8 @@ Las corridas (`ejecuciones/`) siguen con su propio mecanismo de DEV07; una tempo
 
 | Grupo | Qué cubren |
 |---|---|
-| Publicación (22) | Sin temporales ni candados sobrantes, nombre de la temporal, publicación en curso, destino existente o aparecido a mitad, error al escribir, caídas apartadas (con destino, sin destino, recientes y viejas, de corridas, repetidas, que no se pueden mover, uniones), y un publicador terminado a la fuerza de verdad |
-| Lectura verificada (14) | Programa y reporte intactos; archivo cambiado, sobrante o faltante; manifiesto reescrito, roto, de otro modelo o demasiado grande; carpeta o manifiesto inexistentes; ruta que sale de la carpeta; carpeta que es una unión |
+| Publicación (19) | Sin temporales ni candados sobrantes, nombre de la temporal, publicación en curso, destino existente o aparecido a mitad, error al escribir, caídas apartadas (con destino, sin destino, recientes y viejas, de corridas, repetidas, que no se pueden mover, uniones), y un publicador terminado a la fuerza de verdad |
+| Lectura verificada (15) | Programa y reporte intactos; archivo cambiado, sobrante o faltante; manifiesto reescrito, roto, de otro modelo o demasiado grande; carpeta o manifiesto inexistentes; ruta que sale de la carpeta; carpeta que es una unión |
 | Copia de originales (2) | Copia en curso por otra recepción; copia publicada mientras tanto por otra |
 
 **Mutaciones.** 34 cambios a propósito. **30 detectados en la primera pasada; 4 sobrevivieron.** Tres eran huecos reales (temporal con destino vacío, destino existente antes de escribir, manifiesto válido pero demasiado grande) y se cerraron con pruebas. Queda 1 justificada:
