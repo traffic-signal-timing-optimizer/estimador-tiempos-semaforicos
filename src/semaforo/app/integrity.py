@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Literal
 
 from semaforo.app.reception import RECEPTION_ID_PATTERN, RECEPTIONS, RUNS, SNAPSHOTS, read_reception
+from semaforo.app.replica import REPLICAS, read_replica
 from semaforo.caso.case_validation import read_case
 from semaforo.datos.quality_report import read_quality_report
 from semaforo.dominio.base_model import FrozenModel
@@ -293,7 +294,7 @@ def trace_run(workspace: Path, run_id: str) -> RunTrace:
 
 # --- revisión del espacio de trabajo ----------------------------------------------------------
 
-Family = Literal["runs", "receptions", "snapshots", "programs", "inputs", "quality"]
+Family = Literal["runs", "receptions", "snapshots", "programs", "inputs", "quality", "replicas"]
 ItemStatus = Literal["intact", "altered", "incomplete", "temporary", "unknown"]
 
 
@@ -386,7 +387,8 @@ def verify_workspace(
     """Revisa todas las carpetas publicadas de ``workspace``. Solo lee.
 
     Familias: corridas (``ejecuciones``), recepciones, copias de originales, programas derivados,
-    carpetas de entradas y reportes de calidad (``derivados/calidad``). Los casos, escenarios y
+    carpetas de entradas, reportes de calidad (``derivados/calidad``) y reportes de réplica
+    (``derivados/replicas``). Los casos, escenarios y
     demás archivos editables no son carpetas publicadas y no se revisan aquí.
     """
     runs_root = workspace / RUNS
@@ -412,6 +414,7 @@ def verify_workspace(
         ("programs", workspace / PROGRAMS, lambda f: _check(read_program, f), True),
         ("inputs", workspace / INPUT_FOLDERS, lambda f: _check(verify_inputs, f), True),
         ("quality", workspace / QUALITY, lambda f: _check(read_quality_report, f), True),
+        ("replicas", workspace / REPLICAS, lambda f: _check(read_replica, f), False),
     ]
     items = [
         item

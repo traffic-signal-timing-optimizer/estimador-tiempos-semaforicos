@@ -20,6 +20,7 @@ import pytest
 
 from prepared_inputs import MOMENT, request_for
 from semaforo.simulacion.prepare import publish_inputs
+from semaforo.simulacion.replica import compare_runs
 from semaforo.simulacion.run_inputs import CONCILIATION_SUMMARY, CONCILIATION_TABLE, run_inputs
 from semaforo.simulacion.runner import TIMING
 from semaforo.trazabilidad.fs import remove_tree
@@ -100,3 +101,38 @@ def test_the_times_of_a_run_are_not_part_of_the_scientific_comparison(
     result = run_inputs(folder, runs, sumo=sumo_binary, clock=clock).manifest
     assert f"outputs/{TIMING}" in {a.path for a in result.outputs}
     assert TIMING not in SCIENTIFIC  # la comparación nunca depende de cuánto tardó
+
+
+# --- la comparación formal de DEV08 (F3) ------------------------------------------------------
+
+
+def test_the_replica_comparison_says_two_real_runs_are_equivalent(
+    folder: Path, runs: Path, sumo_binary: Path
+) -> None:
+    first = run_inputs(folder, runs, sumo=sumo_binary, clock=clock).manifest
+    second = run_inputs(folder, runs, sumo=sumo_binary, clock=clock).manifest
+    report = compare_runs(runs, first.run_id, second.run_id, created_at=clock())
+    assert (report.verdict, report.reasons, report.inputs_equal) == ("equivalent", [], True)
+    compared = {item.path for item in report.files if item.rule != "excluded"}
+    assert compared == {
+        "outputs/tripinfo.xml",
+        "outputs/statistics.xml",
+        "outputs/summary.json",
+        f"outputs/{CONCILIATION_TABLE}",
+        f"outputs/{CONCILIATION_SUMMARY}",
+    }
+
+
+def test_another_sumo_seed_is_never_taken_for_a_replica(
+    tmp_path: Path, folder: Path, runs: Path, sumo_binary: Path
+) -> None:
+    other = publish_inputs(tmp_path / "otras", request_for(tmp_path, sumo_seed=777), MOMENT)
+    try:
+        first = run_inputs(folder, runs, sumo=sumo_binary, clock=clock).manifest
+        second = run_inputs(other, runs, sumo=sumo_binary, clock=clock).manifest
+        report = compare_runs(runs, first.run_id, second.run_id, created_at=clock())
+        assert report.verdict == "different"
+        assert any(reason.startswith("la semilla no es la misma") for reason in report.reasons)
+        assert not report.inputs_equal  # la configuración de SUMO lleva la semilla
+    finally:
+        remove_tree(tmp_path / "otras")
