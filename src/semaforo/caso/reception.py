@@ -11,7 +11,6 @@ La carpeta de origen nunca se modifica: solo se lee.
 import os
 import posixpath
 import shutil
-import tempfile
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -35,7 +34,7 @@ from semaforo.caso.sumo_config import (
     is_absolute_like,
     read_config_references,
 )
-from semaforo.trazabilidad.fs import make_read_only, remove_tree
+from semaforo.trazabilidad.fs import publication
 from semaforo.trazabilidad.hashing import sha256_file
 from semaforo.trazabilidad.ids import content_id
 
@@ -48,7 +47,6 @@ RETRY_ATTEMPTS = 3
 RETRY_DELAY_S = 0.5
 
 SCRIPT_SUFFIXES = frozenset({".bat", ".cmd", ".ps1", ".sh"})
-TEMP_PREFIX = ".tmp-"
 ABSOLUTE_PATH_MESSAGE = "ruta absoluta: SUMO la usaría tal cual, fuera de la carpeta de la corrida"
 
 Reason = Literal["not_found", "not_a_file", "outside_source", "absolute_path"]
@@ -137,10 +135,19 @@ def snapshot_source(
     manifest = _build_manifest(analysis)
     final = root / manifest.snapshot_id
     reused = final.exists()
+    if not reused:
+        try:
+            _publish(origin, final, analysis.identity_hashes, settings)
+        except FileExistsError as error:
+            if not final.exists():  # otra recepción la está copiando en este momento
+                raise CasoError(
+                    ErrorCode.RUN_EXISTS,
+                    "otra recepción está copiando esta misma simulación; repita en unos segundos",
+                    "snapshot_id",
+                ) from error
+            reused = True  # otra recepción la publicó mientras tanto
     if reused:
         _verify_existing(final, analysis.identity_hashes, settings)
-    else:
-        _publish(origin, final, analysis.identity_hashes, settings)
     return SnapshotResult(manifest=manifest, path=final, reused=reused)
 
 
@@ -398,8 +405,7 @@ def _publish(
     Cada archivo se comprueba dos veces: la copia debe coincidir con el hash del origen y el
     origen no debe haber cambiado mientras se copiaba.
     """
-    temp = Path(tempfile.mkdtemp(prefix=TEMP_PREFIX, dir=final.parent))
-    try:
+    with publication(final) as temp:
         for relative, expected in sorted(identity_hashes.items()):
             destination = temp / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -412,11 +418,6 @@ def _publish(
                 raise CasoError(
                     ErrorCode.HASH_MISMATCH, "el origen cambió durante la copia", relative
                 )
-        make_read_only(temp)
-        temp.replace(final)
-    except BaseException:
-        remove_tree(temp)
-        raise
 
 
 def _verify_existing(

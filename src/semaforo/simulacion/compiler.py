@@ -31,6 +31,7 @@ from semaforo.dominio.errors import DomainError, ErrorCode
 from semaforo.trazabilidad.fs import publish_files
 from semaforo.trazabilidad.hashing import sha256_bytes
 from semaforo.trazabilidad.store import utc_now
+from semaforo.trazabilidad.verify import read_verified
 
 __all__ = [
     "DERIVED_PROGRAM_ID",
@@ -179,6 +180,19 @@ def publish_program(
             ErrorCode.RUN_EXISTS, "ya existe una carpeta con ese programa", "root"
         ) from error
     return final
+
+
+def read_program(folder: Path) -> ProgramManifest:
+    """Manifiesto de un programa publicado, después de comprobar la carpeta entera (DEV08 F1).
+
+    La carpeta debe tener exactamente el programa, los tramos y el manifiesto, cada uno con la
+    huella que registra el manifiesto.
+
+    Raises:
+        TrazabilidadError: PATH_NOT_ALLOWED si hay enlaces; INPUT_SCHEMA si la carpeta o el
+            manifiesto no existen o no son válidos; HASH_MISMATCH si sobra, falta o cambió algo.
+    """
+    return read_verified(folder, MANIFEST_FILE, ProgramManifest, lambda manifest: manifest.files)
 
 
 def _invalid(issues: list[CaseIssue]) -> CompilationError:

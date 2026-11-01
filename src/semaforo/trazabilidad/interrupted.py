@@ -19,7 +19,13 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from semaforo.dominio.base_model import FrozenModel
-from semaforo.trazabilidad.fs import read_at_most
+from semaforo.trazabilidad.fs import (
+    INCOMPLETE_DIR,
+    INCOMPLETE_MARK,
+    free_name,
+    is_plain_folder,
+    read_at_most,
+)
 from semaforo.trazabilidad.lock import RunLock
 from semaforo.trazabilidad.manifest import RunManifest
 from semaforo.trazabilidad.store import (
@@ -38,12 +44,9 @@ __all__ = [
     "recover_interrupted",
 ]
 
-INCOMPLETE_DIR = ".incompletas"
-INCOMPLETE_MARK = "INCOMPLETA.json"
 CAUSE = "el proceso que ejecutaba la corrida terminó sin publicarla"
 # Una carpeta sin manifiesto legible puede estar naciendo; antes de este tiempo no se toca.
 FRESH_S = 60.0
-_MAX_NAME_TRIES = 1000
 
 
 class InterruptedRun(FrozenModel):
@@ -83,25 +86,12 @@ def _age_s(folder: Path) -> float:
     return time.time() - newest
 
 
-def _free_name(parent: Path, base: str) -> str:
-    """``base`` si está libre; si no ``base-2``, ``base-3``… (un run_id pudo caer dos veces)."""
-    for number in range(1, _MAX_NAME_TRIES + 1):
-        name = base if number == 1 else f"{base}-{number}"
-        if not (parent / name).exists():
-            return name
-    raise OSError(f"no hay un nombre libre en {INCOMPLETE_DIR} para {base}")
-
-
-def _is_plain_folder(path: Path) -> bool:
-    return path.is_dir() and not path.is_symlink() and not path.is_junction()
-
-
 def _move(root: Path, folder: Path, run_id: str | None, now: datetime) -> InterruptedRun:
     """Escribe la marca y mueve la carpeta a ``.incompletas``. Se llama con el bloqueo tomado."""
     provisional = _read_provisional(folder)
     destination_root = root / INCOMPLETE_DIR
     destination_root.mkdir(exist_ok=True)
-    name = _free_name(destination_root, run_id or folder.name.removeprefix(TEMP_PREFIX))
+    name = free_name(destination_root, run_id or folder.name.removeprefix(TEMP_PREFIX))
     record = InterruptedRun(
         run_id=run_id,
         folder=f"{INCOMPLETE_DIR}/{name}",
@@ -128,12 +118,12 @@ def recover_interrupted(
     quedó vivo) se deja donde está y se vuelve a intentar la próxima vez. Si ``root`` no existe,
     no se crea nada.
     """
-    if not _is_plain_folder(root):
+    if not is_plain_folder(root):
         return []
     now = clock()
     moved: list[InterruptedRun] = []
     for folder in sorted(root.iterdir()):
-        if not (folder.name.startswith(TEMP_PREFIX) and _is_plain_folder(folder)):
+        if not (folder.name.startswith(TEMP_PREFIX) and is_plain_folder(folder)):
             continue
         provisional = _read_provisional(folder)
         if provisional is None:
@@ -163,11 +153,11 @@ def _recover_one(
 def list_interrupted(root: Path) -> list[InterruptedRun]:
     """Corridas apartadas en ``root/.incompletas``, por nombre. Una marca mala no lanza error."""
     parent = root / INCOMPLETE_DIR
-    if not _is_plain_folder(parent):
+    if not is_plain_folder(parent):
         return []
     found: list[InterruptedRun] = []
     for folder in sorted(parent.iterdir()):
-        if not _is_plain_folder(folder):
+        if not is_plain_folder(folder):
             continue
         relative = f"{INCOMPLETE_DIR}/{folder.name}"
         found.append(_read_mark(folder, relative))

@@ -1,13 +1,35 @@
-"""Operaciones sobre carpetas de copias inmutables (solo lectura) y lectura acotada de archivos."""
+"""Operaciones sobre carpetas de copias inmutables (solo lectura) y lectura acotada de archivos.
+
+Publicar una carpeta (DEV08 F1, decisiones D2 a D4): se toma el bloqueo del sistema
+``<carpeta>/.lock-<destino>``, se escribe en ``<carpeta>/.tmp-<destino>-<aleatorio>`` y se publica
+con un renombrado. Nunca se sobrescribe un destino, aunque dos publicaciones lleguen a la vez. Si
+el programa muere a medias, la carpeta temporal queda; la siguiente publicación en esa carpeta la
+aparta a ``<carpeta>/.incompletas/`` con ``INCOMPLETA.json``, sin borrarla.
+"""
 
 import shutil
 import stat
 import tempfile
-from collections.abc import Callable, Mapping
+import time
+from collections.abc import Callable, Generator, Mapping
+from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
+from semaforo.dominio.base_model import FrozenModel
+from semaforo.trazabilidad.lock import RunLock
 from semaforo.trazabilidad.paths import check_relative_path
+
+TEMP_PREFIX = ".tmp-"
+LOCK_PREFIX = ".lock-"
+INCOMPLETE_DIR = ".incompletas"
+INCOMPLETE_MARK = "INCOMPLETA.json"
+# Una carpeta temporal sin destino en el nombre puede estar naciendo; antes de esto no se toca.
+FRESH_S = 60.0
+_RUN_MANIFEST = "manifest.json"  # las temporales de corridas las aparta recover_interrupted
+_MAX_NAME_TRIES = 1000
+PUBLICATION_CAUSE = "el programa que publicaba la carpeta terminó sin publicarla"
 
 # Tamaño de cada parte al leer con tope (DEV07 F0, D17).
 READ_CHUNK_BYTES = 1024 * 1024
@@ -48,6 +70,135 @@ def make_read_only(folder: Path) -> None:
             path.chmod(stat.S_IREAD)
 
 
+class IncompletePublication(FrozenModel):
+    """Una publicación que quedó a medias y se apartó. Rutas relativas a su carpeta."""
+
+    folder: str
+    source_folder: str
+    target: str | None
+    detected_at: datetime
+    cause: str
+
+
+def free_name(parent: Path, base: str) -> str:
+    """``base`` si está libre en ``parent``; si no, ``base-2``, ``base-3``…"""
+    for number in range(1, _MAX_NAME_TRIES + 1):
+        name = base if number == 1 else f"{base}-{number}"
+        if not (parent / name).exists():
+            return name
+    raise OSError(f"no hay un nombre libre en {INCOMPLETE_DIR} para {base}")
+
+
+def is_plain_folder(path: Path) -> bool:
+    """Una carpeta de verdad: ni enlace ni unión."""
+    return path.is_dir() and not path.is_symlink() and not path.is_junction()
+
+
+def _target_of(name: str) -> str | None:
+    """Destino de una carpeta ``.tmp-<destino>-<aleatorio>``; ``None`` si el nombre es antiguo."""
+    rest = name.removeprefix(TEMP_PREFIX)
+    target, separator, _ = rest.rpartition("-")
+    return target if separator and target else None
+
+
+def _age_s(folder: Path) -> float:
+    try:
+        return time.time() - folder.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _set_aside(
+    parent: Path, folder: Path, target: str | None, now: datetime
+) -> IncompletePublication:
+    destination_root = parent / INCOMPLETE_DIR
+    destination_root.mkdir(exist_ok=True)
+    name = free_name(destination_root, folder.name.removeprefix(TEMP_PREFIX))
+    record = IncompletePublication(
+        folder=f"{INCOMPLETE_DIR}/{name}",
+        source_folder=folder.name,
+        target=target,
+        detected_at=now,
+        cause=PUBLICATION_CAUSE,
+    )
+    (folder / INCOMPLETE_MARK).write_text(record.model_dump_json(indent=2), encoding="utf-8")
+    folder.replace(destination_root / name)
+    return record
+
+
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
+def recover_publications(
+    parent: Path, *, clock: Callable[[], datetime] = _now
+) -> list[IncompletePublication]:
+    """Aparta las publicaciones caídas de ``parent`` a ``parent/.incompletas`` y las devuelve.
+
+    Una publicación viva (su candado está tomado) no se toca. Las temporales de corridas (con
+    ``manifest.json``) se dejan para ``recover_interrupted``. Lo que no se puede mover se deja y se
+    vuelve a intentar la próxima vez. Si ``parent`` no existe, no hace nada.
+    """
+    if not is_plain_folder(parent):
+        return []
+    now = clock()
+    moved: list[IncompletePublication] = []
+    for folder in sorted(parent.iterdir()):
+        if not (folder.name.startswith(TEMP_PREFIX) and is_plain_folder(folder)):
+            continue
+        target = _target_of(folder.name)
+        try:
+            if target is None:
+                if (folder / _RUN_MANIFEST).exists() or _age_s(folder) < FRESH_S:
+                    continue
+                moved.append(_set_aside(parent, folder, None, now))
+                continue
+            lock = RunLock.acquire(parent / f"{LOCK_PREFIX}{target}")
+            if lock is None:
+                continue  # sigue viva
+            with lock:
+                moved.append(_set_aside(parent, folder, target, now))
+        except OSError:
+            continue
+    return moved
+
+
+@contextmanager
+def publication(final: Path) -> Generator[Path]:
+    """Carpeta temporal donde escribir lo que se publicará como ``final``, con su candado tomado.
+
+    Antes aparta las publicaciones caídas de la misma carpeta. Si el bloque termina bien, los
+    archivos quedan de solo lectura y la temporal se publica como ``final`` con un renombrado; si
+    falla, la temporal se borra (su contenido se puede volver a generar).
+
+    Raises:
+        FileExistsError: si ``final`` ya existe o si otra publicación del mismo destino está en
+            curso. Nunca se sobrescribe.
+    """
+    parent = final.parent
+    parent.mkdir(parents=True, exist_ok=True)
+    recover_publications(parent)
+    lock = RunLock.acquire(parent / f"{LOCK_PREFIX}{final.name}")
+    if lock is None:
+        raise FileExistsError(final.name)
+    with lock:
+        if final.exists():
+            raise FileExistsError(final.name)
+        temporary = Path(tempfile.mkdtemp(prefix=f"{TEMP_PREFIX}{final.name}-", dir=parent))
+        try:
+            yield temporary
+            make_read_only(temporary)
+            try:
+                temporary.replace(final)
+            except OSError as error:
+                if final.exists():  # apareció mientras se escribía: no se sobrescribe
+                    raise FileExistsError(final.name) from error
+                raise
+        except BaseException:
+            remove_tree(temporary)
+            raise
+
+
 def publish_files(final: Path, files: Mapping[str, bytes]) -> None:
     """Escribe ``files`` en una carpeta temporal y la publica como ``final`` de una sola vez.
 
@@ -55,24 +206,17 @@ def publish_files(final: Path, files: Mapping[str, bytes]) -> None:
     no queda nada a medias.
 
     Raises:
-        FileExistsError: si ``final`` ya existe; nunca se sobrescribe.
+        FileExistsError: si ``final`` ya existe o se está publicando; nunca se sobrescribe.
         ValueError: si una ruta no es relativa o sale de la carpeta.
     """
     relatives = [check_relative_path(name) for name in files]
     if final.exists():
         raise FileExistsError(final.name)
-    final.parent.mkdir(parents=True, exist_ok=True)
-    temporary = Path(tempfile.mkdtemp(prefix=".tmp-", dir=final.parent))
-    try:
+    with publication(final) as temporary:
         for relative, data in zip(relatives, files.values(), strict=True):
             path = temporary / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
-        make_read_only(temporary)
-        temporary.replace(final)
-    except BaseException:
-        remove_tree(temporary)
-        raise
 
 
 def remove_tree(path: Path) -> None:

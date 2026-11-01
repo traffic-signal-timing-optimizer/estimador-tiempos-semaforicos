@@ -105,7 +105,7 @@ def _checked_run_id(run_id: str) -> str:
         raise TrazabilidadError(ErrorCode.PATH_NOT_ALLOWED, str(error), "run_id") from error
 
 
-def _scan(folder: Path) -> list[str]:
+def scan_files(folder: Path) -> list[str]:
     """Archivos de ``folder`` por ruta relativa con ``/``, ordenados. Rechaza enlaces y uniones."""
     files: list[str] = []
     pending = [folder]
@@ -267,7 +267,7 @@ class RunWriter:
         return manifest
 
     def _verified_outputs(self) -> list[Artifact]:
-        files = _scan(self.path)
+        files = scan_files(self.path)
         inputs = {path for path in files if path.startswith(f"{INPUTS}/")}
         if inputs != set(self._inputs):
             raise TrazabilidadError(
@@ -356,7 +356,7 @@ def read_run(root: Path, run_id: str) -> RunManifest:
             ErrorCode.HASH_MISMATCH, "el manifiesto es de otra ejecución", "run_id"
         )
     artifacts = [*manifest.inputs, *manifest.outputs]
-    if set(_scan(folder)) != {artifact.path for artifact in artifacts} | {MANIFEST}:
+    if set(scan_files(folder)) != {artifact.path for artifact in artifacts} | {MANIFEST}:
         raise TrazabilidadError(
             ErrorCode.HASH_MISMATCH,
             "la carpeta no tiene exactamente los archivos del manifiesto",

@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from semaforo.caso import reception as reception_module
 from semaforo.caso.errors import CasoError, ErrorCode
 from semaforo.caso.reception import ReceptionSettings, SnapshotResult, snapshot_source
 from semaforo.caso.reception_models import MissingDependency
@@ -576,3 +577,33 @@ def test_a_file_with_the_name_of_a_snapshot_is_detected(tmp_path: Path, snapshot
 def test_no_temporary_folders_are_left_behind(tmp_path: Path, snapshots: Path) -> None:
     result = snapshot_source(make_source(tmp_path), ENTRY, snapshots, FAST)
     assert [p.name for p in snapshots.iterdir()] == [result.manifest.snapshot_id]
+
+
+# --- candado de la copia (DEV08 F1) ---------------------------------------------------------
+
+
+def test_a_copy_being_published_by_someone_else_is_refused(
+    tmp_path: Path, snapshots: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def busy(*_: object) -> None:
+        raise FileExistsError("en curso")
+
+    monkeypatch.setattr("semaforo.caso.reception._publish", busy)
+    with pytest.raises(CasoError) as raised:
+        snapshot_source(make_source(tmp_path), ENTRY, snapshots, FAST)
+    assert raised.value.code is ErrorCode.RUN_EXISTS
+
+
+def test_a_copy_published_meanwhile_by_someone_else_is_reused_and_verified(
+    tmp_path: Path, snapshots: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = getattr(reception_module, "_publish")  # noqa: B009  (función privada a envolver)
+
+    def published_meanwhile(*args: object) -> None:
+        real(*args)
+        raise FileExistsError("otra la publicó")
+
+    monkeypatch.setattr(reception_module, "_publish", published_meanwhile)
+    result = snapshot_source(make_source(tmp_path), ENTRY, snapshots, FAST)
+    assert result.reused
+    assert result.path.is_dir()

@@ -29,17 +29,21 @@ from pathlib import Path
 
 from semaforo.datos.coverage import Coverage, MissingEntry
 from semaforo.datos.quality import Exclusion, QualityComparison, QualityError, WindowComparison
+from semaforo.dominio.base_model import FrozenModel
 from semaforo.dominio.case import Case, canonical_sha256
 from semaforo.trazabilidad.fs import publish_files
 from semaforo.trazabilidad.store import utc_now
+from semaforo.trazabilidad.verify import read_verified
 
 __all__ = [
     "DETAIL_FILE",
     "MANIFEST_FILE",
     "SUMMARY_FILE",
+    "QualityManifest",
     "QualityReport",
     "build_report",
     "publish_quality",
+    "read_quality_report",
 ]
 
 DETAIL_FILE = "calidad.csv"
@@ -126,6 +130,29 @@ def publish_quality(root: Path, inputs: ReportInputs, now: datetime | None = Non
     final = root / inputs.case.case_id / report.folder_key
     publish_files(final, report.files)
     return final
+
+
+class QualityManifest(FrozenModel):
+    """Manifiesto de un reporte de calidad publicado (``manifiesto.json``)."""
+
+    schema_version: str
+    created_at: str
+    case_id: str
+    case_sha256: str
+    observed_sha256: str
+    control_sha256: str
+    max_relative_error: float | None
+    files: dict[str, str]
+
+
+def read_quality_report(folder: Path) -> QualityManifest:
+    """Manifiesto de un reporte de calidad publicado, después de comprobar la carpeta (DEV08 F1).
+
+    Raises:
+        TrazabilidadError: PATH_NOT_ALLOWED si hay enlaces; INPUT_SCHEMA si la carpeta o el
+            manifiesto no existen o no son válidos; HASH_MISMATCH si sobra, falta o cambió algo.
+    """
+    return read_verified(folder, MANIFEST_FILE, QualityManifest, lambda manifest: manifest.files)
 
 
 def _text(value: str) -> str:
