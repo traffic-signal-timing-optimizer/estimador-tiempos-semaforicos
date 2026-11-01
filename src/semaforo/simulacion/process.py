@@ -8,6 +8,8 @@ salida en memoria. Aquí:
   pasó el tiempo real, si las salidas superaron su tope y si el proceso superó su tope de memoria.
 - Al cortar el proceso (por tiempo, cancelación o tope) se le pide terminar, a los 5 s se fuerza
   y se espera a que muera: nunca queda un proceso huérfano. Las salidas parciales se conservan.
+- Si el programa que vigila muere a la fuerza, el sistema mata también al proceso (en Windows,
+  ``KillOnClose``): no queda un SUMO huérfano escribiendo en una corrida que nadie vigila.
 - Ctrl+C en la consola cancela la corrida de forma ordenada. En Windows el proceso hijo nace en su
   propio grupo, para que Ctrl+C no llegue directo a él y lo corte a medias.
 
@@ -22,6 +24,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from semaforo.simulacion.job import KillOnClose
 from semaforo.simulacion.resources import MemoryProbe
 from semaforo.simulacion.summary import Termination
 
@@ -220,6 +223,7 @@ def run_controlled(  # noqa: PLR0913  (todos de solo palabra clave, cada uno es 
             stderr=err,
             creationflags=NEW_PROCESS_GROUP,
         )
+        group = KillOnClose.attach(process.pid)  # si este programa muere, el sistema mata a SUMO
         probe = MemoryProbe(process.pid)
         try:
             cause, detail = _supervise(process, probe, watch, cancel, wait)
@@ -230,6 +234,8 @@ def run_controlled(  # noqa: PLR0913  (todos de solo palabra clave, cada uno es 
             _stop(process)  # nada queda vivo, ocurra lo que ocurra
             peak = probe.peak_bytes()
             probe.close()
+            if group is not None:
+                group.close()
     finished_by_itself = cause in ("completed", "sumo_error")
     return ProcessOutcome(
         pid=process.pid,

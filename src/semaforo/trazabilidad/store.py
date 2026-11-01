@@ -9,9 +9,11 @@ publica con un renombrado. Disposición publicada::
     <root>/<run_id>/outputs/...   lo que produjo la ejecución
 
 Mientras se escribe vive en ``<root>/.tmp-<8 caracteres>`` con un manifiesto provisional en estado
-``running``, y el lock ``<root>/.lock-<run_id>`` impide dos escrituras al mismo destino. Una caída
-deja esa carpeta temporal (incompleta): nunca queda publicada una ejecución a medias, y una
-ejecución publicada nunca se sobrescribe.
+``running``, y el lock ``<root>/.lock-<run_id>`` impide dos escrituras al mismo destino. Es un
+bloqueo del sistema operativo (``RunLock``): se libera solo si el proceso muere, y así
+``recover_interrupted`` distingue una corrida viva de una caída. Una caída deja esa carpeta
+temporal (incompleta): nunca queda publicada una ejecución a medias, y una ejecución publicada
+nunca se sobrescribe.
 """
 
 import os
@@ -30,6 +32,7 @@ from pydantic import ValidationError
 from semaforo.dominio.errors import DomainError, ErrorCode
 from semaforo.trazabilidad.fs import make_read_only
 from semaforo.trazabilidad.hashing import sha256_file
+from semaforo.trazabilidad.lock import RunLock
 from semaforo.trazabilidad.manifest import (
     Artifact,
     Error,
@@ -154,13 +157,12 @@ class RunWriter:
             raise TrazabilidadError(
                 ErrorCode.RUN_EXISTS, "la ejecución ya existe y no se sobrescribe", "run_id"
             )
-        self._lock = root / f"{LOCK_PREFIX}{self.run_id}"
-        try:
-            os.close(os.open(self._lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
-        except FileExistsError as error:
+        lock = RunLock.acquire(root / f"{LOCK_PREFIX}{self.run_id}")
+        if lock is None:
             raise TrazabilidadError(
                 ErrorCode.RUN_EXISTS, "otra escritura de esta ejecución está en curso", "run_id"
-            ) from error
+            )
+        self._lock = lock
         try:
             # Nombre corto (.tmp- y 8 caracteres): SUMO no abre rutas de más de 257 caracteres.
             # El run_id queda en el manifiesto provisional.
@@ -320,7 +322,7 @@ class RunWriter:
     def _release(self) -> None:
         lock = getattr(self, "_lock", None)
         if lock is not None:
-            lock.unlink(missing_ok=True)
+            lock.release()
 
 
 def read_run(root: Path, run_id: str) -> RunManifest:

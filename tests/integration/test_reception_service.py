@@ -187,7 +187,10 @@ def test_incomplete_runs_left_by_a_crash_are_listed(workspace: Path, sumo_binary
     record = receive(workspace, sumo_binary)
     (incomplete,) = record.incomplete_runs
     assert incomplete.run_id == "20261020T180000Z_simulation_caida000"
-    assert incomplete.folder.startswith(".tmp-")
+    assert incomplete.folder == ".incompletas/20261020T180000Z_simulation_caida000"
+    runs = workspace / "ejecuciones"
+    assert not [p for p in runs.iterdir() if p.name.startswith(".tmp-")]  # apartada, no borrada
+    assert (runs / incomplete.folder / "manifest.json").is_file()
 
 
 def test_the_reception_files_are_read_only_and_have_no_machine_paths(

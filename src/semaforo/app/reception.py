@@ -48,8 +48,9 @@ from semaforo.simulacion.runner import RunLimits, run_simulation
 from semaforo.simulacion.summary import Mode, SimulationSummary
 from semaforo.trazabilidad.fs import publish_files
 from semaforo.trazabilidad.hashing import sha256_bytes, sha256_file
+from semaforo.trazabilidad.interrupted import list_interrupted, recover_interrupted
 from semaforo.trazabilidad.manifest import Artifact, RunManifest
-from semaforo.trazabilidad.store import MANIFEST, TEMP_PREFIX, RunSpec, read_run, utc_now
+from semaforo.trazabilidad.store import MANIFEST, RunSpec, read_run, utc_now
 
 __all__ = [
     "DomainError",
@@ -113,7 +114,7 @@ def receive_case(  # noqa: PLR0913  (los opcionales son de solo palabra clave)
             ErrorCode.RUN_EXISTS, "la recepción ya existe y no se sobrescribe", "reception_id"
         )
     runs_root = workspace / RUNS
-    incomplete = _incomplete_runs(runs_root)
+    incomplete = _incomplete_runs(runs_root, clock)
     spec = RunSpec(
         kind="simulation",
         case_id=case_id,
@@ -328,22 +329,10 @@ def _base_run(
     )
 
 
-def _incomplete_runs(runs_root: Path) -> list[IncompleteRun]:
-    """Carpetas ``.tmp-`` de ejecuciones sin publicar y el run_id de su manifiesto provisional."""
-    if not runs_root.is_dir():
-        return []
-    found: list[IncompleteRun] = []
-    for folder in sorted(runs_root.iterdir()):
-        if not (folder.is_dir() and folder.name.startswith(TEMP_PREFIX)):
-            continue
-        try:
-            provisional = RunManifest.model_validate_json((folder / MANIFEST).read_bytes())
-        except (OSError, ValidationError):
-            found.append(IncompleteRun(folder=folder.name, run_id=None, created_at=None))
-        else:
-            found.append(
-                IncompleteRun(
-                    folder=folder.name, run_id=provisional.run_id, created_at=provisional.created_at
-                )
-            )
-    return found
+def _incomplete_runs(runs_root: Path, clock: Callable[[], datetime]) -> list[IncompleteRun]:
+    """Corridas que dejó una caída: primero se aparta la que haya sin publicar y luego se listan."""
+    recover_interrupted(runs_root, clock=clock)
+    return [
+        IncompleteRun(folder=item.folder, run_id=item.run_id, created_at=item.created_at)
+        for item in list_interrupted(runs_root)
+    ]

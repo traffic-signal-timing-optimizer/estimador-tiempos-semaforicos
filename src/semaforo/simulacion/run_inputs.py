@@ -241,12 +241,15 @@ def run_inputs(  # noqa: PLR0913  (los opcionales son de solo palabra clave)
     sumo: Path | None = None,
     clock: Callable[[], datetime] = utc_now,
     cancel: threading.Event | None = None,
+    retry_of: str | None = None,
 ) -> SimulationResult:
     """Ejecuta la carpeta de entradas ``inputs_dir`` y publica la corrida en ``runs_root``.
 
     El fin de la simulación sale del manifiesto: el ``end_s`` de ``limits`` no se usa. Los demás
     límites (tiempo real, topes de salidas y de memoria, largo de rutas) sí. Con ``cancel`` se puede
-    cancelar la corrida: queda publicada como ``cancelled`` y sin conciliación.
+    cancelar la corrida: queda publicada como ``cancelled`` y sin conciliación. Con ``retry_of``
+    la corrida es el reintento de una anterior ``failed``, ``cancelled`` o interrumpida del mismo
+    caso, versión y escenario: es una corrida nueva y la anterior no se toca.
 
     Raises:
         SimulacionError o CasoError: antes de ejecutar nada, si la carpeta no pasa
@@ -259,6 +262,7 @@ def run_inputs(  # noqa: PLR0913  (los opcionales son de solo palabra clave)
         case_version=manifest.case_version,
         scenario_id=manifest.scenario_id,
         seed=manifest.seeds.sumo_seed,
+        retry_of=retry_of,
     )
     return run_simulation(
         inputs_dir,

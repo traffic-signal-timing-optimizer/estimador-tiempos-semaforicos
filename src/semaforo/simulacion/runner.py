@@ -39,8 +39,10 @@ from semaforo.simulacion.summary import (
     SimulationSummary,
 )
 from semaforo.simulacion.tripinfo import read_trips
+from semaforo.trazabilidad.interrupted import recover_interrupted
 from semaforo.trazabilidad.manifest import Error, RunManifest
 from semaforo.trazabilidad.paths import check_relative_path
+from semaforo.trazabilidad.retry import check_retry
 from semaforo.trazabilidad.store import RunSpec, RunWriter, utc_now
 
 # Límites provisionales, pendientes del piloto (D4).
@@ -442,13 +444,19 @@ def run_simulation(  # noqa: PLR0913  (los argumentos opcionales son de solo pal
             registros y salidas parciales y la corrida se publica ``cancelled``. Ctrl+C en la
             consola hace lo mismo. Una corrida cancelada no lanza excepción: se devuelve publicada.
 
+    Antes de empezar aparta las corridas interrumpidas de ``runs_root`` (``recover_interrupted``) y,
+    si ``spec.retry_of`` está, comprueba que sea una corrida reintentable (``check_retry``).
+
     Raises:
         DomainError: antes de ejecutar nada, PATH_NOT_ALLOWED si la entrada sale de la carpeta,
             hay enlaces o el .sumocfg declara rutas absolutas; INPUT_SCHEMA si el .sumocfg no
-            existe o no es válido; DEPENDENCY_MISSING si no se encuentra SUMO; SIM_FAILED si no
-            hay espacio en disco o memoria disponible para la corrida.
+            existe o no es válido, o si ``retry_of`` no es una corrida reintentable;
+            DEPENDENCY_MISSING si no se encuentra SUMO; SIM_FAILED si no hay espacio en disco o
+            memoria disponible para la corrida.
     """
     limits = limits or RunLimits()
+    recover_interrupted(runs_root, clock=clock)  # aparta las corridas caídas; no borra nada
+    check_retry(runs_root, spec)
     plan = _plan(source, entry_config, mode, limits, sumo)
     _check_resources(runs_root, plan.input_bytes, limits)
     with RunWriter(runs_root, spec, clock=clock) as writer:

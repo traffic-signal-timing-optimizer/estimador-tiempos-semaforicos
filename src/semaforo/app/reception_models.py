@@ -27,7 +27,7 @@ class BaseRunRecord(FrozenModel):
 
 
 class IncompleteRun(FrozenModel):
-    """Una ejecución que quedó sin publicar (carpeta ``.tmp-``), por ejemplo tras una caída."""
+    """Una ejecución que quedó sin publicar tras una caída; está en ``.incompletas`` (DEV07 F3)."""
 
     folder: str
     run_id: str | None
