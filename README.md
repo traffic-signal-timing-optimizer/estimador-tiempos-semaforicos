@@ -53,6 +53,28 @@ Comprueba Python, los paquetes, el sistema operativo, la CPU, la RAM, la carpeta
 
 La RAM y el espacio libre solo se informan: los umbrales los fija el piloto.
 
+## Ejecutar una simulación: `simulate run`
+
+```powershell
+.venv\Scripts\python.exe -m semaforo simulate run --inputs CARPETA_DE_ENTRADAS [--workspace datos] [--sumo-bin RUTA\sumo.exe] [--wall-timeout SEGUNDOS] [--retry-of RUN_ID] [--debug]
+```
+
+Ejecuta SUMO sobre una carpeta de entradas ya preparada y publica la corrida en `<workspace>\ejecuciones\<run_id>`. Antes de empezar comprueba que la carpeta de entradas no se haya alterado, aparta las corridas que una caída anterior dejó a medias (quedan en `ejecuciones\.incompletas`, sin borrarse) y exige memoria y espacio libres. Por la salida estándar escribe un informe en JSON; por la salida de error, un resumen para la persona.
+
+- **Lea `status` del JSON, no solo el código de salida.** Una corrida fallida o cancelada también queda publicada, con sus registros y salidas parciales.
+- `--wall-timeout`: tiempo real máximo en segundos (por defecto, 900). Si se pasa, SUMO se corta y la corrida queda `failed`.
+- `--retry-of`: vuelve a intentar una corrida `failed`, `cancelled` o interrumpida del mismo caso, versión y escenario. Siempre crea una corrida nueva; la anterior no se toca. Una corrida exitosa no se reintenta.
+- Ctrl+C cancela la corrida de forma ordenada: SUMO se corta, se conservan los registros y la corrida queda `cancelled`.
+
+| Código de salida | Significado |
+|---|---|
+| 0 | corrida exitosa |
+| 2 | carpeta de entradas inválida, o `--retry-of` que no se puede reintentar |
+| 3 | falta SUMO |
+| 4 | corrida fallida, tiempo agotado o cancelada (mire `status`), o falta memoria o espacio |
+| 5 | carpeta de entradas alterada o ruta no permitida |
+| 1 | error interno; repita con `--debug` para ver el detalle |
+
 ## Desarrollo
 
 Verificaciones completas (estilo, tipos, pruebas y contratos):

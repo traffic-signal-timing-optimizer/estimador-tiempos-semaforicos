@@ -12,6 +12,9 @@ Comandos:
 - ``case publish-report``: copia el informe público de una recepción verificada a
   ``docs/recepcion``.
 - ``case compare``: muestra qué cambió entre dos recepciones.
+- ``simulate run``: ejecuta una carpeta de entradas de SUMO y publica la corrida (DEV07). Códigos
+  de salida: 0 exitosa; 2 entradas inválidas; 3 SUMO ausente; 4 fallida, tiempo agotado o
+  cancelada; 5 integridad o ruta no permitida. Hay que leer ``status`` del JSON, no solo el código.
 """
 
 import argparse
@@ -27,7 +30,19 @@ from semaforo.app.reception import (
     publish_public_report,
     receive_case,
 )
+from semaforo.app.simulate import RunReport, run_prepared
 from semaforo.cli.doctor import configure_doctor, run_doctor, summary
+
+
+def _positive_seconds(text: str) -> float:
+    """Segundos mayores que cero para ``--wall-timeout``."""
+    try:
+        value = float(text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(f"no es un número: {text!r}") from error
+    if not 0 < value < float("inf"):
+        raise argparse.ArgumentTypeError("debe ser un número de segundos mayor que cero")
+    return value
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -64,7 +79,25 @@ def build_parser() -> argparse.ArgumentParser:
     compare = actions.add_parser("compare", help="qué cambió entre dos recepciones")
     compare.add_argument("--before", required=True, help="recepción anterior")
     compare.add_argument("--after", required=True, help="recepción posterior")
-    for command in (doctor, receive, publish, compare):
+    simulate = groups.add_parser("simulate", help="ejecuta simulaciones de SUMO (DEV07)")
+    simulate_actions = simulate.add_subparsers(dest="action", required=True)
+    run = simulate_actions.add_parser(
+        "run", help="ejecuta una carpeta de entradas y publica la corrida"
+    )
+    run.add_argument(
+        "--inputs", type=Path, required=True, help="carpeta de entradas que publicó DEV06"
+    )
+    run.add_argument("--sumo-bin", type=Path, default=None, help="SUMO; por defecto, SUMO_HOME")
+    run.add_argument(
+        "--wall-timeout",
+        type=_positive_seconds,
+        default=None,
+        help="tiempo real máximo en segundos (por defecto, 900)",
+    )
+    run.add_argument(
+        "--retry-of", default=None, help="run_id de una corrida fallida, cancelada o interrumpida"
+    )
+    for command in (doctor, receive, publish, compare, run):
         command.add_argument(
             "--workspace",
             type=Path,
@@ -93,6 +126,16 @@ def _error(code: str, message: str, field: str | None) -> str:
     return json.dumps(report, ensure_ascii=False, indent=2)
 
 
+def _run_summary(report: RunReport) -> str:
+    """Resumen para la persona de una corrida terminada."""
+    lines = [f"Corrida {report.run_id}: {report.status}"]
+    if report.error_message is not None:
+        lines.append(f"Motivo: {report.error_code}: {report.error_message}")
+    if report.recovered_interrupted:
+        lines.append(f"Corridas caídas apartadas: {', '.join(report.recovered_interrupted)}")
+    return "\n".join(lines)
+
+
 def _run(arguments: argparse.Namespace) -> int:
     workspace = Path(arguments.workspace)
     if arguments.group == "doctor":
@@ -100,6 +143,17 @@ def _run(arguments: argparse.Namespace) -> int:
         report = run_doctor(workspace, sumo)
         _emit(report.model_dump_json(indent=2))
         _say(summary(report))
+        return report.exit_code
+    if arguments.group == "simulate":
+        report = run_prepared(
+            Path(arguments.inputs),
+            workspace,
+            sumo=None if arguments.sumo_bin is None else Path(arguments.sumo_bin),
+            wall_timeout_s=arguments.wall_timeout,
+            retry_of=None if arguments.retry_of is None else str(arguments.retry_of),
+        )
+        _emit(report.model_dump_json(indent=2))
+        _say(_run_summary(report))
         return report.exit_code
     if arguments.action == "receive":
         record = receive_case(
