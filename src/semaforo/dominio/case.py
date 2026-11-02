@@ -58,7 +58,11 @@ STATE_PATTERN = r"^[rRyYgGsuoO]+$"
 # Categorías Unicode que no se admiten en un identificador: control (Cc) y formato (Cf), que
 # incluye los caracteres invisibles como el espacio de ancho cero.
 HIDDEN_CATEGORIES = frozenset({"Cc", "Cf"})
-_CUSTOM_RULES = {"case_s02": IDENTIFIER_RULE, "case_s03": VERSION_RULE}
+_CUSTOM_RULES = {
+    "case_s02": IDENTIFIER_RULE,
+    "case_s03": VERSION_RULE,
+    "spec_s02": "SPEC-S02",  # identificador seguro de la especificación de escenarios (DEV11)
+}
 
 
 def _identifier(value: str) -> str:

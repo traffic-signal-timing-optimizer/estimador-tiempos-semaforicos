@@ -22,6 +22,7 @@ CONTRACT_FIXTURES = [
 EXTRA_FIXTURES = [
     "scenario_test.json",
     "scenario_validation.json",
+    "scenario_spec.json",
     "aforos.csv",
     "expected_normalization.json",
 ]

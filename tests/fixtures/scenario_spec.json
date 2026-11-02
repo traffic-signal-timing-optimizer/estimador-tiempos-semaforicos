@@ -1,0 +1,72 @@
+{
+  "schema_version": "1.0.0",
+  "spec_id": "SPEC_DEMO",
+  "case_id": "SYNTHETIC_DEMO",
+  "case_version": "1.0.0",
+  "origin": "synthetic",
+  "source_ids": [
+    "SYNTHETIC_FIXTURE"
+  ],
+  "observation_start": "2026-10-18T08:00:00-05:00",
+  "observation_end": "2026-10-18T08:15:00-05:00",
+  "warmup_s": 0,
+  "measure_s": 900,
+  "drain_max_s": 900,
+  "families": [
+    {
+      "family_id": "FAM_PUNTA",
+      "variants": 3,
+      "seeds": 2,
+      "demand": [
+        {
+          "movement_id": "N_S",
+          "flow_vph": {
+            "min": 400,
+            "max": 600
+          },
+          "composition": {
+            "car": 0.9,
+            "bus": 0.1
+          }
+        },
+        {
+          "movement_id": "E_W",
+          "flow_vph": {
+            "min": 200,
+            "max": 300
+          },
+          "composition": {
+            "car": 1.0,
+            "bus": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "family_id": "FAM_VALLE",
+      "variants": 2,
+      "seeds": 2,
+      "demand": [
+        {
+          "movement_id": "N_S",
+          "flow_vph": {
+            "min": 100,
+            "max": 200
+          },
+          "composition": {
+            "car": 0.8,
+            "bus": 0.2
+          }
+        },
+        {
+          "movement_id": "E_W",
+          "flow_vph": {
+            "min": 0,
+            "max": 0
+          },
+          "composition": null
+        }
+      ]
+    }
+  ]
+}
