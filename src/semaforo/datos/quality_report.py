@@ -31,18 +31,29 @@ from semaforo.datos.coverage import Coverage, MissingEntry
 from semaforo.datos.quality import Exclusion, QualityComparison, QualityError, WindowComparison
 from semaforo.dominio.base_model import FrozenModel
 from semaforo.dominio.case import Case, canonical_sha256
-from semaforo.trazabilidad.fs import publish_files
-from semaforo.trazabilidad.store import utc_now
+from semaforo.dominio.errors import ErrorCode
+from semaforo.trazabilidad.fs import publish_files, read_at_most
+from semaforo.trazabilidad.store import TrazabilidadError, utc_now
 from semaforo.trazabilidad.verify import read_verified
 
 __all__ = [
     "DETAIL_FILE",
     "MANIFEST_FILE",
+    "MAX_FILE_BYTES",
     "SUMMARY_FILE",
+    "QualityData",
+    "QualityExclusion",
+    "QualityGap",
     "QualityManifest",
+    "QualityMissing",
+    "QualityMovement",
     "QualityReport",
+    "QualityRow",
+    "QualitySummary",
+    "QualityWindow",
     "build_report",
     "publish_quality",
+    "read_quality_data",
     "read_quality_report",
 ]
 
@@ -53,6 +64,12 @@ CSV_DELIMITER = ";"
 DISPLAY_DECIMALS = 3
 SHORT_HASH_CHARS = 8
 SAFE_FOLDER_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+# Tope de lectura de cada archivo del reporte (DEV09 F1): una planilla de este tamaño ya tiene
+# cientos de miles de filas; más que eso no es un reporte de calidad de aforos de un cruce.
+MAX_FILE_BYTES = 32 * 1024 * 1024
+_QUOTED_TEXT = re.compile(r'="((?:[^"]|"")*)"', re.DOTALL)
+_INTEGER = re.compile(r"-?\d+")
+_DECIMAL = re.compile(r"-?\d+\.\d+")
 DETAIL_HEADER = [
     "observation_id",
     "control_source_id",
@@ -153,6 +170,227 @@ def read_quality_report(folder: Path) -> QualityManifest:
             manifiesto no existen o no son válidos; HASH_MISMATCH si sobra, falta o cambió algo.
     """
     return read_verified(folder, MANIFEST_FILE, QualityManifest, lambda manifest: manifest.files)
+
+
+class QualityWindow(FrozenModel):
+    """Ventana de estudio y su cobertura (``window`` de ``resumen.json``)."""
+
+    start: str
+    end: str
+    declared: bool
+    window_s: float
+    covered_s: float
+    coverage: float
+    meets_minimum: bool | None
+
+
+class QualityMovement(FrozenModel):
+    """Cobertura de un movimiento."""
+
+    movement_id: str
+    covered_s: float
+    coverage: float
+    meets_minimum: bool | None
+
+
+class QualityGap(FrozenModel):
+    """Un hueco de la ventana sin ninguna observación."""
+
+    start: str
+    end: str
+
+
+class QualityMissing(FrozenModel):
+    """Una combinación de movimiento y clase que falta en un periodo."""
+
+    observation_id: str
+    start: str
+    end: str
+    movement_id: str
+    vehicle_class: str
+
+
+class QualityExclusion(FrozenModel):
+    """Una comparación excluida, con su causa. ``relative_error`` es el valor exacto."""
+
+    observation_id: str | None
+    start: str
+    end: str
+    movement_id: str
+    vehicle_class: str
+    relative_error: float
+    reason: str
+
+
+class QualitySummary(FrozenModel):
+    """Contenido de ``resumen.json``."""
+
+    schema_version: str
+    case_id: str
+    observed_sha256: str
+    control_sha256: str
+    window: QualityWindow
+    per_movement: list[QualityMovement]
+    gaps: list[QualityGap]
+    overlaps: list[list[str]]
+    outside_window: list[str]
+    windows_by_status: dict[str, int]
+    missing: list[QualityMissing]
+    max_relative_error: float | None
+    exclusions: list[QualityExclusion]
+
+
+class QualityRow(FrozenModel):
+    """Una fila de ``calidad.csv``. Los campos vacíos de la planilla son ``None``.
+
+    Una ventana sin pareja o no comparable ocupa una sola fila sin movimiento ni clase.
+    ``relative_error`` es el valor redondeado a tres decimales que muestra la planilla.
+    """
+
+    observation_id: str
+    control_source_id: str
+    start: str
+    end: str
+    movement_id: str | None
+    vehicle_class: str | None
+    observed: int | None
+    control: int | None
+    absolute_error: int | None
+    relative_error: float | None
+    relative_reason: str | None
+    status: str
+    status_reason: str | None
+
+
+class QualityData(FrozenModel):
+    """Un reporte de calidad publicado, leído con sus huellas comprobadas."""
+
+    manifest: QualityManifest
+    summary: QualitySummary
+    rows: list[QualityRow]
+
+
+def read_quality_data(folder: Path) -> QualityData:
+    """Manifiesto, resumen y planilla de un reporte de calidad publicado (DEV09 F1).
+
+    Primero se verifica la carpeta (``read_quality_report``). Después, los bytes que se interpretan
+    se leen una sola vez y se comparan con la huella del manifiesto, para que un archivo cambiado
+    entre la verificación y la lectura no se use.
+
+    Raises:
+        TrazabilidadError: PATH_NOT_ALLOWED si hay enlaces; INPUT_SCHEMA si algo no existe, es
+            demasiado grande o no tiene el formato que escribe ``publish_quality``; HASH_MISMATCH
+            si sobra, falta o cambió algo.
+    """
+    manifest = read_quality_report(folder)
+    detail = _read_member(folder, manifest, DETAIL_FILE)
+    summary_bytes = _read_member(folder, manifest, SUMMARY_FILE)
+    try:
+        summary = QualitySummary.model_validate_json(summary_bytes)
+    except ValueError as error:
+        raise _unreadable(SUMMARY_FILE, "no tiene el formato de un resumen de calidad") from error
+    _same_report(manifest, summary)
+    return QualityData(manifest=manifest, summary=summary, rows=_detail_rows(detail))
+
+
+def _unreadable(name: str, reason: str) -> TrazabilidadError:
+    return TrazabilidadError(ErrorCode.INPUT_SCHEMA, f"{name}: {reason}", name)
+
+
+def _read_member(folder: Path, manifest: QualityManifest, name: str) -> bytes:
+    expected = manifest.files.get(name)
+    if expected is None:
+        raise _unreadable(name, "el manifiesto no lo incluye")
+    try:
+        with (folder / name).open("rb") as stream:
+            data = read_at_most(stream, MAX_FILE_BYTES + 1)
+    except OSError as error:
+        raise _unreadable(name, f"no se puede leer ({type(error).__name__})") from error
+    if len(data) > MAX_FILE_BYTES:
+        raise _unreadable(name, "es demasiado grande")
+    if hashlib.sha256(data).hexdigest() != expected:
+        raise TrazabilidadError(ErrorCode.HASH_MISMATCH, "un archivo fue modificado", name)
+    return data
+
+
+def _same_report(manifest: QualityManifest, summary: QualitySummary) -> None:
+    """El resumen y el manifiesto hablan del mismo caso, los mismos archivos y el mismo límite."""
+    pairs = {
+        "case_id": (manifest.case_id, summary.case_id),
+        "observed_sha256": (manifest.observed_sha256, summary.observed_sha256),
+        "control_sha256": (manifest.control_sha256, summary.control_sha256),
+        "max_relative_error": (manifest.max_relative_error, summary.max_relative_error),
+    }
+    for field, (from_manifest, from_summary) in pairs.items():
+        if from_manifest != from_summary:
+            raise _unreadable(SUMMARY_FILE, f"{field} no coincide con el manifiesto")
+
+
+def _detail_rows(data: bytes) -> list[QualityRow]:
+    try:
+        text = data.decode("utf-8-sig")
+        records = list(csv.reader(io.StringIO(text, newline=""), delimiter=CSV_DELIMITER))
+    except (UnicodeDecodeError, csv.Error) as error:
+        raise _unreadable(DETAIL_FILE, "no es una planilla de texto válida") from error
+    if not records or records[0] != DETAIL_HEADER:
+        raise _unreadable(DETAIL_FILE, "el encabezado no es el de la planilla de calidad")
+    return [_row(number, record) for number, record in enumerate(records[1:], start=2)]
+
+
+def _row(number: int, record: list[str]) -> QualityRow:
+    if len(record) != len(DETAIL_HEADER):
+        raise _unreadable(DETAIL_FILE, f"la línea {number} no tiene {len(DETAIL_HEADER)} columnas")
+    status = record[11]
+    if status not in set(STATUS_LABELS.values()):
+        raise _unreadable(DETAIL_FILE, f"la línea {number} tiene un estado desconocido")
+    for instant in (record[2], record[3]):
+        try:
+            datetime.fromisoformat(instant)
+        except ValueError:
+            raise _unreadable(DETAIL_FILE, f"la línea {number} tiene una fecha inválida") from None
+    return QualityRow(
+        observation_id=_untext(number, record[0]),
+        control_source_id=_untext(number, record[1]),
+        start=record[2],
+        end=record[3],
+        movement_id=_optional_text(number, record[4]),
+        vehicle_class=_optional_text(number, record[5]),
+        observed=_optional_integer(number, record[6]),
+        control=_optional_integer(number, record[7]),
+        absolute_error=_optional_integer(number, record[8]),
+        relative_error=_optional_decimal(number, record[9]),
+        relative_reason=record[10] or None,
+        status=status,
+        status_reason=record[12] or None,
+    )
+
+
+def _untext(number: int, field: str) -> str:
+    """Inversa de ``_text``: el identificador que iba entre ``="..."``."""
+    match = _QUOTED_TEXT.fullmatch(field)
+    if match is None:
+        raise _unreadable(DETAIL_FILE, f"la línea {number} tiene un identificador mal formado")
+    return match.group(1).replace('""', '"')
+
+
+def _optional_text(number: int, field: str) -> str | None:
+    return None if field == "" else _untext(number, field)
+
+
+def _optional_integer(number: int, field: str) -> int | None:
+    if field == "":
+        return None
+    if _INTEGER.fullmatch(field) is None:
+        raise _unreadable(DETAIL_FILE, f"la línea {number} tiene un conteo que no es entero")
+    return int(field)
+
+
+def _optional_decimal(number: int, field: str) -> float | None:
+    if field == "":
+        return None
+    if _DECIMAL.fullmatch(field) is None:
+        raise _unreadable(DETAIL_FILE, f"la línea {number} tiene un error relativo mal escrito")
+    return float(field)
 
 
 def _text(value: str) -> str:
