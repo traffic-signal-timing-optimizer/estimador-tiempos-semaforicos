@@ -86,6 +86,26 @@ Ejecuta SUMO sobre una carpeta de entradas ya preparada y publica la corrida en 
 - `runs verify --run-id` sigue una corrida hacia atrás: su carpeta de entradas, el programa derivado y el caso (o la copia de originales, en las corridas de recepción) y la corrida anterior si es un reintento. Código 0 si la cadena está completa; 5 si un eslabón está alterado; 3 si falta o cambió alguno.
 - `runs compare` dice si dos corridas son réplicas: mismas entradas y semilla, y mismos resultados sin contar la hora ni las duraciones. Publica el reporte en `datos/derivados/replicas/` y sale con código 0 tanto si son `equivalent` como `different` (mire `status`). `--tolerance` es la diferencia admitida en números con decimales.
 
+## Informes HTML del caso y de los datos: `report case` y `report data`
+
+```powershell
+.venv\Scripts\python.exe -m semaforo report case --case RUTA\case.json [--workspace datos] [--debug]
+.venv\Scripts\python.exe -m semaforo report data --case RUTA\case.json --quality-report CARPETA_DEL_REPORTE_DE_CALIDAD [--workspace datos] [--debug]
+```
+
+Cada comando publica una página HTML que se abre con doble clic en el navegador (no usa internet ni servidor) y escribe en la salida estándar un JSON con la ruta del informe; el mensaje para la persona (salida de error) da la ruta completa de la página.
+
+- `report case` muestra el origen (sintético o real), el estado de la validación con sus 19 reglas, los límites del plan, los movimientos, las clases de vehículos y la evidencia de las restricciones. Un caso inválido **también** genera informe, con sus problemas a la vista: lea `case_status` del JSON.
+- `report data` muestra la cobertura, los datos que faltan (nunca como cero), la comparación con el conteo de control, lo observado, corregido y excluido, y la causa de cada exclusión. Parte del reporte de calidad que ya publicó la preparación de datos (`derivados/calidad/<caso>/<fecha>_<huella>`), que se verifica antes de mostrarlo.
+- Los informes se publican en `<espacio de trabajo>\reportes\informes\<caso|datos>\<id-del-caso>\<fecha>_<huella>\` con su `manifiesto.json` (huellas de la página y de lo que se usó). Nunca se sobrescriben. Todo el texto se escapa: un identificador con `<script>` se ve como texto y no se ejecuta.
+
+| Código de salida | Significado |
+|---|---|
+| 0 | informe publicado (también con un caso inválido o con avisos) |
+| 2 | el archivo del caso o la carpeta del reporte de calidad no existen o no son válidos, o el reporte es de otro caso |
+| 5 | ruta no permitida (un enlace), reporte alterado, caso cambiado desde que se generó el reporte, o el informe ya existe |
+| 1 | error interno; repita con `--debug` para ver el detalle |
+
 ## Desarrollo
 
 Verificaciones completas (estilo, tipos, pruebas y contratos):

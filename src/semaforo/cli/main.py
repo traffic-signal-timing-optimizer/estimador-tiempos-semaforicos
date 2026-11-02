@@ -20,6 +20,9 @@ Comandos:
   un eslabón) (DEV08).
 - ``runs compare``: compara dos corridas y publica el reporte de réplica (0 al registrarlo, sea
   ``equivalent`` o ``different``: hay que leer ``status``) (DEV08).
+- ``report case`` y ``report data``: publican el informe HTML del caso o de sus datos (DEV09). Un
+  caso inválido también genera informe (0; hay que leer ``case_status``); un archivo que no se
+  puede leer sale 2 o 5, y un reporte de calidad alterado o de otro caso, 5.
 """
 
 import argparse
@@ -44,6 +47,7 @@ from semaforo.app.reception import (
     receive_case,
 )
 from semaforo.app.replica import Tolerance, replicate
+from semaforo.app.report_commands import report_case, report_data
 from semaforo.app.simulate import RunReport, run_prepared
 from semaforo.cli.doctor import configure_doctor, run_doctor, summary
 
@@ -139,7 +143,31 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="diferencia admitida en números con decimales, relativa y absoluta (por defecto 1e-9)",
     )
-    for command in (doctor, receive, publish, compare, run, verify, compare_runs):
+    report = groups.add_parser("report", help="informes HTML del caso y de los datos (DEV09)")
+    report_actions = report.add_subparsers(dest="action", required=True)
+    case_report = report_actions.add_parser("case", help="informe HTML del caso")
+    case_report.add_argument("--case", type=Path, required=True, help="archivo case.json")
+    data_report = report_actions.add_parser(
+        "data", help="informe HTML de los datos, a partir de su reporte de calidad"
+    )
+    data_report.add_argument("--case", type=Path, required=True, help="archivo case.json")
+    data_report.add_argument(
+        "--quality-report",
+        type=Path,
+        required=True,
+        help="carpeta del reporte de calidad (derivados/calidad/<caso>/<fecha>_<huella>)",
+    )
+    for command in (
+        doctor,
+        receive,
+        publish,
+        compare,
+        run,
+        verify,
+        compare_runs,
+        case_report,
+        data_report,
+    ):
         command.add_argument(
             "--workspace",
             type=Path,
@@ -233,27 +261,21 @@ def _runs(arguments: argparse.Namespace, workspace: Path) -> int:
     return 0
 
 
-def _run(arguments: argparse.Namespace) -> int:
-    workspace = Path(arguments.workspace)
-    if arguments.group == "doctor":
-        sumo = None if arguments.sumo_bin is None else Path(arguments.sumo_bin)
-        report = run_doctor(workspace, sumo)
-        _emit(report.model_dump_json(indent=2))
-        _say(summary(report))
-        return report.exit_code
-    if arguments.group == "runs":
-        return _runs(arguments, workspace)
-    if arguments.group == "simulate":
-        report = run_prepared(
-            Path(arguments.inputs),
-            workspace,
-            sumo=None if arguments.sumo_bin is None else Path(arguments.sumo_bin),
-            wall_timeout_s=arguments.wall_timeout,
-            retry_of=None if arguments.retry_of is None else str(arguments.retry_of),
-        )
-        _emit(report.model_dump_json(indent=2))
-        _say(_run_summary(report))
-        return report.exit_code
+CASE_STATES = {"valid": "válido", "valid_with_warnings": "válido con avisos", "invalid": "inválido"}
+
+
+def _report(arguments: argparse.Namespace, workspace: Path) -> int:
+    if arguments.action == "case":
+        result = report_case(workspace, Path(arguments.case))
+    else:
+        result = report_data(workspace, Path(arguments.case), Path(arguments.quality_report))
+    _emit(_with_exit(result.model_dump(mode="json"), 0))
+    _say(f"Informe de {result.kind} publicado: {(workspace / result.index).resolve()}")
+    _say(f"Estado del caso {result.case_id}: {CASE_STATES[result.case_status]}")
+    return 0
+
+
+def _case(arguments: argparse.Namespace, workspace: Path) -> int:
     if arguments.action == "receive":
         record = receive_case(
             Path(arguments.source),
@@ -285,6 +307,32 @@ def _run(arguments: argparse.Namespace) -> int:
     _emit(comparison.model_dump_json(indent=2))
     _say(f"{len(comparison.changes)} cambios entre {comparison.before} y {comparison.after}")
     return 0
+
+
+def _run(arguments: argparse.Namespace) -> int:
+    workspace = Path(arguments.workspace)
+    if arguments.group == "report":
+        return _report(arguments, workspace)
+    if arguments.group == "doctor":
+        sumo = None if arguments.sumo_bin is None else Path(arguments.sumo_bin)
+        report = run_doctor(workspace, sumo)
+        _emit(report.model_dump_json(indent=2))
+        _say(summary(report))
+        return report.exit_code
+    if arguments.group == "runs":
+        return _runs(arguments, workspace)
+    if arguments.group == "simulate":
+        report = run_prepared(
+            Path(arguments.inputs),
+            workspace,
+            sumo=None if arguments.sumo_bin is None else Path(arguments.sumo_bin),
+            wall_timeout_s=arguments.wall_timeout,
+            retry_of=None if arguments.retry_of is None else str(arguments.retry_of),
+        )
+        _emit(report.model_dump_json(indent=2))
+        _say(_run_summary(report))
+        return report.exit_code
+    return _case(arguments, workspace)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

@@ -60,16 +60,17 @@ def demo_case() -> Case:
     return parse_case(json.loads(DEMO_CASE_TEXT))
 
 
-def publish_demo_quality(
+def publish_demo_quality(  # noqa: PLR0913  (una ayuda de pruebas con opciones por nombre)
     root: Path,
     work: Path,
     *,
     observed: list[str] | None = None,
     control: list[str] | None = None,
     limit: float | None = None,
+    case: Case | None = None,
 ) -> Path:
     """Publica el reporte de calidad de QA06 (o de los conteos dados) y devuelve su carpeta."""
-    case = demo_case()
+    case = demo_case() if case is None else case
     work.mkdir(parents=True, exist_ok=True)
     obs = work / "principal.csv"
     ctl = work / "control.csv"
