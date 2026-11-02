@@ -22,6 +22,7 @@ import math
 from collections.abc import Sequence
 from fractions import Fraction
 
+from semaforo.datos.scenarios import MAX_SEED
 from semaforo.dominio.case import CaseIssue, Identifier, cap_issues
 from semaforo.dominio.scenario import Scenario
 from semaforo.dominio.split import (
@@ -129,7 +130,7 @@ def create_split(
             la partición resultante incumple alguna regla (por ejemplo, una fuente de campo
             compartida entre dos partes).
     """
-    problems = _input_issues(scenarios)
+    problems = _input_issues(scenarios, seed)
     if problems:
         raise SplitInvalidError(problems)
     group_ids = sorted({scenario.group_id for scenario in scenarios})
@@ -154,10 +155,18 @@ def create_split(
     return split
 
 
-def _input_issues(scenarios: Sequence[Scenario]) -> list[CaseIssue]:
-    if not scenarios:
-        return [CaseIssue("SPLIT-C01", "scenarios", "no hay escenarios que asignar")]
+def _input_issues(scenarios: Sequence[Scenario], seed: int) -> list[CaseIssue]:
     issues: list[CaseIssue] = []
+    if not 0 <= seed <= MAX_SEED:
+        issues.append(
+            CaseIssue(
+                "SPLIT-S01",
+                "seed",
+                f"la semilla debe ser un entero de 0 a {MAX_SEED} y es {seed}",
+            )
+        )
+    if not scenarios:
+        return [*issues, CaseIssue("SPLIT-C01", "scenarios", "no hay escenarios que asignar")]
     seen: set[str] = set()
     for index, scenario in enumerate(scenarios):
         if scenario.scenario_id in seen:

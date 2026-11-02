@@ -55,6 +55,7 @@ __all__ = [
     "parse_policy",
     "parse_split",
     "split_issues",
+    "split_self_issues",
 ]
 
 Partition = Literal["train", "validation", "test"]
@@ -192,6 +193,11 @@ def split_issues(split: Split, scenarios: Sequence[Scenario]) -> list[CaseIssue]
         *_frozen(split),
         *_provenance(split, by_id),
     ]
+
+
+def split_self_issues(split: Split) -> list[CaseIssue]:
+    """Lo que se puede comprobar sin los escenarios: SPLIT-C02, SPLIT-C04 y SPLIT-C05."""
+    return [*_one_partition_per_group(split), *_partitions_used(split), *_frozen(split)]
 
 
 def _names(partitions: Sequence[Partition]) -> str:

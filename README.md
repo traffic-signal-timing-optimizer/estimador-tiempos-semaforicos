@@ -126,6 +126,27 @@ Genera un conjunto de escenarios de demanda sobre un caso y lo publica. La **esp
 | 5 | ruta no permitida (un enlace) o el conjunto ya existe |
 | 1 | error interno; repita con `--debug` para ver el detalle |
 
+## Particiones sin fuga de la prueba: `splits create` y `splits validate`
+
+```powershell
+.venv\Scripts\python.exe -m semaforo splits create --scenarios CARPETA_DEL_CONJUNTO --seed 7 [--policy politica.json] [--workspace datos] [--debug]
+.venv\Scripts\python.exe -m semaforo splits validate --split CARPETA_DE_LA_PARTICION --scenarios CARPETA_DEL_CONJUNTO [--debug]
+```
+
+`create` reparte las **familias completas** de un conjunto de escenarios (el grupo de cada escenario) entre entrenamiento, validación y prueba, y publica la partición congelada. Una familia nunca se parte: todas sus perturbaciones y semillas van a la misma parte. `validate` comprueba una partición ya publicada contra su conjunto.
+
+- **Proporciones:** `--policy` es un archivo JSON (`schema_version` 1.0.0, `policy_id` y `proportions` con `train`, `validation` y `test`, cada una entre 0 y 1 y con suma 1). Sin archivo se usan las **provisionales** 0.6 / 0.2 / 0.2 (DEC07 pendiente) y el mensaje y el manifiesto lo dicen. Hacen falta al menos tres familias, una por parte. La semilla decide cuáles; la misma entrada y semilla dan siempre la misma partición.
+- **Reglas** (se listan todos los problemas, cada uno con su regla `SPLIT-…`, campo y motivo): cada escenario asignado una vez, un grupo en una sola parte, el grupo de cada asignación es el del escenario, las tres partes con grupos, partición congelada, y ninguna fuente de campo en dos partes.
+- **La prueba se reserva una sola vez:** se publica en `<espacio de trabajo>\derivados\particiones\<caso>\<huella16>\`, con `split.json` (contrato `split` v1.0) y `manifiesto.json`, y la carpeta lleva la huella del conjunto. Nunca se sobrescribe, así que **un conjunto tiene una sola partición**; para otra partición hace falta un conjunto nuevo. `runs verify` la revisa.
+- **Bloqueo en el código:** quien ajusta recibe la vista de desarrollo (`semaforo.aprendizaje.split_access`), que solo trae entrenamiento y validación; pedir la prueba para ajustar, seleccionar o repetir el ajuste es un error.
+
+| Código de salida | Significado |
+|---|---|
+| 0 | partición publicada o válida |
+| 2 | argumentos mal escritos, conjunto o política inválidos, o partición con problemas (no se publica nada) |
+| 5 | ruta no permitida (un enlace), conjunto o partición alterados, o el conjunto ya tiene su partición |
+| 1 | error interno; repita con `--debug` para ver el detalle |
+
 ## Desarrollo
 
 Verificaciones completas (estilo, tipos, pruebas y contratos):

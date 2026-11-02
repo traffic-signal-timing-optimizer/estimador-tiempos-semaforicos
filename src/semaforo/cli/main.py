@@ -27,12 +27,17 @@ Comandos:
   publica (DEV11). Códigos de salida: 0 publicado; 2 caso o especificación inválidos o
   ilegibles (no se publica nada, se listan todos los problemas); 5 ruta no permitida o conjunto
   ya existente.
+- ``splits create`` y ``splits validate``: reparten las familias de un conjunto de escenarios en
+  entrenamiento, validación y prueba, y lo publican congelado, o comprueban una partición ya
+  publicada (DEV12). Códigos de salida: 0 correcto; 2 argumentos, conjunto, política o partición
+  inválidos (se listan todos los problemas); 5 enlace, algo alterado o el conjunto ya tiene su
+  partición.
 """
 
 import argparse
 import json
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from semaforo.app.comparison import compare_receptions
@@ -55,6 +60,7 @@ from semaforo.app.replica import Tolerance, replicate
 from semaforo.app.report_commands import report_case, report_data
 from semaforo.app.scenario_commands import MAX_SEED, generate_scenario_set
 from semaforo.app.simulate import RunReport, run_prepared
+from semaforo.app.split_commands import create_split_set, validate_split_set
 from semaforo.cli.doctor import configure_doctor, run_doctor, summary
 
 
@@ -89,6 +95,50 @@ def _master_seed(text: str) -> int:
     if not 0 <= value <= MAX_SEED:
         raise argparse.ArgumentTypeError(f"debe ser un entero de 0 a {MAX_SEED}")
     return value
+
+
+def _add_experiment_commands(
+    add_group: Callable[..., argparse.ArgumentParser],
+) -> list[argparse.ArgumentParser]:
+    """Los grupos ``scenarios`` (DEV11) y ``splits`` (DEV12); devuelve sus comandos."""
+    scenarios = add_group("scenarios", help="escenarios controlados (DEV11)")
+    scenario_actions = scenarios.add_subparsers(dest="action", required=True)
+    generate = scenario_actions.add_parser(
+        "generate", help="genera un conjunto de escenarios con sus llegadas y lo publica"
+    )
+    generate.add_argument("--case", type=Path, required=True, help="archivo case.json")
+    generate.add_argument(
+        "--spec", type=Path, required=True, help="especificación de escenarios (JSON)"
+    )
+    generate.add_argument(
+        "--seed", type=_master_seed, required=True, help="semilla maestra (entero desde 0)"
+    )
+    splits = add_group("splits", help="particiones sin fuga de la prueba (DEV12)")
+    split_actions = splits.add_subparsers(dest="action", required=True)
+    create = split_actions.add_parser(
+        "create", help="reparte las familias de un conjunto de escenarios y publica la partición"
+    )
+    create.add_argument(
+        "--scenarios",
+        type=Path,
+        required=True,
+        help="carpeta del conjunto (derivados/escenarios/<caso>/<fecha>_<huella>)",
+    )
+    create.add_argument(
+        "--seed", type=_master_seed, required=True, help="semilla de la partición (entero desde 0)"
+    )
+    create.add_argument(
+        "--policy",
+        type=Path,
+        default=None,
+        help="archivo JSON con las proporciones (por defecto, las provisionales 0.6/0.2/0.2)",
+    )
+    check = split_actions.add_parser(
+        "validate", help="comprueba una partición publicada contra su conjunto de escenarios"
+    )
+    check.add_argument("--split", type=Path, required=True, help="carpeta de la partición")
+    check.add_argument("--scenarios", type=Path, required=True, help="carpeta del conjunto")
+    return [generate, create, check]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -174,18 +224,6 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="carpeta del reporte de calidad (derivados/calidad/<caso>/<fecha>_<huella>)",
     )
-    scenarios = groups.add_parser("scenarios", help="escenarios controlados (DEV11)")
-    scenario_actions = scenarios.add_subparsers(dest="action", required=True)
-    generate = scenario_actions.add_parser(
-        "generate", help="genera un conjunto de escenarios con sus llegadas y lo publica"
-    )
-    generate.add_argument("--case", type=Path, required=True, help="archivo case.json")
-    generate.add_argument(
-        "--spec", type=Path, required=True, help="especificación de escenarios (JSON)"
-    )
-    generate.add_argument(
-        "--seed", type=_master_seed, required=True, help="semilla maestra (entero desde 0)"
-    )
     for command in (
         doctor,
         receive,
@@ -196,7 +234,7 @@ def build_parser() -> argparse.ArgumentParser:
         compare_runs,
         case_report,
         data_report,
-        generate,
+        *_add_experiment_commands(groups.add_parser),
     ):
         command.add_argument(
             "--workspace",
@@ -318,6 +356,27 @@ def _scenarios(arguments: argparse.Namespace, workspace: Path) -> int:
     return 0
 
 
+def _splits(arguments: argparse.Namespace, workspace: Path) -> int:
+    if arguments.action == "create":
+        policy = None if arguments.policy is None else Path(arguments.policy)
+        result = create_split_set(workspace, Path(arguments.scenarios), int(arguments.seed), policy)
+        _emit(_with_exit(result.model_dump(mode="json"), 0))
+        _say(f"Partición publicada: {(workspace / str(result.folder)).resolve()}")
+    else:
+        result = validate_split_set(Path(arguments.split), Path(arguments.scenarios))
+        _emit(_with_exit(result.model_dump(mode="json"), 0))
+        _say(f"La partición {result.split_id} es válida")
+    note = " (proporciones provisionales: DEC07 pendiente)" if result.provisional else ""
+    _say(
+        "Grupos: "
+        + ", ".join(f"{name} {count}" for name, count in result.groups.items())
+        + "; escenarios: "
+        + ", ".join(f"{name} {count}" for name, count in result.scenarios.items())
+        + note
+    )
+    return 0
+
+
 def _case(arguments: argparse.Namespace, workspace: Path) -> int:
     if arguments.action == "receive":
         record = receive_case(
@@ -352,20 +411,25 @@ def _case(arguments: argparse.Namespace, workspace: Path) -> int:
     return 0
 
 
+COMMAND_GROUPS = {
+    "report": _report,
+    "scenarios": _scenarios,
+    "splits": _splits,
+    "runs": _runs,
+}
+
+
 def _run(arguments: argparse.Namespace) -> int:
     workspace = Path(arguments.workspace)
-    if arguments.group == "report":
-        return _report(arguments, workspace)
-    if arguments.group == "scenarios":
-        return _scenarios(arguments, workspace)
+    handler = COMMAND_GROUPS.get(arguments.group)
+    if handler is not None:
+        return handler(arguments, workspace)
     if arguments.group == "doctor":
         sumo = None if arguments.sumo_bin is None else Path(arguments.sumo_bin)
         report = run_doctor(workspace, sumo)
         _emit(report.model_dump_json(indent=2))
         _say(summary(report))
         return report.exit_code
-    if arguments.group == "runs":
-        return _runs(arguments, workspace)
     if arguments.group == "simulate":
         report = run_prepared(
             Path(arguments.inputs),

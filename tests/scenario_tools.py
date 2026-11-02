@@ -2,9 +2,11 @@
 
 import copy
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from semaforo.datos.scenario_set import PublishedSet, publish_scenario_set
 from semaforo.datos.scenarios import GeneratedScenario, generate_scenarios
 from semaforo.dominio.case import Case, parse_case
 from semaforo.dominio.scenario import Scenario
@@ -64,3 +66,14 @@ def families_spec(count: int, variants: int = 2, seeds: int = 2) -> dict[str, An
 def scenarios_of(count: int, variants: int = 2, seeds: int = 2) -> list[Scenario]:
     """Los escenarios de ``count`` familias (``variants`` x ``seeds`` escenarios cada una)."""
     return [m.scenario for m in generated(families_spec(count, variants, seeds))]
+
+
+def publish_set(workspace: Path, families: int = 5, seed: int = SEED) -> PublishedSet:
+    """Publica en ``workspace`` un conjunto de ``families`` familias (4 escenarios cada una)."""
+    return publish_scenario_set(
+        workspace,
+        the_case(),
+        parse_spec(families_spec(families)),
+        seed,
+        clock=lambda: datetime(2026, 11, 2, 14, 0, 7, tzinfo=UTC),
+    )

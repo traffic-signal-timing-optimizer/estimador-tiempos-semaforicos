@@ -22,6 +22,7 @@ from typing import Literal
 
 from semaforo.app.reception import RECEPTION_ID_PATTERN, RECEPTIONS, RUNS, SNAPSHOTS, read_reception
 from semaforo.app.replica import REPLICAS, read_replica
+from semaforo.aprendizaje.split_store import SPLITS, read_split
 from semaforo.caso.case_validation import read_case
 from semaforo.datos.quality_report import read_quality_report
 from semaforo.datos.scenario_set import SCENARIO_SETS, read_scenario_set
@@ -303,7 +304,15 @@ def trace_run(workspace: Path, run_id: str) -> RunTrace:
 # --- revisión del espacio de trabajo ----------------------------------------------------------
 
 Family = Literal[
-    "runs", "receptions", "snapshots", "programs", "inputs", "quality", "replicas", "scenarios"
+    "runs",
+    "receptions",
+    "snapshots",
+    "programs",
+    "inputs",
+    "quality",
+    "replicas",
+    "scenarios",
+    "splits",
 ]
 ItemStatus = Literal["intact", "altered", "incomplete", "temporary", "unknown"]
 
@@ -398,7 +407,8 @@ def verify_workspace(
 
     Familias: corridas (``ejecuciones``), recepciones, copias de originales, programas derivados,
     carpetas de entradas, reportes de calidad (``derivados/calidad``), reportes de réplica
-    (``derivados/replicas``) y conjuntos de escenarios (``derivados/escenarios``). Los casos, los
+    (``derivados/replicas``), conjuntos de escenarios (``derivados/escenarios``) y particiones
+    (``derivados/particiones``). Los casos, los
     escenarios escritos a mano y demás archivos editables no son carpetas publicadas y no se
     revisan aquí.
     """
@@ -427,6 +437,7 @@ def verify_workspace(
         ("quality", workspace / QUALITY, lambda f: _check(read_quality_report, f), True),
         ("replicas", workspace / REPLICAS, lambda f: _check(read_replica, f), False),
         ("scenarios", workspace / SCENARIO_SETS, lambda f: _check(read_scenario_set, f), True),
+        ("splits", workspace / SPLITS, lambda f: _check(read_split, f), True),
     ]
     items = [
         item
