@@ -269,3 +269,41 @@ def test_the_commit_is_a_full_hash() -> None:
     commit, dirty = git_state()
     assert len(commit) == 40
     assert isinstance(dirty, bool)
+
+
+def test_every_skip_of_the_suite_is_listed_and_the_declared_ones_do_not_count_as_findings() -> None:
+    outside = Result(
+        file="tests/unit/test_otro.py", name="test_algo", outcome="skipped", message=SYMLINK
+    )
+    report = build([*key_results(), outside])
+    assert [s.test for s in report.suite_skips] == ["tests/unit/test_otro.py::test_algo"]
+    assert report.suite_skips[0].declared
+    assert report.gate.major_findings == 0
+    text = render_markdown(report)
+    assert "| — | `tests/unit/test_otro.py::test_algo` |" in text
+
+
+def test_an_undeclared_skip_outside_the_key_tests_is_a_major_finding() -> None:
+    outside = Result(
+        file="tests/unit/test_otro.py", name="test_algo", outcome="skipped", message="sí"
+    )
+    report = build([*key_results(), outside])
+    assert report.gate.critical_failures == 0
+    assert [s.test for s in report.undeclared_skips] == ["tests/unit/test_otro.py::test_algo"]
+    assert report.gate.major_findings == 1
+    assert all(q.status == "cumplido" for q in report.qa)  # no es una prueba clave
+
+
+def test_an_error_outside_the_key_tests_is_also_a_major_failure() -> None:
+    extra = Result(file="tests/unit/test_otro.py", name="test_algo", outcome="error", message="x")
+    report = build([*key_results(), extra])
+    assert [(f.severity, f.test) for f in report.other_failures] == [
+        ("mayor", "tests/unit/test_otro.py::test_algo")
+    ]
+    assert report.gate.critical_failures == 0
+
+
+def test_the_report_labels_the_gate_result() -> None:
+    assert "- **Resultado de la puerta:** sin fallos críticos" in render_markdown(
+        build(key_results())
+    )

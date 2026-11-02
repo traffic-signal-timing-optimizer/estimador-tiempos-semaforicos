@@ -63,3 +63,8 @@ def test_the_resolver_returns_nothing_for_what_does_not_exist() -> None:
 def test_a_file_without_tests_does_not_count(tmp_path: Path) -> None:
     (tmp_path / "vacio.py").write_text("X = 1\n", encoding="utf-8")
     assert list_tests(tmp_path / "vacio.py") == []
+
+
+def test_a_file_without_tests_is_not_resolved_even_when_it_exists() -> None:
+    assert (ROOT / "tests" / "prepared_inputs.py").is_file()
+    assert resolve("tests/prepared_inputs.py") == []

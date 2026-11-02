@@ -108,6 +108,7 @@ class EvidenceReport(FrozenModel):
     totals: Totals
     qa: list[QaOutcome]
     other_failures: list[FailureRecord]
+    suite_skips: list[SkipRecord]
     undeclared_skips: list[SkipRecord]
     sensitivity: dict[str, int] | None
     gate: Gate
@@ -231,7 +232,12 @@ def classify(  # noqa: PLR0913  (cada dato es un campo distinto del registro)
         for r in results
         if r.outcome in ("failed", "error") and (r.file, r.name) not in key_ids
     ]
-    undeclared = [skip for qa in outcomes for skip in qa.skips if not skip.declared]
+    suite_skips = [
+        _skip(f"{r.file}::{r.name}", scrub(r.message or "sin motivo"))
+        for r in results
+        if r.outcome == "skipped"
+    ]
+    undeclared = [skip for skip in suite_skips if not skip.declared]
     critical = sum(len(qa.failures) for qa in outcomes)
     major = len(others) + len(undeclared)
     return EvidenceReport(
@@ -250,6 +256,7 @@ def classify(  # noqa: PLR0913  (cada dato es un campo distinto del registro)
         ),
         qa=outcomes,
         other_failures=others,
+        suite_skips=suite_skips,
         undeclared_skips=undeclared,
         sensitivity=sensitivity,
         gate=Gate(
@@ -366,11 +373,12 @@ def render_markdown(report: EvidenceReport) -> str:
             for q in report.qa
         ],
     ]
-    declared = [(q.qa_id, s) for q in report.qa for s in q.skips if s.declared]
-    lines += ["", "## Pruebas saltadas (declaradas)", ""]
+    belongs = {s.test: q.qa_id for q in report.qa for s in q.skips}
+    declared = [s for s in report.suite_skips if s.declared]
+    lines += ["", "## Pruebas saltadas en toda la suite (declaradas)", ""]
     if declared:
         lines += ["| QA | Prueba | Motivo |", "|---|---|---|"]
-        lines += [f"| {qa_id} | `{s.test}` | {s.note} |" for qa_id, s in declared]
+        lines += [f"| {belongs.get(s.test, '—')} | `{s.test}` | {s.note} |" for s in declared]
     else:
         lines.append("Ninguna.")
     lines += ["", "## Fallos", ""]
