@@ -17,6 +17,8 @@ Si los N solicitados terminaron, la cohorte es ``complete`` y su media es suma /
 ``censored``: **no hay media completa**, solo la cota inferior (suma de lo acumulado / N) y los
 conteos residuales. Nadie se excluye: cada vehículo de la cohorte está en la tabla y en los
 denominadores, por acceso y por movimiento. Nunca se calcula la media de los que terminaron.
+
+``compare_cohorts`` compara dos corridas con la misma cohorte sin esa media sesgada (QA26).
 """
 
 import math
@@ -29,6 +31,7 @@ from semaforo.dominio.base_model import FrozenModel
 from semaforo.dominio.case import Case
 from semaforo.dominio.errors import ErrorCode
 from semaforo.dominio.protocol import Protocol
+from semaforo.dominio.timing import shown
 from semaforo.evaluacion.errors import EvaluacionError
 from semaforo.simulacion.reconcile import Reconciliation, Status, VehicleOutcome
 from semaforo.simulacion.tripinfo import Trip
@@ -36,11 +39,15 @@ from semaforo.simulacion.tripinfo import Trip
 __all__ = [
     "CENSORING_POLICY",
     "COHORT_POLICY",
+    "CohortComparison",
     "CohortDelay",
     "DelayStatus",
     "DelaySummary",
+    "GroupComparison",
     "VehicleDelay",
+    "Verdict",
     "cohort_delay",
+    "compare_cohorts",
     "require_supported",
     "summarize_delays",
 ]
@@ -123,14 +130,14 @@ def require_supported(protocol: Protocol) -> None:
     if protocol.cohort_policy != COHORT_POLICY:
         raise EvaluacionError(
             ErrorCode.INPUT_SCHEMA,
-            f"la población {protocol.cohort_policy!r} no está admitida; "
+            f"la población {shown(protocol.cohort_policy)!r} no está admitida; "
             f"se admite {COHORT_POLICY!r}",
             "cohort_policy",
         )
     if protocol.censoring_policy != CENSORING_POLICY:
         raise EvaluacionError(
             ErrorCode.INPUT_SCHEMA,
-            f"la censura {protocol.censoring_policy!r} no está admitida; se admite "
+            f"la censura {shown(protocol.censoring_policy)!r} no está admitida; se admite "
             f"{CENSORING_POLICY!r} (otra regla debe aprobarse y programarse antes)",
             "censoring_policy",
         )
@@ -139,9 +146,9 @@ def require_supported(protocol: Protocol) -> None:
 def _measured(trip: Trip, name: str, vehicle_id: str) -> float:
     value = trip.time_loss if name == "timeLoss" else trip.depart_delay
     if value is None:
-        raise _error(f"al viaje de {vehicle_id!r} le falta {name}", "tripinfo.xml")
+        raise _error(f"al viaje de {shown(vehicle_id)!r} le falta {name}", "tripinfo.xml")
     if value < 0:
-        raise _error(f"el viaje de {vehicle_id!r} tiene {name} negativo", "tripinfo.xml")
+        raise _error(f"el viaje de {shown(vehicle_id)!r} tiene {name} negativo", "tripinfo.xml")
     return value
 
 
@@ -152,7 +159,7 @@ def _vehicle(
     started = trip is not None and trip.started
     if (outcome.status != "not_inserted") != started:
         raise _error(
-            f"la conciliación y los viajes no coinciden para {vehicle_id!r}", "tripinfo.xml"
+            f"la conciliación y los viajes no coinciden para {shown(vehicle_id)!r}", "tripinfo.xml"
         )
     if trip is None or not trip.started:
         if trip is None:
@@ -254,7 +261,8 @@ def cohort_delay(
         access_id = access_of.get(outcome.movement_id)
         if access_id is None:
             raise _error(
-                f"el movimiento {outcome.movement_id!r} no es del caso", "cohorte_conciliada.csv"
+                f"el movimiento {shown(outcome.movement_id)!r} no es del caso",
+                "cohorte_conciliada.csv",
             )
         vehicles.append(_vehicle(outcome, trips.get(outcome.vehicle_id), access_id, end_s))
     total = summarize_delays(vehicles)
@@ -272,4 +280,93 @@ def cohort_delay(
         warmup_vehicles=warmup,
         simulation_end_s=end_s,
         vehicles=vehicles,
+    )
+
+
+Verdict = Literal["a_lower", "b_lower", "equal", "undetermined", "not_comparable"]
+
+
+class GroupComparison(FrozenModel):
+    """Demora de A frente a B en un grupo (toda la cohorte o un acceso), con la censura a la vista.
+
+    ``difference_s`` = media de A menos media de B, solo si las dos cohortes del grupo terminaron.
+    ``a`` y ``b`` son los resúmenes de cada lado, con sus inconclusos y no insertados.
+    """
+
+    verdict: Verdict
+    reason: str
+    difference_s: float | None
+    a: DelaySummary
+    b: DelaySummary
+
+
+class CohortComparison(FrozenModel):
+    """Comparación de la demora de dos corridas con la misma cohorte (QA26)."""
+
+    same_cohort: bool
+    total: GroupComparison
+    by_access: dict[str, GroupComparison]
+
+
+def _compare_group(a: DelaySummary, b: DelaySummary, tolerance_s: float) -> GroupComparison:
+    def result(verdict: Verdict, reason: str, difference: float | None = None) -> GroupComparison:
+        return GroupComparison(verdict=verdict, reason=reason, difference_s=difference, a=a, b=b)
+
+    if a.requested == 0:  # misma cohorte: los dos lados tienen los mismos pedidos
+        return result("not_comparable", "el grupo no tiene vehículos pedidos")
+    if a.mean_delay_s is not None and b.mean_delay_s is not None:
+        difference = a.mean_delay_s - b.mean_delay_s
+        if abs(difference) <= tolerance_s:
+            return result("equal", "las dos cohortes terminaron; medias iguales", difference)
+        verdict: Verdict = "a_lower" if difference < 0 else "b_lower"
+        return result(verdict, "las dos cohortes terminaron", difference)
+    sides: tuple[tuple[DelaySummary, DelaySummary, Verdict], ...] = (
+        (a, b, "a_lower"),
+        (b, a, "b_lower"),
+    )
+    for complete, censored, side in sides:
+        bound = censored.lower_bound_mean_delay_s
+        if complete.mean_delay_s is not None and bound is not None:
+            if complete.mean_delay_s < bound - tolerance_s:
+                return result(
+                    side,
+                    "la otra cohorte está censurada, pero su cota inferior ya supera esta media",
+                )
+            return result(
+                "undetermined",
+                "una cohorte está censurada y su cota inferior no alcanza para decidir",
+            )
+    return result("undetermined", "las dos cohortes están censuradas: no hay medias completas")
+
+
+def _cohort_key(cohort: CohortDelay) -> set[tuple[str, str, str]]:
+    return {(v.vehicle_id, v.movement_id, v.vehicle_class) for v in cohort.vehicles}
+
+
+def compare_cohorts(a: CohortDelay, b: CohortDelay, tolerance_s: float) -> CohortComparison:
+    """Compara la demora de dos corridas (por ejemplo, dos planes) sin la media sesgada (D12).
+
+    Solo se compara la **misma cohorte** (los mismos vehículos pedidos). Dos completas: la
+    diferencia de medias, igual dentro de ``tolerance_s`` (s). Una completa y otra censurada: la
+    completa es menor solo si su media queda por debajo de la cota inferior de la otra; si no,
+    ``undetermined``. Dos censuradas: ``undetermined``. La media de los que terminaron nunca se usa.
+    """
+    same = _cohort_key(a) == _cohort_key(b)
+    accesses = sorted(set(a.by_access) | set(b.by_access))
+    if not same:
+        reason = "no son la misma cohorte: los vehículos pedidos difieren"
+        return CohortComparison(
+            same_cohort=False,
+            total=GroupComparison(
+                verdict="not_comparable", reason=reason, difference_s=None, a=a.total, b=b.total
+            ),
+            by_access={},
+        )
+    return CohortComparison(
+        same_cohort=True,
+        total=_compare_group(a.total, b.total, tolerance_s),
+        by_access={
+            name: _compare_group(a.by_access[name], b.by_access[name], tolerance_s)
+            for name in accesses
+        },
     )
