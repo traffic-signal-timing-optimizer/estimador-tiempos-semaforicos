@@ -77,7 +77,7 @@ def failure(request: PreparationRequest) -> DemandInputError:
 # --- archivos -------------------------------------------------------------------------------
 
 
-def test_the_folder_has_exactly_the_six_files(built: prepare.PreparedInputs) -> None:
+def test_the_folder_has_exactly_the_seven_files(built: prepare.PreparedInputs) -> None:
     assert sorted(built.files) == [
         "cohorte.csv",
         "demanda.rou.xml",
@@ -85,6 +85,7 @@ def test_the_folder_has_exactly_the_six_files(built: prepare.PreparedInputs) -> 
         "manifiesto.json",
         "programa.tll.xml",
         "red.net.xml",
+        "zona_fcd.txt",
     ]
 
 
@@ -475,6 +476,8 @@ def test_the_manifest_lists_the_required_outputs_options_and_limits(tmp_path: Pa
         "tripinfo-output",
         "tripinfo-output.write-unfinished",
         "statistic-output",
+        "tripinfo-output.write-undeparted",
+        "fcd-output",
     ]
     assert manifest.sumo_options == {"lateral-resolution": 0.8}
     assert len(manifest.limitations) == 3

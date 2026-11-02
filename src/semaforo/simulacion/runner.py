@@ -9,8 +9,9 @@ salidas se dirigen a ``outputs/`` por línea de comandos, que tiene precedencia 
 El éxito exige código de salida 0 y salidas coherentes (QA07). Si SUMO falla, se pasa del tiempo
 o de un tope, o sus salidas no son coherentes, la ejecución se publica como ``failed`` con su
 motivo y sin métricas (QA08); si se cancela, como ``cancelled``. Toda ejecución publicada lleva
-``outputs/tiempos.json`` con su duración y por qué terminó. Una configuración con rutas absolutas
-no se ejecuta, porque SUMO escribiría fuera de la carpeta de la corrida (QA10).
+``outputs/tiempos.json`` con su duración y por qué terminó. Con una zona de medición (ADR11, DEV19)
+SUMO escribe además los viajes que nunca entraron y la FCD de la zona. Una configuración con rutas
+absolutas no se ejecuta, porque SUMO escribiría fuera de la carpeta de la corrida (QA10).
 """
 
 import os
@@ -67,11 +68,19 @@ TRIPINFO = "tripinfo.xml"
 SUMMARY = "summary.json"
 TIMING = "tiempos.json"
 LOG = "sumo.log"
+FCD = "fcd.xml"
+# Lo que la evaluación necesita de cada vehículo en cada paso (ADR11).
+FCD_ATTRIBUTES = "id,lane,speed"
 TOLERANCE = 1e-9
 # SUMO 1.27.1 en Windows no abre una ruta de más de 257 caracteres (medido en F6). En otros
 # sistemas no hay un límite práctico.
 MAX_PATH_CHARS: int | None = 257 if os.name == "nt" else None
-PLANNED_OUTPUTS = (f"outputs/{TRIPINFO}", f"outputs/{STATISTICS}", f"outputs/{LOG}")
+PLANNED_OUTPUTS = (
+    f"outputs/{TRIPINFO}",
+    f"outputs/{STATISTICS}",
+    f"outputs/{LOG}",
+    f"outputs/{FCD}",
+)
 
 
 class SimulacionError(DomainError):
@@ -183,17 +192,38 @@ def _seconds(value: float) -> str:
     return f"{value:g}"
 
 
-def sumo_arguments(entry: str, end_s: float, gui_options: Sequence[str] = ()) -> list[str]:
+def sumo_arguments(
+    entry: str,
+    end_s: float,
+    gui_options: Sequence[str] = (),
+    zone_file: str | None = None,
+) -> list[str]:
     """Argumentos de SUMO, relativos a la carpeta de la ejecución (sin el ejecutable).
 
     Las opciones de archivo de ``<gui_only>`` (``gui_options``) se anulan con un valor vacío: no
     afectan a una corrida sin interfaz, pero SUMO exige que sus archivos existan y la copia de F2
-    no incluye las vistas (ADR09).
+    no incluye las vistas (ADR09). ``zone_file`` (relativo a las entradas) es la lista de calles
+    de la zona de medición: con él se piden los viajes no iniciados y la FCD de la zona (ADR11).
     """
     neutralized = [item for option in gui_options for item in (f"--{option}", "")]
+    measurement = [] if zone_file is None else _measurement_arguments(zone_file)
     return [
         *_base_arguments(entry, end_s),
+        *measurement,
         *neutralized,
+    ]
+
+
+def _measurement_arguments(zone_file: str) -> list[str]:
+    return [
+        "--tripinfo-output.write-undeparted",
+        "true",
+        "--fcd-output",
+        f"outputs/{FCD}",
+        "--fcd-output.filter-edges.input-file",
+        f"inputs/{zone_file}",
+        "--fcd-output.attributes",
+        FCD_ATTRIBUTES,
     ]
 
 
@@ -223,6 +253,7 @@ class _Plan:
     """Lo que se decide antes de crear la corrida: nada de esto escribe en disco."""
 
     entry: str
+    zone_file: str | None
     files: list[str]
     binary: Path
     arguments: list[str]
@@ -232,11 +263,18 @@ class _Plan:
     input_bytes: int
 
 
-def _plan(
-    source: Path, entry_config: str, mode: Mode, limits: RunLimits, sumo: Path | None
+def _plan(  # noqa: PLR0913  (todo lo que define la corrida)
+    source: Path,
+    entry_config: str,
+    mode: Mode,
+    limits: RunLimits,
+    sumo: Path | None,
+    *,
+    zone_file: str | None,
 ) -> _Plan:
     """Comprueba la entrada y arma el comando. Raises: ver ``run_simulation``."""
     entry = _checked_entry(entry_config)
+    zone = None if zone_file is None else _checked_entry(zone_file, "zone_file")
     if not (source / entry).is_file():
         raise SimulacionError(
             ErrorCode.INPUT_SCHEMA, "no existe el .sumocfg de entrada", "entry_config"
@@ -249,13 +287,18 @@ def _plan(
             references.absolute_paths[0].option,
         )
     files = _source_files(source)
+    if zone is not None and zone not in files:
+        raise SimulacionError(
+            ErrorCode.INPUT_SCHEMA, "no existe el archivo de la zona de medición", "zone_file"
+        )
     binary = sumo or find_sumo()
     version = sumo_version(binary)
     end_s = limits.smoke_end_s if mode == "smoke" else limits.end_s
     gui_options = sorted({ref.option for ref in references.files if ref.section == GUI_ONLY})
-    arguments = sumo_arguments(entry, end_s, gui_options=gui_options)
+    arguments = sumo_arguments(entry, end_s, gui_options=gui_options, zone_file=zone)
     return _Plan(
         entry=entry,
+        zone_file=zone,
         files=files,
         binary=binary,
         arguments=arguments,
@@ -423,6 +466,7 @@ def run_simulation(  # noqa: PLR0913  (los argumentos opcionales son de solo pal
     clock: Callable[[], datetime] = utc_now,
     finalize: Callable[[Path], Mapping[str, bytes]] | None = None,
     cancel: threading.Event | None = None,
+    zone_file: str | None = None,
 ) -> SimulationResult:
     """Ejecuta la simulación de ``source`` y publica la corrida en ``runs_root``.
 
@@ -443,6 +487,9 @@ def run_simulation(  # noqa: PLR0913  (los argumentos opcionales son de solo pal
         cancel: evento que, al activarse, cancela la corrida: SUMO se termina, se conservan sus
             registros y salidas parciales y la corrida se publica ``cancelled``. Ctrl+C en la
             consola hace lo mismo. Una corrida cancelada no lanza excepción: se devuelve publicada.
+        zone_file: archivo de ``source`` con las calles de la zona de medición (``edge:<id>``
+            por línea). Con él SUMO escribe también los viajes no iniciados y ``outputs/fcd.xml``
+            de esas calles, y la corrida solo es exitosa si están (ADR11).
 
     Antes de empezar aparta las corridas interrumpidas de ``runs_root`` (``recover_interrupted``) y,
     si ``spec.retry_of`` está, comprueba que sea una corrida reintentable (``check_retry``).
@@ -457,7 +504,7 @@ def run_simulation(  # noqa: PLR0913  (los argumentos opcionales son de solo pal
     limits = limits or RunLimits()
     recover_interrupted(runs_root, clock=clock)  # aparta las corridas caídas; no borra nada
     check_retry(runs_root, spec)
-    plan = _plan(source, entry_config, mode, limits, sumo)
+    plan = _plan(source, entry_config, mode, limits, sumo, zone_file=zone_file)
     _check_resources(runs_root, plan.input_bytes, limits)
     with RunWriter(runs_root, spec, clock=clock) as writer:
         run = _Execution(writer, plan, limits, clock)
@@ -483,6 +530,7 @@ def run_simulation(  # noqa: PLR0913  (los argumentos opcionales son de solo pal
                 mode=mode,
                 end_limit_s=plan.end_s,
                 sumo_version=plan.environment["sumo"],
+                measured=plan.zone_file is not None,
             )
         except DomainError as invalid:
             return run.fail(ErrorCode.OUTPUT_INVALID, invalid.message, outcome.returncode, outcome)
@@ -508,11 +556,11 @@ def _final_outputs(
     return extra, None
 
 
-def _checked_entry(entry_config: str) -> str:
+def _checked_entry(entry_config: str, field: str = "entry_config") -> str:
     try:
         return check_relative_path(entry_config.strip().replace("\\", "/"))
     except ValueError as error:
-        raise SimulacionError(ErrorCode.PATH_NOT_ALLOWED, str(error), "entry_config") from error
+        raise SimulacionError(ErrorCode.PATH_NOT_ALLOWED, str(error), field) from error
 
 
 def _source_files(source: Path) -> list[str]:
@@ -562,18 +610,21 @@ def _invalid(message: str, field: str) -> SimulacionError:
     return SimulacionError(ErrorCode.OUTPUT_INVALID, message, field)
 
 
-def summarize_outputs(
+def summarize_outputs(  # noqa: PLR0913  (los opcionales son de solo palabra clave)
     folder: Path,
     declared_vehicles: float | None,
     *,
     mode: Mode = "base",
     end_limit_s: float | None = None,
     sumo_version: str | None = None,
+    measured: bool = False,
 ) -> SimulationSummary:
     """Resume ``statistics.xml`` y ``tripinfo.xml`` de ``folder`` y comprueba que sean coherentes.
 
     Coherencia (acta de F1): hay un ``tripinfo`` por vehículo insertado, los no terminados
     (``arrival`` negativo) son los que siguen en la red y no se insertan más de los cargados.
+    Con ``measured`` (ADR11) hay además un registro por vehículo que esperaba entrar
+    (``depart`` -1) y existe ``fcd.xml``; sin él no puede haber ninguno de esos registros.
 
     Raises:
         SimulacionError: OUTPUT_INVALID si falta un archivo, no es XML válido, le falta un dato
@@ -591,7 +642,9 @@ def summarize_outputs(
         trip_stats = stats.find("vehicleTripStatistics")
         loaded, inserted = integer(vehicles, "loaded"), integer(vehicles, "inserted")
         running, waiting = integer(vehicles, "running"), integer(vehicles, "waiting")
-        unfinished = sum(1 for trip in trips.values() if (trip.arrival or 0) < 0)
+        undeparted = sum(1 for trip in trips.values() if not trip.started)
+        started = len(trips) - undeparted
+        unfinished = sum(1 for trip in trips.values() if trip.started and (trip.arrival or 0) < 0)
         counts = {
             "teleports_total": integer(teleports, "total"),
             "teleports_jam": integer(teleports, "jam"),
@@ -608,8 +661,15 @@ def summarize_outputs(
         raise _invalid(error.message, error.field or STATISTICS) from error
     if inserted > loaded:
         raise _invalid(f"se insertaron {inserted} vehículos de {loaded} cargados", "vehicles")
-    if len(trips) != inserted:
-        raise _invalid(f"hay {len(trips)} viajes y {inserted} vehículos insertados", TRIPINFO)
+    if started != inserted:
+        raise _invalid(f"hay {started} viajes y {inserted} vehículos insertados", TRIPINFO)
+    if undeparted != (waiting if measured else 0):
+        raise _invalid(
+            f"hay {undeparted} viajes que no entraron y {waiting} vehículos esperando para entrar",
+            TRIPINFO,
+        )
+    if measured and not (folder / FCD).is_file():
+        raise _invalid(f"falta {FCD}", FCD)
     if unfinished != running:
         raise _invalid(
             f"hay {unfinished} viajes sin terminar y {running} vehículos en la red", TRIPINFO
@@ -624,7 +684,7 @@ def summarize_outputs(
         vehicles_inserted=inserted,
         vehicles_running=running,
         vehicles_waiting=waiting,
-        trips_finished=len(trips) - unfinished,
+        trips_finished=started - unfinished,
         trips_unfinished=unfinished,
         mean_depart_delay_s=depart_delay,
         declared_vehicles=declared_vehicles,

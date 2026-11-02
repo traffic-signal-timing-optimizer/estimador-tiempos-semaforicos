@@ -117,6 +117,7 @@ def test_the_replica_comparison_says_two_real_runs_are_equivalent(
     assert compared == {
         "outputs/tripinfo.xml",
         "outputs/statistics.xml",
+        "outputs/fcd.xml",  # la FCD de la zona (DEV19, ADR11) también se compara
         "outputs/summary.json",
         f"outputs/{CONCILIATION_TABLE}",
         f"outputs/{CONCILIATION_SUMMARY}",

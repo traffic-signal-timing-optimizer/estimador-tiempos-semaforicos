@@ -9,12 +9,17 @@ DEV03 en una carpeta autosuficiente, lista para ``run_simulation``::
         demanda.rou.xml      tipos, rutas y vehículos uno por uno, ordenados por salida
         programa.tll.xml     programa derivado, copiado tal cual
         cohorte.csv          un vehículo por fila, con su huella (formato de planilla del equipo)
+        zona_fcd.txt         calles de la zona de medición, ``edge:<id>`` por línea (ADR11)
         manifiesto.json      huellas, semillas, tiempos, conteos y salidas requeridas
 
 La carpeta se publica de una vez y nunca se sobrescribe. No ejecuta SUMO (D2): las salidas
 ``tripinfo`` (con vehículos inconclusos) y ``statistics`` las fija el corredor por línea de
 comandos y el manifiesto las declara como requeridas. El fin de la simulación está en la
 configuración y en el manifiesto; quien ejecute debe tomarlo de ahí.
+
+Desde DEV19 (ADR11, manifiesto 1.1.0) la carpeta declara también la zona de medición: las calles
+de entrada de los movimientos del caso. El corredor pide para ellas la FCD (velocidad de cada
+vehículo en cada paso) y los viajes que nunca entraron, que la evaluación necesita.
 
 Ajustes de F2 frente a F0: se admiten dos políticas de frontera equivalentes en esta etapa (red
 vacía al inicio y rutas fijas), la del ejemplo sintético y la del caso real; el carril de salida
@@ -32,7 +37,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from xml.etree.ElementTree import Element, SubElement, indent, tostring
 
-from pydantic import ValidationError
+from pydantic import Field, ValidationError
 
 from semaforo.caso.case_network import verified_network_path
 from semaforo.caso.errors import CasoError
@@ -65,6 +70,7 @@ __all__ = [
     "MAX_DEMAND_BYTES",
     "REQUIRED_OUTPUTS",
     "SUMO_OPTIONS",
+    "ZONE_FILE",
     "InputsManifest",
     "PreparationRequest",
     "PreparedInputs",
@@ -76,7 +82,9 @@ CONFIG_FILE = "escenario.sumocfg"
 DEMAND_FILE = "demanda.rou.xml"
 PROGRAM_FILE = "programa.tll.xml"
 COHORT_FILE = "cohorte.csv"
+ZONE_FILE = "zona_fcd.txt"
 MANIFEST_FILE = "manifiesto.json"
+INPUTS_SCHEMA_VERSION = "1.1.0"
 PROGRAM_MANIFEST_FILE = "manifiesto.json"
 NETWORK_FILE = "red.net.xml"
 GZIP_MAGIC = b"\x1f\x8b"
@@ -92,7 +100,13 @@ CSV_DELIMITER = ";"
 ALLOWED_BOUNDARY_POLICIES = frozenset({"DEMO_EMPTY_START_FIXED_ROUTES", "sin-semaforos-vecinos"})
 # Opciones de SUMO admitidas (D14) y el tipo de su valor.
 SUMO_OPTIONS: Mapping[str, type] = {"lateral-resolution": float, "collision.check-junctions": bool}
-REQUIRED_OUTPUTS = ("tripinfo-output", "tripinfo-output.write-unfinished", "statistic-output")
+REQUIRED_OUTPUTS = (
+    "tripinfo-output",
+    "tripinfo-output.write-unfinished",
+    "statistic-output",
+    "tripinfo-output.write-undeparted",
+    "fcd-output",
+)
 LIMITATIONS = (
     "El carril de salida es la intención del vehículo: SUMO puede cambiarlo antes del cruce, "
     "así que el carril con que cruza la línea de parada no está garantizado (D4).",
@@ -184,9 +198,13 @@ class Vehicles(FrozenModel):
 
 
 class InputsManifest(FrozenModel):
-    """Manifiesto de las entradas de una corrida (D18)."""
+    """Manifiesto de las entradas de una corrida (D18).
 
-    schema_version: str = "1.0.0"
+    ``measurement_edges`` (1.1.0, ADR11) son las calles de la zona de medición, en el orden de
+    ``zona_fcd.txt``. Una carpeta 1.0.0 no las tiene: se ejecuta igual, sin FCD.
+    """
+
+    schema_version: str = INPUTS_SCHEMA_VERSION
     created_at: str
     scenario_id: str
     scenario_sha256: str
@@ -205,6 +223,7 @@ class InputsManifest(FrozenModel):
     times: Times
     vehicles: Vehicles
     required_outputs: list[str]
+    measurement_edges: list[str] = Field(default_factory=list[str])
     sumo_options: dict[str, float | bool]
     limitations: list[str]
     files: dict[str, str]
@@ -282,12 +301,14 @@ def build_inputs(request: PreparationRequest, created_at: datetime) -> PreparedI
             "scenario",
         )
     times = _times(case, scenario)
+    zone = measurement_edges(case, graph)
     files = {
         CONFIG_FILE: _config_xml(network_name, times, sumo_seed, options),
         network_name: network_bytes,
         DEMAND_FILE: demand,
         PROGRAM_FILE: program_bytes,
         COHORT_FILE: _cohort_csv(cohort, request.routes, request.vehicle_types, assigned),
+        ZONE_FILE: zone_file_bytes(zone),
     }
     hashes = {name: sha256_bytes(data) for name, data in files.items()}
     moment = created_at.astimezone(UTC)
@@ -326,6 +347,7 @@ def build_inputs(request: PreparationRequest, created_at: datetime) -> PreparedI
             ],
         ),
         required_outputs=list(REQUIRED_OUTPUTS),
+        measurement_edges=zone,
         sumo_options=dict(options),
         limitations=list(LIMITATIONS),
         files=hashes,
@@ -460,6 +482,33 @@ def _program(folder: Path, case: Case) -> tuple[bytes, ProgramRecord]:
         source_manifest_sha256=sha256_bytes(manifest_bytes),
     )
     return program_bytes, record
+
+
+def measurement_edges(case: Case, graph: NetworkGraph) -> list[str]:
+    """Calles de la zona de medición: las de los carriles de entrada de cada movimiento, sin
+    repetir y en el orden del caso (ADR11).
+
+    Raises:
+        DemandInputError: INPUT_SCHEMA si un carril de entrada no está en la red.
+    """
+    edges: list[str] = []
+    for movement in case.movements:
+        for lane in movement.incoming_lanes:
+            found = graph.lanes.get(lane)
+            if found is None:
+                raise _error(
+                    ErrorCode.INPUT_SCHEMA,
+                    f"el carril {lane!r} del movimiento {movement.id!r} no está en la red",
+                    "movements",
+                )
+            if found.edge_id not in edges:
+                edges.append(found.edge_id)
+    return edges
+
+
+def zone_file_bytes(edges: list[str]) -> bytes:
+    """Contenido de ``zona_fcd.txt``: una línea ``edge:<id>`` por calle (selección de SUMO)."""
+    return "".join(f"edge:{edge}\n" for edge in edges).encode("utf-8")
 
 
 @dataclass(frozen=True)

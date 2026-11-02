@@ -6,7 +6,8 @@ tres estados:
 
 - ``finished``: llegó a su destino (``arrival`` mayor o igual que 0).
 - ``unfinished``: entró a la red pero seguía en ella al terminar la simulación (``arrival`` -1).
-- ``not_inserted``: no tiene viaje; nunca entró a la red.
+- ``not_inserted``: nunca entró a la red: no tiene viaje, o su viaje dice ``depart="-1"`` (los
+  registra ``write-undeparted``, ADR11).
 
 Nadie se excluye sin registro: la suma de los tres estados es el número pedido, por movimiento y
 clase y en total, y cualquier desajuste con el manifiesto o con SUMO es un error. Aquí no se calcula
@@ -36,7 +37,7 @@ from semaforo.simulacion.prepare import (
     MANIFEST_FILE,
     InputsManifest,
 )
-from semaforo.simulacion.tripinfo import read_trips
+from semaforo.simulacion.tripinfo import Trip, read_trips
 from semaforo.trazabilidad.hashing import sha256_file
 from semaforo.trazabilidad.store import read_run
 
@@ -237,8 +238,8 @@ def _check_against_manifest(vehicles: list[VehicleOutcome], manifest: InputsMani
         )
 
 
-def _trips_by_id(tripinfo: Path) -> dict[str, tuple[float | None, float | None]]:
-    """Salida (``depart``, ``arrival``) de cada viaje de ``tripinfo``, por identificador."""
+def _trips_by_id(tripinfo: Path) -> dict[str, Trip]:
+    """Viajes de ``tripinfo`` por identificador."""
     if tripinfo.is_symlink() or tripinfo.is_junction():
         raise CasoError(
             ErrorCode.PATH_NOT_ALLOWED,
@@ -249,7 +250,7 @@ def _trips_by_id(tripinfo: Path) -> dict[str, tuple[float | None, float | None]]
         trips = read_trips(tripinfo, MAX_TRIPINFO_BYTES)
     except DomainError as invalid:
         raise _error(ErrorCode.OUTPUT_INVALID, invalid.message, tripinfo.name) from invalid
-    return {trip_id: (trip.depart, trip.arrival) for trip_id, trip in trips.items()}
+    return trips
 
 
 def _apply_trips(vehicles: list[VehicleOutcome], tripinfo: Path) -> list[VehicleOutcome]:
@@ -267,17 +268,16 @@ def _apply_trips(vehicles: list[VehicleOutcome], tripinfo: Path) -> list[Vehicle
     result: list[VehicleOutcome] = []
     for vehicle in vehicles:
         trip = trips.get(vehicle.vehicle_id)
-        if trip is None:
+        if trip is None or not trip.started:
             result.append(vehicle)
             continue
-        inserted, arrival = trip
-        finished = arrival is not None and arrival >= 0
+        finished = trip.arrival is not None and trip.arrival >= 0
         result.append(
             vehicle.model_copy(
                 update={
                     "status": "finished" if finished else "unfinished",
-                    "inserted_s": inserted,
-                    "arrival_s": arrival if finished else None,
+                    "inserted_s": trip.depart,
+                    "arrival_s": trip.arrival if finished else None,
                 }
             )
         )

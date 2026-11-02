@@ -8,7 +8,9 @@
    archivos). ``manifiesto.json`` no puede llevar su propia huella: esta comparación cierra ese
    hueco. Una carpeta alterada no se ejecuta.
 2. **Ejecuta con el corredor de DEV00** (D1, D3), con el fin de la simulación, la semilla, el
-   escenario y la versión del caso tomados del manifiesto.
+   escenario y la versión del caso tomados del manifiesto. Si la carpeta declara una zona de
+   medición (manifiesto 1.1.0, ADR11), SUMO escribe también la FCD de la zona y los viajes que
+   nunca entraron.
 3. **Concilia la cohorte antes de publicar** (D10): vuelve a comprobar la copia de las entradas
    que usó SUMO y agrega a ``outputs/`` la tabla de cohorte y sus conteos. Si la conciliación
    falla, la corrida queda ``failed`` y sin métricas. Vehículos sin terminar o que no entraron no
@@ -29,7 +31,14 @@ from semaforo.caso.json_input import read_json
 from semaforo.caso.xml_input import parse_root
 from semaforo.dominio.base_model import FrozenModel
 from semaforo.dominio.errors import ErrorCode
-from semaforo.simulacion.prepare import CONFIG_FILE, DEMAND_FILE, MANIFEST_FILE, InputsManifest
+from semaforo.simulacion.prepare import (
+    CONFIG_FILE,
+    DEMAND_FILE,
+    MANIFEST_FILE,
+    ZONE_FILE,
+    InputsManifest,
+    zone_file_bytes,
+)
 from semaforo.simulacion.reconcile import OutcomeCount, reconcile, reconciliation_csv
 from semaforo.simulacion.runner import (
     MAX_CONFIG_BYTES,
@@ -48,6 +57,7 @@ __all__ = [
     "ConciliationSummary",
     "run_inputs",
     "verify_inputs",
+    "zone_of",
 ]
 
 CONCILIATION_TABLE = "cohorte_conciliada.csv"
@@ -181,14 +191,38 @@ def _check_config(folder: Path, manifest: InputsManifest) -> None:
             )
 
 
+def _check_zone(folder: Path, manifest: InputsManifest) -> None:
+    """La zona de medición del archivo es la del manifiesto (ADR11); sin zona, no hay archivo."""
+    declared = bool(manifest.measurement_edges)
+    if declared != (ZONE_FILE in manifest.files):
+        raise _error(
+            ErrorCode.HASH_MISMATCH,
+            "el manifiesto y los archivos no coinciden en la zona de medición",
+            ZONE_FILE,
+        )
+    if declared and (folder / ZONE_FILE).read_bytes() != zone_file_bytes(
+        manifest.measurement_edges
+    ):
+        raise _error(
+            ErrorCode.HASH_MISMATCH,
+            "las calles de la zona de medición no son las del manifiesto",
+            ZONE_FILE,
+        )
+
+
+def zone_of(manifest: InputsManifest) -> str | None:
+    """Archivo de la zona de medición de una carpeta de entradas, o None si no la declara."""
+    return ZONE_FILE if manifest.measurement_edges else None
+
+
 def verify_inputs(folder: Path) -> InputsManifest:
     """Manifiesto de la carpeta de entradas ``folder``, después de comprobarla entera (D2).
 
     Raises:
         SimulacionError: PATH_NOT_ALLOWED si la carpeta es un enlace o tiene enlaces o
             subcarpetas; INPUT_SCHEMA si no existe o su manifiesto no es válido; HASH_MISMATCH si
-            sobran, faltan o cambiaron archivos, o si la configuración no coincide con el
-            manifiesto.
+            sobran, faltan o cambiaron archivos, o si la configuración o la zona de medición no
+            coinciden con el manifiesto.
         CasoError: si el manifiesto o la configuración no se pueden leer.
     """
     if folder.is_symlink() or folder.is_junction():
@@ -200,6 +234,7 @@ def verify_inputs(folder: Path) -> InputsManifest:
     manifest = _manifest(folder)
     _check_files(folder, manifest)
     _check_config(folder, manifest)
+    _check_zone(folder, manifest)
     return manifest
 
 
@@ -275,4 +310,5 @@ def run_inputs(  # noqa: PLR0913  (los opcionales son de solo palabra clave)
         clock=clock,
         finalize=_conciliation(manifest),
         cancel=cancel,
+        zone_file=zone_of(manifest),
     )

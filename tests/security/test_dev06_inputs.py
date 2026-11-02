@@ -165,5 +165,6 @@ def test_the_example_files_are_the_clean_baseline(tmp_path: Path) -> None:
         "manifiesto.json",
         "programa.tll.xml",
         "red.net.xml",
+        "zona_fcd.txt",
     ]
     remove_tree(tmp_path / "entradas")

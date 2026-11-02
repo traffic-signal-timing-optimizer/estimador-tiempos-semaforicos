@@ -2,8 +2,8 @@
 
 El ``tripinfo`` es la salida más grande de una corrida (unos 470 bytes por vehículo). Leerlo entero
 como árbol ocupa unos 2,5 KB por viaje: con 200 000 vehículos, unos 500 MB, y se leía dos veces
-(resumen y conciliación). Aquí se lee de a un viaje y solo se guarda su identificador, su salida y
-su llegada: la memoria crece con los vehículos, no con el árbol.
+(resumen y conciliación). Aquí se lee de a un viaje y solo se guardan sus horas y sus tiempos
+(``Trip``): la memoria crece con los vehículos, no con el árbol.
 
 Mismas protecciones que ``parse_root``: tope de bytes (también para ``.gz``, contado sobre lo
 descomprimido), sin DTD ni entidades (``defusedxml``) y raíz esperada. Los errores solo llevan el
@@ -30,10 +30,29 @@ TAG = "tripinfo"
 
 @dataclass(frozen=True)
 class Trip:
-    """Un viaje de SUMO: hora real de entrada y de llegada (``-1`` si no terminó), en segundos."""
+    """Un viaje de SUMO, en segundos (DEV19 F1 agrega lo que mide la evaluación).
+
+    - ``depart``: hora real de entrada; ``-1`` si nunca entró (``write-undeparted``, ADR11).
+    - ``arrival``: hora de llegada; ``-1`` si no terminó.
+    - ``time_loss`` y ``depart_delay``: tiempo perdido en ruta y espera para entrar. En un viaje
+      sin terminar o sin entrar son lo acumulado hasta el fin de la simulación.
+    - ``waiting_time`` y ``waiting_count``: tiempo y episodios a muy baja velocidad en todo el
+      viaje. No son la demora (protocolo); se conservan solo como dato auxiliar.
+
+    Un atributo ausente queda en None: el lector no inventa ceros.
+    """
 
     depart: float | None
     arrival: float | None
+    time_loss: float | None = None
+    depart_delay: float | None = None
+    waiting_time: float | None = None
+    waiting_count: float | None = None
+
+    @property
+    def started(self) -> bool:
+        """Entró a la red: ``depart`` no es negativo (sin ``depart``, sí, como en DEV07)."""
+        return self.depart is None or self.depart >= 0
 
 
 class _TooLargeError(Exception):
@@ -77,6 +96,10 @@ def _trips(source: Readable, what: str) -> dict[str, Trip]:
             trips[trip_id] = Trip(
                 depart=optional_number(element, "depart"),
                 arrival=optional_number(element, "arrival"),
+                time_loss=optional_number(element, "timeLoss"),
+                depart_delay=optional_number(element, "departDelay"),
+                waiting_time=optional_number(element, "waitingTime"),
+                waiting_count=optional_number(element, "waitingCount"),
             )
         root.clear()
     return trips
