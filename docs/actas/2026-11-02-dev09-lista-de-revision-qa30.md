@@ -22,22 +22,22 @@ Marque cada punto con «Sí» o escriba qué no se entiende.
 
 | # | Qué abrir | Qué debe ver | Resultado |
 |---|---|---|---|
-| 1 | Caso real de Frutales | Arriba, «Origen: Real: datos de campo» y «Representación: Sin verificar». El estado «Válido» con una marca ✔, la red «Verificada», 23 movimientos y un ciclo de 120 a 240 s | |
-| 2 | Caso sintético válido | «Origen: Sintético: datos de prueba, no son observaciones de Lima» | |
-| 3 | Caso con avisos | «Válido con avisos» con una marca ⚠ y, en la tabla de reglas, la regla CASE-C07 con su motivo | |
-| 4 | Caso inválido | Un recuadro de alerta arriba que dice qué reglas no cumple; el estado «Inválido» con una marca ✖; **no** aparece la tabla de movimientos, solo una nota que explica por qué | |
-| 5 | Caso con texto hostil | En «Evidencia de las restricciones» se ven, **como texto**, líneas como `<script>alert(...)</script>`. No aparece ninguna ventana emergente, y el texto `<h1>título falso</h1>` se ve como texto dentro de la lista, no como un título grande | |
-| 6 | Cualquier informe del caso | Cada estado se entiende **sin mirar el color**: tiene un símbolo y una palabra (Cumple, Aviso, No cumple, No aplica) | |
-| 7 | Cualquier informe del caso | Los números llevan su unidad (s, veh/h) y el glosario del final explica «tick», «slot», «ciclo», «grupo de verde» y «enlace» con palabras que usted entiende | |
-| 8 | Datos con una exclusión | «Excluidos: 1», y una tabla «Conteos excluidos» con el error 0.1 y su causa. Esa fila aparece con ✖ «excluido» en la comparación | |
-| 9 | Datos con una exclusión | En las filas de buses, el conteo de control es un cero verdadero y se escribe «0»; el error relativo dice «no se calcula (control cero)»; no hay ningún «sin dato» en esa tabla | |
-| 10 | Datos con filas que faltan | En la comparación, la fila dice «sin dato» (no «0») y está la tabla «Combinaciones que faltan» | |
-| 11 | Datos sin pareja | Dos filas con ⚠ «sin pareja» y «sin dato» en los números | |
-| 12 | Datos completos | «Cobertura 100 %», «No hay huecos» | |
-| 13 | Cualquier informe de datos | «Corregidos: 0» con la explicación de que en esta etapa no se corrige ningún dato | |
-| 14 | Cualquiera | Con el navegador al 200 % de zoom o con la ventana angosta, las tablas se pueden desplazar a los lados y nada queda cortado | |
-| 15 | Cualquiera | Si su Windows está en modo oscuro, el informe también se lee bien | |
-| 16 | Cualquiera | Con el internet apagado, el informe se ve igual (no carga nada de fuera) | |
+| 1 | Caso real de Frutales | Arriba, «Origen: Real: datos de campo» y «Representación: Sin verificar». El estado «Válido» con una marca ✔, la red «Verificada», 23 movimientos y un ciclo de 120 a 240 s | Sí |
+| 2 | Caso sintético válido | «Origen: Sintético: datos de prueba, no son observaciones de Lima» | Sí |
+| 3 | Caso con avisos | «Válido con avisos» con una marca ⚠ y, en la tabla de reglas, la regla CASE-C07 con su motivo | Sí |
+| 4 | Caso inválido | Un recuadro de alerta arriba que dice qué reglas no cumple; el estado «Inválido» con una marca ✖; **no** aparece la tabla de movimientos, solo una nota que explica por qué | Sí |
+| 5 | Caso con texto hostil | En «Evidencia de las restricciones» se ven, **como texto**, líneas como `<script>alert(...)</script>`. No aparece ninguna ventana emergente, y el texto `<h1>título falso</h1>` se ve como texto dentro de la lista, no como un título grande | Sí |
+| 6 | Cualquier informe del caso | Cada estado se entiende **sin mirar el color**: tiene un símbolo y una palabra (Cumple, Aviso, No cumple, No aplica) | Sí |
+| 7 | Cualquier informe del caso | Los números llevan su unidad (s, veh/h) y el glosario del final explica «tick», «slot», «ciclo», «grupo de verde» y «enlace» con palabras que usted entiende | Sí |
+| 8 | Datos con una exclusión | «Excluidos: 1», y una tabla «Conteos excluidos» con el error 0.1 y su causa. Esa fila aparece con ✖ «excluido» en la comparación | Sí |
+| 9 | Datos con una exclusión | En las filas de buses, el conteo de control es un cero verdadero y se escribe «0»; el error relativo dice «no se calcula (control cero)»; no hay ningún «sin dato» en esa tabla | Sí |
+| 10 | Datos con filas que faltan | En la comparación, la fila dice «sin dato» (no «0») y está la tabla «Combinaciones que faltan» | Sí |
+| 11 | Datos sin pareja | Dos filas con ⚠ «sin pareja» y «sin dato» en los números | Sí |
+| 12 | Datos completos | «Cobertura 100 %», «No hay huecos» | Sí |
+| 13 | Cualquier informe de datos | «Corregidos: 0» con la explicación de que en esta etapa no se corrige ningún dato | Sí |
+| 14 | Cualquiera | Con el navegador al 200 % de zoom o con la ventana angosta, las tablas se pueden desplazar a los lados y nada queda cortado | Sí |
+| 15 | Cualquiera | Si su Windows está en modo oscuro, el informe también se lee bien | Sí |
+| 16 | Cualquiera | Con el internet apagado, el informe se ve igual (no carga nada de fuera) | Sí |
 
 ## Qué hacer con el resultado
 
