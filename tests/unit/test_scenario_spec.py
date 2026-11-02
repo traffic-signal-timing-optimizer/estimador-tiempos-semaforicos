@@ -79,6 +79,16 @@ def test_the_reference_spec_has_its_values() -> None:
     assert (spec.warmup_s, spec.measure_s, spec.drain_max_s) == (0, 900, 900)
 
 
+def test_the_classes_of_a_composition_are_kept_in_alphabetical_order() -> None:
+    data = good()
+    row(data, 0, 0)["composition"] = {"car": 0.9, "bus": 0.1}
+    spec = parse_spec(data)
+    composition = spec.families[0].demand[0].composition
+    assert composition is not None
+    assert list(composition) == ["bus", "car"]
+    assert spec.model_dump_json() == parse_spec(good()).model_dump_json()
+
+
 def test_the_scenario_count_is_variants_times_seeds_per_family() -> None:
     assert scenario_count(parse_spec(good())) == 3 * 2 + 2 * 2
 
@@ -435,10 +445,11 @@ def test_a_share_outside_zero_one_is_rejected(share: float) -> None:
     data = good()
     row(data, 0, 0)["composition"] = {"car": share, "bus": 1 - share}
     issues = issues_of(data)
-    # La clase que falta para sumar 1 también queda fuera de 0 a 1: se informan las dos.
+    # La clase que falta para sumar 1 también queda fuera de 0 a 1: se informan las dos, por
+    # orden alfabético de clase.
     assert [(i.rule_id, i.field) for i in issues] == [
-        ("SPEC-C04", "families[0].demand[0].composition.car"),
         ("SPEC-C04", "families[0].demand[0].composition.bus"),
+        ("SPEC-C04", "families[0].demand[0].composition.car"),
     ]
     assert all("debe estar entre 0 y 1" in issue.message for issue in issues)
 

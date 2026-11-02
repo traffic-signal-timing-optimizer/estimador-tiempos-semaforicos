@@ -32,3 +32,13 @@ def generated(
 ) -> tuple[GeneratedScenario, ...]:
     """Los escenarios de la especificación (o de ``data``) sobre el caso de ejemplo."""
     return generate_scenarios(the_spec(data), the_case(), seed)
+
+
+def write_inputs(folder: Path, spec: dict[str, Any] | None = None) -> tuple[Path, Path]:
+    """Escribe el caso de ejemplo y la especificación (o ``spec``) en ``folder``; devuelve ambos."""
+    folder.mkdir(parents=True, exist_ok=True)
+    case_path = folder / "case.json"
+    case_path.write_bytes((FIXTURES / "case.json").read_bytes())
+    spec_path = folder / "spec.json"
+    spec_path.write_text(json.dumps(spec_data() if spec is None else spec), encoding="utf-8")
+    return case_path, spec_path

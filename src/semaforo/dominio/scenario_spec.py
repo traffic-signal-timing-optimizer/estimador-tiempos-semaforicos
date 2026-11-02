@@ -87,7 +87,14 @@ def _safe_id(value: str) -> str:
     return value
 
 
+def _sorted_composition(value: dict[str, float] | None) -> dict[str, float] | None:
+    """La composición con sus clases en orden alfabético: el orden en que se escribieron no
+    cambia los bytes de lo que se genera."""
+    return None if value is None else dict(sorted(value.items()))
+
+
 SafeId = Annotated[str, AfterValidator(_safe_id)]
+Composition = Annotated[dict[str, float] | None, AfterValidator(_sorted_composition)]
 
 
 class FlowRange(FrozenModel):
@@ -102,7 +109,7 @@ class FamilyRow(FrozenModel):
 
     movement_id: Identifier
     flow_vph: FlowRange
-    composition: dict[str, float] | None
+    composition: Composition
 
 
 class Family(FrozenModel):

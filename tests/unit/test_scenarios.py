@@ -253,6 +253,15 @@ def test_the_composition_is_the_family_one() -> None:
         assert compositions == [row.composition for row in spec_family.demand]
 
 
+def test_the_order_of_the_classes_in_the_spec_does_not_change_the_scenarios() -> None:
+    data = spec_data()
+    for family in data["families"]:
+        for row in family["demand"]:
+            if row["composition"] is not None:
+                row["composition"] = dict(reversed(list(row["composition"].items())))
+    assert by_id(generated(data)) == by_id(generated())
+
+
 def test_the_flows_of_the_member_are_the_ones_in_its_request() -> None:
     for member in generated():
         in_request = {row.movement_id: row.flow_vph for row in member.scenario.request.demand}

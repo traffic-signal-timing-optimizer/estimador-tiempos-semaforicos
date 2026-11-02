@@ -82,7 +82,7 @@ Ejecuta SUMO sobre una carpeta de entradas ya preparada y publica la corrida en 
 .venv\Scripts\python.exe -m semaforo runs compare --run-a RUN_ID --run-b RUN_ID [--workspace datos] [--tolerance 1e-9] [--debug]
 ```
 
-- `runs verify` revisa todas las carpetas guardadas de `datos/` (corridas, recepciones, copias de originales, programas, entradas, reportes de calidad y de réplica) y dice cuáles están íntegras, alteradas, incompletas, en curso o no siguen un formato conocido. Solo lee: no mueve ni corrige nada. Código 0 si nada está alterado; 5 si algo lo está.
+- `runs verify` revisa todas las carpetas guardadas de `datos/` (corridas, recepciones, copias de originales, programas, entradas, reportes de calidad y de réplica, y conjuntos de escenarios) y dice cuáles están íntegras, alteradas, incompletas, en curso o no siguen un formato conocido. Solo lee: no mueve ni corrige nada. Código 0 si nada está alterado; 5 si algo lo está.
 - `runs verify --run-id` sigue una corrida hacia atrás: su carpeta de entradas, el programa derivado y el caso (o la copia de originales, en las corridas de recepción) y la corrida anterior si es un reintento. Código 0 si la cadena está completa; 5 si un eslabón está alterado; 3 si falta o cambió alguno.
 - `runs compare` dice si dos corridas son réplicas: mismas entradas y semilla, y mismos resultados sin contar la hora ni las duraciones. Publica el reporte en `datos/derivados/replicas/` y sale con código 0 tanto si son `equivalent` como `different` (mire `status`). `--tolerance` es la diferencia admitida en números con decimales.
 
@@ -104,6 +104,26 @@ Cada comando publica una página HTML que se abre con doble clic en el navegador
 | 0 | informe publicado (también con un caso inválido o con avisos) |
 | 2 | el archivo del caso o la carpeta del reporte de calidad no existen o no son válidos, o el reporte es de otro caso |
 | 5 | ruta no permitida (un enlace), reporte alterado, caso cambiado desde que se generó el reporte, o el informe ya existe |
+| 1 | error interno; repita con `--debug` para ver el detalle |
+
+## Escenarios controlados: `scenarios generate`
+
+```powershell
+.venv\Scripts\python.exe -m semaforo scenarios generate --case RUTA\case.json --spec RUTA\spec.json --seed 7 [--workspace datos] [--debug]
+```
+
+Genera un conjunto de escenarios de demanda sobre un caso y lo publica. La **especificación** (`spec.json`, con `schema_version` 1.0.0) dice, por **familia** (un patrón de demanda, por ejemplo una hora punta), el rango de flujo en veh/h de cada movimiento del caso, su composición por clase de vehículo, cuántas **perturbaciones** (flujos distintos dentro de los rangos) y cuántas **semillas** (las mismas cifras con otras llegadas) se piden, más la ventana de observación y los tiempos de calentamiento, medición y drenaje. Un ejemplo completo está en `tests\fixtures\scenario_spec.json`.
+
+- **Repetible:** la misma especificación y la misma semilla dan los mismos escenarios, byte a byte, y por eso la misma `content_id`. Una semilla distinta da otros flujos y otras llegadas.
+- **Cada escenario** lleva el grupo de su familia, el origen de la especificación y la frontera del caso, y se valida con las reglas del escenario. Todos los vehículos que llegan en cada escenario están en un archivo fijo (`demanda\<escenario>.csv`) enlazado por su huella: cualquier comparador recibe exactamente los mismos vehículos.
+- **Se rechaza antes de publicar** un rango invertido (`min > max`) o fuera del dominio de flujos del movimiento, un movimiento sin rango, una composición que no suma 1, más de 200 perturbaciones o 100 semillas por familia, más de 2000 escenarios en total, o un conjunto de más de 2 millones de vehículos. Se listan todos los problemas, cada uno con su regla (`SPEC-…`), su campo y su motivo.
+- El conjunto se publica en `<espacio de trabajo>\derivados\escenarios\<caso>\<fecha>_<huella>\` con `spec.json`, `escenarios\`, `demanda\` y un `manifiesto.json` (caso, semilla, huellas, rangos y flujos usados por escenario). Nunca se sobrescribe, y `runs verify` lo revisa.
+
+| Código de salida | Significado |
+|---|---|
+| 0 | conjunto publicado |
+| 2 | semilla o argumentos mal escritos, o el caso o la especificación no existen o no son válidos (no se publica nada) |
+| 5 | ruta no permitida (un enlace) o el conjunto ya existe |
 | 1 | error interno; repita con `--debug` para ver el detalle |
 
 ## Desarrollo

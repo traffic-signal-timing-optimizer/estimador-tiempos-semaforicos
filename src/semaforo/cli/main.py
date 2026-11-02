@@ -23,6 +23,10 @@ Comandos:
 - ``report case`` y ``report data``: publican el informe HTML del caso o de sus datos (DEV09). Un
   caso inválido también genera informe (0; hay que leer ``case_status``); un archivo que no se
   puede leer sale 2 o 5, y un reporte de calidad alterado o de otro caso, 5.
+- ``scenarios generate``: genera un conjunto de escenarios controlados con sus llegadas y lo
+  publica (DEV11). Códigos de salida: 0 publicado; 2 caso o especificación inválidos o
+  ilegibles (no se publica nada, se listan todos los problemas); 5 ruta no permitida o conjunto
+  ya existente.
 """
 
 import argparse
@@ -41,6 +45,7 @@ from semaforo.app.integrity import (
     verify_workspace,
     workspace_exit_code,
 )
+from semaforo.app.issue_lines import issue_lines
 from semaforo.app.reception import (
     DomainError,
     publish_public_report,
@@ -48,6 +53,7 @@ from semaforo.app.reception import (
 )
 from semaforo.app.replica import Tolerance, replicate
 from semaforo.app.report_commands import report_case, report_data
+from semaforo.app.scenario_commands import MAX_SEED, generate_scenario_set
 from semaforo.app.simulate import RunReport, run_prepared
 from semaforo.cli.doctor import configure_doctor, run_doctor, summary
 
@@ -71,6 +77,17 @@ def _positive_number(text: str) -> float:
         raise argparse.ArgumentTypeError(f"no es un número: {text!r}") from error
     if not 0 < value < float("inf"):
         raise argparse.ArgumentTypeError("debe ser un número mayor que cero")
+    return value
+
+
+def _master_seed(text: str) -> int:
+    """Semilla maestra para ``--seed``: un entero de 0 a ``MAX_SEED``."""
+    try:
+        value = int(text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(f"no es un entero: {text!r}") from error
+    if not 0 <= value <= MAX_SEED:
+        raise argparse.ArgumentTypeError(f"debe ser un entero de 0 a {MAX_SEED}")
     return value
 
 
@@ -157,6 +174,18 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="carpeta del reporte de calidad (derivados/calidad/<caso>/<fecha>_<huella>)",
     )
+    scenarios = groups.add_parser("scenarios", help="escenarios controlados (DEV11)")
+    scenario_actions = scenarios.add_subparsers(dest="action", required=True)
+    generate = scenario_actions.add_parser(
+        "generate", help="genera un conjunto de escenarios con sus llegadas y lo publica"
+    )
+    generate.add_argument("--case", type=Path, required=True, help="archivo case.json")
+    generate.add_argument(
+        "--spec", type=Path, required=True, help="especificación de escenarios (JSON)"
+    )
+    generate.add_argument(
+        "--seed", type=_master_seed, required=True, help="semilla maestra (entero desde 0)"
+    )
     for command in (
         doctor,
         receive,
@@ -167,6 +196,7 @@ def build_parser() -> argparse.ArgumentParser:
         compare_runs,
         case_report,
         data_report,
+        generate,
     ):
         command.add_argument(
             "--workspace",
@@ -275,6 +305,19 @@ def _report(arguments: argparse.Namespace, workspace: Path) -> int:
     return 0
 
 
+def _scenarios(arguments: argparse.Namespace, workspace: Path) -> int:
+    result = generate_scenario_set(
+        workspace, Path(arguments.case), Path(arguments.spec), int(arguments.seed)
+    )
+    _emit(_with_exit(result.model_dump(mode="json"), 0))
+    _say(f"Conjunto de escenarios publicado: {(workspace / result.folder).resolve()}")
+    _say(
+        f"{result.scenarios} escenarios en {result.families} familias; "
+        f"{result.vehicles} vehículos en total"
+    )
+    return 0
+
+
 def _case(arguments: argparse.Namespace, workspace: Path) -> int:
     if arguments.action == "receive":
         record = receive_case(
@@ -313,6 +356,8 @@ def _run(arguments: argparse.Namespace) -> int:
     workspace = Path(arguments.workspace)
     if arguments.group == "report":
         return _report(arguments, workspace)
+    if arguments.group == "scenarios":
+        return _scenarios(arguments, workspace)
     if arguments.group == "doctor":
         sumo = None if arguments.sumo_bin is None else Path(arguments.sumo_bin)
         report = run_doctor(workspace, sumo)
@@ -343,6 +388,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     except DomainError as error:
         _emit(_error(error.code.value, error.message, error.field))
         _say(f"Error {error.code.value}: {error.message}")
+        for line in issue_lines(error):
+            _say(line)
         return exit_code_for(error.code)
     except Exception:
         if arguments.debug:
