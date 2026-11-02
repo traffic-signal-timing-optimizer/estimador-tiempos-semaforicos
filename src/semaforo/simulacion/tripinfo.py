@@ -10,16 +10,12 @@ descomprimido), sin DTD ni entidades (``defusedxml``) y raíz esperada. Los erro
 nombre del archivo.
 """
 
-import gzip
-import zlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO
 
-from defusedxml.common import DefusedXmlException
 from defusedxml.ElementTree import iterparse
 
-from semaforo.caso.xml_input import GZIP_MAGIC, invalid, optional_number, required
+from semaforo.caso.xml_input import invalid, optional_number, required, stream_parse
 from semaforo.trazabilidad.fs import Readable
 
 __all__ = ["ROOT", "TAG", "Trip", "read_trips"]
@@ -53,25 +49,6 @@ class Trip:
     def started(self) -> bool:
         """Entró a la red: ``depart`` no es negativo (sin ``depart``, sí, como en DEV07)."""
         return self.depart is None or self.depart >= 0
-
-
-class _TooLargeError(Exception):
-    """Se leyó más del tope."""
-
-
-class _Capped:
-    """Envuelve un flujo y falla si se lee más de ``limit`` bytes."""
-
-    def __init__(self, stream: Readable, limit: int) -> None:
-        self._stream = stream
-        self._left = limit
-
-    def read(self, size: int = -1, /) -> bytes:
-        chunk = self._stream.read(size)
-        self._left -= len(chunk)
-        if self._left < 0:
-            raise _TooLargeError
-        return chunk
 
 
 def _trips(source: Readable, what: str) -> dict[str, Trip]:
@@ -113,21 +90,4 @@ def read_trips(path: Path, max_bytes: int) -> dict[str, Trip]:
             XML válido o seguro, su raíz no es ``<tripinfos>``, a un viaje le falta ``id``, un
             número no es válido o un vehículo aparece dos veces.
     """
-    name = path.name
-    try:
-        with path.open("rb") as handle:
-            compressed = handle.read(len(GZIP_MAGIC)) == GZIP_MAGIC
-            handle.seek(0)
-            stream: BinaryIO | gzip.GzipFile = (
-                gzip.GzipFile(fileobj=handle) if compressed else handle
-            )
-            trips = _trips(_Capped(stream, max_bytes), name)
-    except _TooLargeError:
-        raise invalid(f"el archivo supera el límite de {max_bytes} bytes", name) from None
-    except (DefusedXmlException, SyntaxError) as error:
-        raise invalid(
-            f"{name}: no es un XML válido o seguro ({type(error).__name__})", name
-        ) from error
-    except (OSError, EOFError, zlib.error) as error:
-        raise invalid(f"no se puede leer el archivo ({type(error).__name__})", name) from error
-    return trips
+    return stream_parse(path, max_bytes, _trips)
