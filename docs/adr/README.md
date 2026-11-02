@@ -14,5 +14,6 @@ Los ADR01 a ADR08 provienen de `documentacion/documentos/01_Diseno_tecnico.md` y
 | [ADR08](ADR08-formato-de-modelos.md) | Formato de modelos sin deserialización insegura | P | Propuesta | Decidir (DEC09) |
 | [ADR09](ADR09-artefactos-de-recepcion.md) | Artefactos de recepción (manifiesto, inventario y auditoría) | P (equipo) | Aceptada (2026-10-19) | Implementada en F2 a F9 de DEV00 |
 | [ADR10](ADR10-firma-de-validate-case.md) | Firma de la validación del caso: `validate_case(ruta)` | P (equipo) | Aceptada (2026-10-30) | Implementada en F3 de DEV02 |
+| [ADR11](ADR11-salidas-de-medicion.md) | Salidas de medición de las corridas preparadas (FCD en la zona y no iniciados) | P (equipo) | Aceptada (2026-11-02, por delegación del PO) | Implementar en DEV19 |
 
 Estados posibles: Propuesta, Aceptada, Rechazada, Sustituida.
