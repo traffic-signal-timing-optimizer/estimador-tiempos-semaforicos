@@ -27,6 +27,7 @@ from typing import Literal
 
 from semaforo.dominio.errors import DomainError, ErrorCode
 from semaforo.dominio.split import Partition, Split
+from semaforo.trazabilidad.hashing import sha256_bytes
 
 __all__ = [
     "ALLOWED",
@@ -37,6 +38,7 @@ __all__ = [
     "check_ids",
     "development_view",
     "ids_for",
+    "rows_digest",
     "rows_for",
 ]
 
@@ -175,3 +177,13 @@ def rows_for[T](split: Split, rows: Mapping[str, T], purpose: Purpose) -> dict[s
         for assignment in split.assignments
         if assignment.partition in allowed and assignment.scenario_id in rows
     }
+
+
+def rows_digest(rows: Mapping[str, float]) -> str:
+    """Huella SHA-256 de las filas, en orden de escenario: una línea ``<escenario>\t<valor>``.
+
+    Sirve para dejar anotado qué consumió un ajuste: si la prueba no se cuela, la huella de las
+    filas de ajuste es la misma aunque se altere cualquier valor de la prueba (QA15).
+    """
+    text = "".join(f"{scenario_id}\t{value!r}\n" for scenario_id, value in sorted(rows.items()))
+    return sha256_bytes(text.encode("utf-8"))
