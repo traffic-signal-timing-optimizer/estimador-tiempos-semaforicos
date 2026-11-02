@@ -16,6 +16,7 @@ from semaforo.caso.errors import CasoError
 from semaforo.caso.network_graph import read_network_graph
 from semaforo.dominio.errors import DomainError, ErrorCode
 from semaforo.simulacion import prepare
+from semaforo.simulacion.demand_inputs import RouteTable
 from semaforo.simulacion.prepare import (
     MANIFEST_FILE,
     ZONE_FILE,
@@ -76,7 +77,8 @@ def test_the_zone_lists_the_entry_streets_of_the_case_in_order(tmp_path: Path) -
     built = build_inputs(request_for(tmp_path), MOMENT)
     assert built.files[ZONE_FILE] == DEMO_ZONE
     assert built.manifest.measurement_edges == ["demo_N", "demo_E"]
-    assert built.manifest.schema_version == "1.1.0"
+    assert built.manifest.schema_version == "1.2.0"
+    assert built.manifest.measurement_access == {"demo_N": "N", "demo_E": "E"}
     assert built.manifest.files[ZONE_FILE] == hashlib.sha256(DEMO_ZONE).hexdigest()
 
 
@@ -88,15 +90,57 @@ def test_the_zone_uses_the_street_of_the_lanes_not_the_declared_approach(tmp_pat
     assert "N" not in built.manifest.measurement_edges
 
 
-def test_a_street_shared_by_two_movements_appears_once(tmp_path: Path) -> None:
+def zone_of_routes(
+    tmp_path: Path,
+    routes: dict[str, list[str]],
+    case_change: Callable[[dict[str, Any]], None] | None = None,
+) -> tuple[list[str], dict[str, str]]:
+    return prepare.measurement_zone(
+        request_for(tmp_path, case_change=case_change).case,
+        read_network_graph(tmp_path / "caso" / "demo.net.xml"),
+        RouteTable.model_validate({"routes": routes}),
+    )
+
+
+def test_the_zone_is_the_modeled_approach_up_to_the_entry_street(tmp_path: Path) -> None:
+    """Una calle de entrada puede medir centímetros (caso-001): se mide toda la aproximación."""
+    edges, access = zone_of_routes(
+        tmp_path,
+        {"N_S": ["n2", "n1", "demo_N", "demo_S"], "E_W": ["e1", "demo_E", "demo_W"]},
+    )
+    assert edges == ["n2", "n1", "demo_N", "e1", "demo_E"]
+    assert access == {"n2": "N", "n1": "N", "demo_N": "N", "e1": "E", "demo_E": "E"}
+
+
+def test_the_streets_after_the_junction_are_not_in_the_zone(tmp_path: Path) -> None:
+    edges, _ = zone_of_routes(tmp_path, {"N_S": ["demo_N", "demo_S"], "E_W": ["demo_E", "demo_W"]})
+    assert "demo_S" not in edges
+    assert "demo_W" not in edges
+
+
+def test_without_route_or_entry_street_in_it_the_zone_is_the_entry_street(tmp_path: Path) -> None:
+    edges, access = zone_of_routes(tmp_path, {"N_S": ["otra", "demo_S"]})
+    assert edges == ["demo_N", "demo_E"]
+    assert access == {"demo_N": "N", "demo_E": "E"}
+
+
+def test_a_street_shared_by_movements_of_one_access_appears_once(tmp_path: Path) -> None:
     def share(case: dict[str, Any]) -> None:
         case["movements"][1]["incoming_lanes"] = ["demo_N_0"]
+        case["movements"][1]["approach_id"] = "N"
 
-    lanes = prepare.measurement_edges(
-        request_for(tmp_path, case_change=share).case,
-        read_network_graph(tmp_path / "caso" / "demo.net.xml"),
-    )
-    assert lanes == ["demo_N"]
+    edges, access = zone_of_routes(tmp_path, {}, share)
+    assert edges == ["demo_N"]
+    assert access == {"demo_N": "N"}
+
+
+def test_a_street_in_two_accesses_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(DomainError, match="dos accesos") as raised:
+        zone_of_routes(
+            tmp_path,
+            {"N_S": ["comun", "demo_N", "demo_S"], "E_W": ["comun", "demo_E", "demo_W"]},
+        )
+    assert raised.value.code is ErrorCode.INPUT_SCHEMA
 
 
 def test_a_lane_that_is_not_in_the_network_is_refused(tmp_path: Path) -> None:
@@ -104,10 +148,7 @@ def test_a_lane_that_is_not_in_the_network_is_refused(tmp_path: Path) -> None:
         case["movements"][0]["incoming_lanes"] = ["fantasma_0"]
 
     with pytest.raises(DomainError, match="no está en la red") as raised:
-        prepare.measurement_edges(
-            request_for(tmp_path, case_change=ghost).case,
-            read_network_graph(tmp_path / "caso" / "demo.net.xml"),
-        )
+        zone_of_routes(tmp_path, {}, ghost)
     assert raised.value.code is ErrorCode.INPUT_SCHEMA
 
 
@@ -130,9 +171,21 @@ def test_a_zone_that_disagrees_with_the_manifest_is_refused(editable: Path) -> N
 
 
 def test_a_manifest_with_other_streets_is_refused(editable: Path) -> None:
-    change_manifest(editable, lambda manifest: manifest.update(measurement_edges=["demo_S"]))
+    change_manifest(
+        editable,
+        lambda manifest: manifest.update(
+            measurement_edges=["demo_S"], measurement_access={"demo_S": "S"}
+        ),
+    )
     with pytest.raises(SimulacionError, match="zona de medición no son"):
         verify_inputs(editable)
+
+
+def test_an_access_map_that_does_not_match_the_streets_is_refused(editable: Path) -> None:
+    change_manifest(editable, lambda manifest: manifest.update(measurement_access={"demo_N": "N"}))
+    with pytest.raises(SimulacionError, match="acceso de las calles") as raised:
+        verify_inputs(editable)
+    assert raised.value.code is ErrorCode.HASH_MISMATCH
 
 
 def test_a_manifest_that_forgets_the_zone_while_the_file_is_there_is_refused(
@@ -164,6 +217,7 @@ def test_an_old_folder_without_zone_still_passes_and_runs_without_measurement(
     def as_old(manifest: dict[str, Any]) -> None:
         del manifest["files"][ZONE_FILE]
         del manifest["measurement_edges"]
+        del manifest["measurement_access"]
         manifest["schema_version"] = "1.0.0"
         manifest["required_outputs"] = manifest["required_outputs"][:3]
 
@@ -176,7 +230,9 @@ def test_an_old_folder_without_zone_still_passes_and_runs_without_measurement(
 def test_an_old_manifest_without_the_new_field_is_still_valid(folder: Path) -> None:
     data = json.loads((folder / MANIFEST_FILE).read_text(encoding="utf-8"))
     del data["measurement_edges"]
-    assert InputsManifest.model_validate(data).measurement_edges == []
+    del data["measurement_access"]
+    old = InputsManifest.model_validate(data)
+    assert (old.measurement_edges, old.measurement_access) == ([], {})
 
 
 # --- el corredor pide las salidas nuevas ---------------------------------------------------

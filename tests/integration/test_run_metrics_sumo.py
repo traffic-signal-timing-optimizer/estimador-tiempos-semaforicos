@@ -12,6 +12,7 @@ from prepared_inputs import MOMENT, request_for
 from semaforo.dominio.case import Case
 from semaforo.dominio.errors import DomainError, ErrorCode
 from semaforo.dominio.protocol import Protocol, parse_protocol
+from semaforo.evaluacion import run_metrics
 from semaforo.evaluacion.cohort import compare_cohorts
 from semaforo.evaluacion.errors import EvaluacionError
 from semaforo.evaluacion.run_metrics import evaluate_run
@@ -19,6 +20,7 @@ from semaforo.simulacion.prepare import MANIFEST_FILE, ZONE_FILE, publish_inputs
 from semaforo.simulacion.reconcile import reconcile_run
 from semaforo.simulacion.run_inputs import run_inputs
 from semaforo.simulacion.runner import RunLimits
+from semaforo.simulacion.summary import SimulationSummary
 from semaforo.trazabilidad.fs import remove_tree
 
 pytestmark = pytest.mark.sumo
@@ -78,6 +80,12 @@ def test_a_full_run_gives_a_complete_cohort_and_the_zone_metrics(
     assert metrics.zone.stops.total_stops > 0
     assert metrics.zone_unavailable is None
     assert (metrics.origin, metrics.protocol_status) == ("synthetic", "draft")
+    assert run.summary is not None
+    assert (metrics.teleports_total, metrics.collisions) == (
+        run.summary.teleports_total,
+        run.summary.collisions,
+    )
+    assert metrics.simulation_findings == run.summary.findings
 
 
 def test_qa25_a_saturated_run_keeps_every_requested_vehicle_and_is_censored(
@@ -100,6 +108,7 @@ def test_qa25_a_saturated_run_keeps_every_requested_vehicle_and_is_censored(
     assert metrics.zone is not None
     assert metrics.zone.stops.status == "censored"
     assert metrics.zone.stops.mean_stops is None
+    assert "DEMAND_NOT_INSERTED" in {finding.code for finding in metrics.simulation_findings}
 
 
 def test_two_censored_real_runs_are_undetermined_even_when_identical(
@@ -128,6 +137,7 @@ def as_old_folder(tmp_path: Path, published: Path) -> Path:
     manifest = json.loads(path.read_text(encoding="utf-8"))
     del manifest["files"][ZONE_FILE]
     del manifest["measurement_edges"]
+    del manifest["measurement_access"]
     manifest["schema_version"] = "1.0.0"
     manifest["required_outputs"] = manifest["required_outputs"][:3]
     path.write_text(json.dumps(manifest), encoding="utf-8")
@@ -167,6 +177,40 @@ def test_in_an_old_saturated_folder_the_wait_comes_from_the_end_of_the_simulatio
     }
     for vehicle in waiting:
         assert vehicle.depart_delay_s == max(0.0, end_s - scheduled[vehicle.vehicle_id])
+
+
+def test_teleports_and_collisions_of_the_run_reach_the_metrics(
+    tmp_path: Path, runs: Path, sumo_binary: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """La demo no tiene atascos: se pone un resumen con teletransportes para ver que se copian."""
+    folder, case = prepared(tmp_path, "entradas")
+    run = run_inputs(folder, runs, sumo=sumo_binary)
+    assert run.summary is not None
+    stuck = run.summary.model_copy(update={"teleports_total": 3, "collisions": 1})
+
+    def summary_of(_outputs: Path) -> SimulationSummary:
+        return stuck
+
+    monkeypatch.setattr(run_metrics, "_run_summary", summary_of)
+    metrics = evaluate_run(folder, runs, run.manifest.run_id, case, protocol())
+    assert (metrics.teleports_total, metrics.collisions) == (3, 1)
+
+
+def test_the_access_of_each_zone_street_is_passed_to_the_measurement(
+    tmp_path: Path, runs: Path, sumo_binary: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    folder, case = prepared(tmp_path, "entradas")
+    run = run_inputs(folder, runs, sumo=sumo_binary)
+    seen: dict[str, object] = {}
+    measure = run_metrics.zone_metrics
+
+    def spy(*args: Any, **kwargs: Any) -> Any:  # noqa: ANN401 - espía de la llamada real
+        seen.update(kwargs)
+        return measure(*args, **kwargs)
+
+    monkeypatch.setattr(run_metrics, "zone_metrics", spy)
+    evaluate_run(folder, runs, run.manifest.run_id, case, protocol())
+    assert seen["edge_access"] == {"demo_N": "N", "demo_E": "E"}
 
 
 def test_the_case_must_be_the_one_of_the_inputs(

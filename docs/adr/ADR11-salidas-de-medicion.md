@@ -39,6 +39,16 @@ El corredor genérico de DEV00 (réplica de la simulación del equipo) no cambia
 - `evaluacion/`: lee `outputs/fcd.xml` (DEV19 F3).
 - **Límite:** la zona es la calle de aproximación declarada en el caso. Si la cola se extiende a la calle anterior, esa parte no se ve. La zona definitiva depende de DEC04.
 
+## Enmienda del 2026-11-02 (DEV19 F5): la zona es la aproximación modelada
+
+La inspección con el caso real mostró que varias calles de entrada del caso-001 son tramos minúsculos de OpenStreetMap. La entrada de Javier Prado desde el este (`279893869#6`) mide 3.85 m; `282567283#5` mide 0.20 m y `563085958` mide 0.13 m. Con la zona limitada a esas calles, la cola de esos accesos no se veía: 14 vehículos en promedio en toda la zona y 0.2 detenciones por vehículo, aun en corridas con 240 s de demora media.
+
+**Cambio:** la zona de una carpeta de entradas (manifiesto **1.2.0**) es, para cada movimiento, la lista de calles de su ruta desde el inicio hasta la de sus carriles de entrada, inclusive. Sin ruta, es solo esa calle. Cada calle queda con el acceso de su movimiento (`measurement_access`), y una calle que resulte de dos accesos se rechaza. La evaluación usa ese mapa para el desglose por acceso.
+
+- **Largo de la zona:** el del área que modelan las rutas del equipo. No se inventó ninguna distancia. La zona definitiva sigue dependiendo de DEC04.
+- **Con el caso-001:** 21 calles y 58 carriles. La FCD ocupa hasta 27 MB por corrida, contra un tope de 512 MiB.
+- **Carpetas anteriores:** las 1.1.0 siguen siendo válidas, con la zona de las calles de entrada.
+
 ## Prueba de aceptación
 
 - Una corrida con SUMO real desde una carpeta 1.1.0 produce `outputs/fcd.xml` solo con las calles de la zona y un paso por tick, y el `tripinfo` incluye los no iniciados.

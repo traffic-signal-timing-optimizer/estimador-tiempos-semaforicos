@@ -200,6 +200,13 @@ def _check_zone(folder: Path, manifest: InputsManifest) -> None:
             "el manifiesto y los archivos no coinciden en la zona de medición",
             ZONE_FILE,
         )
+    access = manifest.measurement_access
+    if access and set(access) != set(manifest.measurement_edges):
+        raise _error(
+            ErrorCode.HASH_MISMATCH,
+            "el acceso de las calles de la zona no coincide con sus calles",
+            MANIFEST_FILE,
+        )
     if declared and (folder / ZONE_FILE).read_bytes() != zone_file_bytes(
         manifest.measurement_edges
     ):

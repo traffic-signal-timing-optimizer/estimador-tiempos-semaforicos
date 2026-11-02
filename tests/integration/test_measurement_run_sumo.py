@@ -103,6 +103,7 @@ def test_an_old_folder_without_zone_runs_as_before_without_fcd(
     manifest = json.loads(path.read_text(encoding="utf-8"))
     del manifest["files"][ZONE_FILE]
     del manifest["measurement_edges"]
+    del manifest["measurement_access"]
     manifest["schema_version"] = "1.0.0"
     manifest["required_outputs"] = manifest["required_outputs"][:3]
     path.write_text(json.dumps(manifest), encoding="utf-8")

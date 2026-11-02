@@ -316,6 +316,28 @@ def test_an_access_without_cohort_has_no_stop_figures(tmp_path: Path) -> None:
 # --- acceso de cada carril -------------------------------------------------------------------
 
 
+def test_an_upstream_lane_takes_the_access_of_its_street() -> None:
+    access = lane_access(case(), [N, "arriba_0", "otra_1"], {"arriba": "N", "demo_N": "N"})
+    assert access == {N: "N", "arriba_0": "N", "otra_1": "otra"}
+
+
+def test_upstream_queues_count_in_the_access_of_their_street(tmp_path: Path) -> None:
+    steps: dict[float, Step] = {0.0: {"a": ("arriba_0", 0.0), "b": (N, 0.0)}}
+    result = zone_metrics(
+        write(tmp_path, steps),
+        protocol(zone_lane_ids=[N, E, "arriba_0"]),
+        case(),
+        cohort(("a", "N", "finished"), ("b", "N", "finished")),
+        step_s=1.0,
+        start_s=0.0,
+        end_s=1.0,
+        edge_access={"arriba": "N"},
+    )
+    assert sorted(result.queue_by_access) == ["E", "N"]
+    assert result.queue_by_access["N"].vehicle_ticks == 2
+    assert result.vehicle_stops == {"a": 1, "b": 1}
+
+
 def test_the_access_of_a_lane_is_the_approach_of_its_movement() -> None:
     assert lane_access(case(), [N, E, "otra_calle_2"]) == {
         N: "N",

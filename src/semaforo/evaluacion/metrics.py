@@ -21,6 +21,7 @@ zona que no es de ningún movimiento usa el nombre de su calle.
 """
 
 import math
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Literal
 
@@ -106,16 +107,24 @@ class ZoneMetrics(FrozenModel):
     fcd_steps: int = Field(ge=0)
 
 
-def lane_access(case: Case, lanes: list[str]) -> dict[str, str]:
-    """Acceso de cada carril: el ``approach_id`` del movimiento que entra por él o, si no es de
-    ninguno, el nombre de su calle (el carril sin su ``_<índice>`` final).
+def lane_access(
+    case: Case, lanes: list[str], edge_access: Mapping[str, str] | None = None
+) -> dict[str, str]:
+    """Acceso de cada carril: el ``approach_id`` del movimiento que entra por él; si no es de
+    ninguno, el acceso de su calle en ``edge_access`` (la zona de la carpeta de entradas); y si
+    tampoco, el nombre de su calle (el carril sin su ``_<índice>`` final).
     """
     declared = {
         lane: movement.approach_id
         for movement in case.movements
         for lane in movement.incoming_lanes
     }
-    return {lane: declared.get(lane, lane.rsplit("_", 1)[0]) for lane in lanes}
+    by_edge = edge_access or {}
+    result: dict[str, str] = {}
+    for lane in lanes:
+        edge = lane.rsplit("_", 1)[0]
+        result[lane] = declared.get(lane, by_edge.get(edge, edge))
+    return result
 
 
 def _sample_ticks(start_s: float, end_s: float, sampling_s: float, step_s: float) -> int:
@@ -239,6 +248,7 @@ def zone_metrics(  # noqa: PLR0913  (los tiempos de la corrida son de solo palab
     start_s: float,
     end_s: float,
     max_bytes: int = MAX_FCD_BYTES,
+    edge_access: Mapping[str, str] | None = None,
 ) -> ZoneMetrics:
     """Cola y detenciones de una corrida a partir de su ``fcd.xml``.
 
@@ -251,12 +261,13 @@ def zone_metrics(  # noqa: PLR0913  (los tiempos de la corrida son de solo palab
         step_s: paso de la simulación (s).
         start_s, end_s: intervalo de medición de la cola [inicio, fin), en s.
         max_bytes: tope de la FCD descomprimida.
+        edge_access: acceso de cada calle de la zona (``measurement_access`` de las entradas).
 
     Raises:
         EvaluacionError: INPUT_SCHEMA si el muestreo no es múltiplo del paso; OUTPUT_INVALID si la
             FCD no se puede leer o no es válida.
     """
-    access = lane_access(case, protocol.zone_lane_ids)
+    access = lane_access(case, protocol.zone_lane_ids, edge_access)
     vehicles = {vehicle.vehicle_id: vehicle.access_id for vehicle in cohort.vehicles}
     expected = _sample_ticks(start_s, end_s, protocol.queue_sampling_s, step_s)
     settings = ZoneSettings(

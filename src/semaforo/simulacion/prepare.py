@@ -17,9 +17,11 @@ La carpeta se publica de una vez y nunca se sobrescribe. No ejecuta SUMO (D2): l
 comandos y el manifiesto las declara como requeridas. El fin de la simulación está en la
 configuración y en el manifiesto; quien ejecute debe tomarlo de ahí.
 
-Desde DEV19 (ADR11, manifiesto 1.1.0) la carpeta declara también la zona de medición: las calles
-de entrada de los movimientos del caso. El corredor pide para ellas la FCD (velocidad de cada
-vehículo en cada paso) y los viajes que nunca entraron, que la evaluación necesita.
+Desde DEV19 (ADR11) la carpeta declara también la zona de medición y el corredor pide para ella
+la FCD (velocidad de cada vehículo en cada paso) y los viajes que nunca entraron. La zona es la
+aproximación modelada (manifiesto 1.2.0, F5): para cada movimiento, las calles de su ruta hasta la
+de entrada al cruce, cada una con el acceso al que pertenece. En la 1.1.0 eran solo las calles de
+entrada, que en una red de OpenStreetMap pueden medir centímetros.
 
 Ajustes de F2 frente a F0: se admiten dos políticas de frontera equivalentes en esta etapa (red
 vacía al inicio y rutas fijas), la del ejemplo sintético y la del caso real; el carril de salida
@@ -84,7 +86,7 @@ PROGRAM_FILE = "programa.tll.xml"
 COHORT_FILE = "cohorte.csv"
 ZONE_FILE = "zona_fcd.txt"
 MANIFEST_FILE = "manifiesto.json"
-INPUTS_SCHEMA_VERSION = "1.1.0"
+INPUTS_SCHEMA_VERSION = "1.2.0"
 PROGRAM_MANIFEST_FILE = "manifiesto.json"
 NETWORK_FILE = "red.net.xml"
 GZIP_MAGIC = b"\x1f\x8b"
@@ -201,7 +203,8 @@ class InputsManifest(FrozenModel):
     """Manifiesto de las entradas de una corrida (D18).
 
     ``measurement_edges`` (1.1.0, ADR11) son las calles de la zona de medición, en el orden de
-    ``zona_fcd.txt``. Una carpeta 1.0.0 no las tiene: se ejecuta igual, sin FCD.
+    ``zona_fcd.txt``; ``measurement_access`` (1.2.0) dice a qué acceso pertenece cada una. Una
+    carpeta 1.0.0 no tiene zona: se ejecuta igual, sin FCD.
     """
 
     schema_version: str = INPUTS_SCHEMA_VERSION
@@ -224,6 +227,7 @@ class InputsManifest(FrozenModel):
     vehicles: Vehicles
     required_outputs: list[str]
     measurement_edges: list[str] = Field(default_factory=list[str])
+    measurement_access: dict[str, str] = Field(default_factory=dict[str, str])
     sumo_options: dict[str, float | bool]
     limitations: list[str]
     files: dict[str, str]
@@ -301,7 +305,7 @@ def build_inputs(request: PreparationRequest, created_at: datetime) -> PreparedI
             "scenario",
         )
     times = _times(case, scenario)
-    zone = measurement_edges(case, graph)
+    zone, zone_access = measurement_zone(case, graph, request.routes)
     files = {
         CONFIG_FILE: _config_xml(network_name, times, sumo_seed, options),
         network_name: network_bytes,
@@ -348,6 +352,7 @@ def build_inputs(request: PreparationRequest, created_at: datetime) -> PreparedI
         ),
         required_outputs=list(REQUIRED_OUTPUTS),
         measurement_edges=zone,
+        measurement_access=zone_access,
         sumo_options=dict(options),
         limitations=list(LIMITATIONS),
         files=hashes,
@@ -484,26 +489,54 @@ def _program(folder: Path, case: Case) -> tuple[bytes, ProgramRecord]:
     return program_bytes, record
 
 
-def measurement_edges(case: Case, graph: NetworkGraph) -> list[str]:
-    """Calles de la zona de medición: las de los carriles de entrada de cada movimiento, sin
-    repetir y en el orden del caso (ADR11).
+def _lane_edges(movement_id: str, lanes: list[str], graph: NetworkGraph) -> list[str]:
+    edges: list[str] = []
+    for lane in lanes:
+        found = graph.lanes.get(lane)
+        if found is None:
+            raise _error(
+                ErrorCode.INPUT_SCHEMA,
+                f"el carril {lane!r} del movimiento {movement_id!r} no está en la red",
+                "movements",
+            )
+        if found.edge_id not in edges:
+            edges.append(found.edge_id)
+    return edges
+
+
+def measurement_zone(
+    case: Case, graph: NetworkGraph, routes: RouteTable
+) -> tuple[list[str], dict[str, str]]:
+    """Zona de medición: la aproximación modelada de cada acceso (ADR11, ajustada en DEV19 F5).
+
+    Para cada movimiento, las calles de su ruta desde el inicio hasta la de sus carriles de
+    entrada, inclusive; sin ruta, solo esa calle. Cada calle queda con el acceso del movimiento
+    (``approach_id``). Devuelve las calles sin repetir, en el orden del caso y de cada ruta, y el
+    acceso de cada una. El largo de la zona es el del área modelada por las rutas (DEC04 pendiente).
 
     Raises:
-        DemandInputError: INPUT_SCHEMA si un carril de entrada no está en la red.
+        DemandInputError: INPUT_SCHEMA si un carril de entrada no está en la red o una calle
+            resulta de dos accesos distintos.
     """
     edges: list[str] = []
+    access: dict[str, str] = {}
     for movement in case.movements:
-        for lane in movement.incoming_lanes:
-            found = graph.lanes.get(lane)
-            if found is None:
+        entry = _lane_edges(movement.id, movement.incoming_lanes, graph)
+        route = routes.routes.get(movement.id, [])
+        reached = [position for position, edge in enumerate(route) if edge in entry]
+        inbound = route[: reached[0] + 1] if reached else entry
+        for edge in inbound:
+            owner = access.setdefault(edge, movement.approach_id)
+            if owner != movement.approach_id:
                 raise _error(
                     ErrorCode.INPUT_SCHEMA,
-                    f"el carril {lane!r} del movimiento {movement.id!r} no está en la red",
-                    "movements",
+                    f"la calle {edge!r} queda en dos accesos ({owner!r} y "
+                    f"{movement.approach_id!r})",
+                    "routes",
                 )
-            if found.edge_id not in edges:
-                edges.append(found.edge_id)
-    return edges
+            if edge not in edges:
+                edges.append(edge)
+    return edges, access
 
 
 def zone_file_bytes(edges: list[str]) -> bytes:
