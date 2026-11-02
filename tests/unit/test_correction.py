@@ -548,3 +548,81 @@ def test_the_algorithm_version_is_declared_and_enters_the_rules_version(
 
 def test_the_priority_order_used_here_is_the_one_of_caso_001() -> None:
     assert with_priority().cut_order == tuple(PRIORITY)
+
+
+# ---------------------------------------------------------------------------
+# El «antes» de la corrección (diseño técnico, I4 e I5 del plan de pruebas)
+# ---------------------------------------------------------------------------
+
+
+def test_the_original_plan_is_checked_too_and_its_cycle_and_greens_are_kept() -> None:
+    result = run(plan(120, 10, 50.4, 40))
+    assert result.original_check is not None
+    assert result.original_check.timing is not None
+    assert not result.original_check.feasible
+    # El original completo: t1 = 120, t3 = 10, t5 = 50.4, t7 = 40 y los fijos del caso.
+    assert result.original_check.timing.cycle_s == 120 + 10 + 50.4 + 40 + sum(FIXED.values())
+    assert result.original_check.timing.greens_s["jp_este_oeste"] == 120.0
+    assert result.original_check.violated == ("PLAN-02", "PLAN-03")
+    assert result.check is not None
+    assert result.check.feasible
+    assert cycle_of(result) == 229.0
+
+
+def test_an_accepted_proposal_has_a_feasible_original_check() -> None:
+    result = run(BASELINE_VARIABLE)
+    assert result.original_check is not None
+    assert result.original_check.feasible
+    assert result.original_check.timing is not None
+    assert result.original_check.timing.cycle_s == 206.0
+
+
+def test_a_cycle_that_is_too_long_is_visible_in_the_original_check() -> None:
+    result = run(plan(110, 60, 70, 30))
+    assert result.original_check is not None
+    assert result.original_check.violated == ("PLAN-04",)
+    assert result.original_check.timing is not None
+    assert result.original_check.timing.cycle_s == 294.0
+    assert cycle_of(result) == 240.0
+
+
+def test_a_rejected_proposal_keeps_the_original_check() -> None:
+    result = run(plan(30, 15, 45, 10), with_priority(tighter_straight_group))
+    assert result.status == "rejected"
+    assert result.original_check is not None
+    assert result.original_check.violated == ("PLAN-05",)
+
+
+def test_an_invalid_input_has_no_original_check() -> None:
+    result = run({**BASELINE_VARIABLE, "t1": float("nan")})
+    assert result.original_check is None
+    assert result.check is None
+
+
+@pytest.mark.parametrize("seed", range(100))
+def test_the_state_follows_the_original_check_on_generated_proposals(seed: int) -> None:
+    rng = random.Random(seed)  # noqa: S311 - propuestas de prueba, no seguridad
+    result = run(random_proposal(rng))
+    assert result.original_check is not None
+    assert (result.status == "accepted") == result.original_check.feasible
+    if result.status == "corrected":
+        assert not result.original_check.feasible
+
+
+def test_the_original_is_kept_when_only_the_case_or_the_version_is_wrong() -> None:
+    result = run(plan(120, 10, 50.4, 40), case_version="9.9.9")
+    assert result.status == "invalid_input"
+    assert [i.rule_id for i in result.issues] == ["TIME-02"]
+    assert dict(result.original_s or {}) == plan(120, 10, 50.4, 40)
+    assert result.final_s is None
+    assert result.check is None
+    assert result.original_check is None
+    with pytest.raises(TypeError):
+        result.original_s["t1"] = 1.0  # type: ignore[index]
+
+
+def test_the_original_is_not_kept_when_a_value_is_not_a_number() -> None:
+    result = run({**BASELINE_VARIABLE, "t1": float("nan")}, case_id="OTRO")
+    assert result.status == "invalid_input"
+    assert [i.rule_id for i in result.issues] == ["TIME-02"]
+    assert result.original_s is None

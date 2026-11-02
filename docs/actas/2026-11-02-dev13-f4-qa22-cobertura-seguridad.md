@@ -77,7 +77,7 @@ Entradas no confiables: la propuesta de duraciones, el caso y el archivo del ord
 | Qué | Resultado |
 |---|---|
 | Pruebas nuevas | **121** (31 + 13 + 77). Suite completa: **4403 pasan, 1 se salta** (la que solo corre fuera de Windows; antes 4282). Formato, lint, tipos estrictos, contratos y reglas de capas sin observaciones. Sin dependencias nuevas; `schemas/` y `pyproject.toml` sin cambios |
-| Mutaciones | 30 cambios a propósito, uno por vez: 19 en la cobertura y 11 en los mensajes acotados. **28 detectados a la primera.** Sobrevivieron 2, y eran huecos reales (no había prueba de un nombre enorme repetido en el orden ni de un tramo fijo con nombre enorme); se agregaron y las 2 quedaron detectadas |
+| Mutaciones | 31 cambios a propósito, uno por vez: 20 en la cobertura y 11 en los mensajes acotados. **28 detectados a la primera.** Sobrevivieron 2, y eran huecos reales (no había prueba de un nombre enorme repetido en el orden ni de un tramo fijo con nombre enorme); se agregaron y las 2 quedaron detectadas |
 | Mutación equivalente | El orden alfabético de `rejected_by_rule` no se puede distinguir: después de corregir solo puede quedar violada una regla (PLAN-05), así que tiene una sola clave. Se mantiene el orden para que el resultado sea determinista si algún día hay más |
 
 ## Inspección contra el caso real (solo lectura)

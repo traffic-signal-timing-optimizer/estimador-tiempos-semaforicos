@@ -318,11 +318,15 @@ def check_plan(
 class Correction:
     """Registro de una corrección: qué llegó, qué salió, cuánto cambió y qué reglas cumple.
 
-    - ``original_s``: las duraciones variables recibidas (None si la entrada no sirve).
+    - ``original_s``: las duraciones variables recibidas. Se conservan siempre que sean números
+      válidos, aunque la propuesta sea de otro caso o versión; es None solo si algún valor no
+      sirve (NaN, texto…), porque entonces no se puede representar.
     - ``final_s``: el plan completo después de corregir, con los fijos del caso. Está también en
       un rechazo, para que se vea qué se intentó; pero solo ``plan`` es admisible.
     - ``changes_s``: final menos original, por slot variable.
-    - ``check``: las reglas sobre el plan final (ciclo, verdes y ventanas en ``check.timing``).
+    - ``original_check``: las reglas sobre el plan original completo (con los fijos del caso),
+      con su ciclo, verdes y ventanas en ``original_check.timing``: el «antes» de la corrección.
+    - ``check``: lo mismo sobre el plan final: el «después».
     - ``issues``: por qué la entrada no sirve (solo en ``invalid_input``).
     """
 
@@ -335,6 +339,7 @@ class Correction:
     final_s: Mapping[str, float] | None
     changes_s: Mapping[str, float]
     check: PlanCheck | None
+    original_check: PlanCheck | None
     issues: tuple[CaseIssue, ...]
 
     @property
@@ -408,21 +413,26 @@ def correct(
     no lanza: el estado es ``invalid_input`` con sus problemas. Misma entrada, mismo resultado.
     """
     case = prepared.case
-    problems = _claim_issues(case, case_id, case_version) or duration_issues(
-        prepared.variable_ids, durations, allow_negative=True
-    )
-    if problems:
+    claim_problems = _claim_issues(case, case_id, case_version)
+    value_problems = duration_issues(prepared.variable_ids, durations, allow_negative=True)
+    if claim_problems or value_problems:
+        kept = (
+            None
+            if value_problems
+            else MappingProxyType({i: float(durations[i]) for i in prepared.variable_ids})
+        )
         return Correction(
             "invalid_input",
             case.case_id,
             case.case_version,
             prepared.rules_version,
             prepared.order_source,
-            None,
+            kept,
             None,
             MappingProxyType({}),
             None,
-            tuple(problems),
+            None,
+            tuple(claim_problems or value_problems),
         )
     original = {slot_id: float(durations[slot_id]) for slot_id in prepared.variable_ids}
     exact = {slot_id: _exact(value) for slot_id, value in original.items()}
@@ -446,6 +456,7 @@ def correct(
         MappingProxyType(final),
         MappingProxyType({i: float(ticks[i] * tick - exact[i]) for i in prepared.variable_ids}),
         after,
+        before,
         (),
     )
 
@@ -454,11 +465,22 @@ def correct(
 class Coverage:
     """Cobertura de la corrección sobre un conjunto de propuestas (HU11, QA22).
 
-    La cobertura es ``(aceptadas + corregidas) / (aceptadas + corregidas + rechazadas)``: las
-    rechazadas **cuentan** en el denominador, porque son propuestas admisibles que la corrección
-    no logró arreglar. Las de entrada inválida (``invalid_input``) no son propuestas admisibles:
-    se cuentan aparte y no entran en la cobertura. Si no hubo ninguna propuesta evaluada, la
-    cobertura es None (no se inventa un 100 %).
+    Los denominadores del indicador I4 del plan de pruebas, explícitos:
+
+    - ``feasibility_before`` (factibilidad original): propuestas que ya eran factibles / propuestas
+      evaluadas (las aceptadas, entre las aceptadas, corregidas y rechazadas).
+    - ``feasibility_after`` (factibilidad posterior): planes válidos / propuestas evaluadas. Es
+      ``(aceptadas + corregidas) / (aceptadas + corregidas + rechazadas)``: las rechazadas
+      **cuentan** en el denominador, porque son propuestas que la corrección no logró arreglar.
+      Es también ``coverage`` en lo que toca a la corrección.
+    - ``coverage_with_invalid``: planes válidos / todas las entradas recibidas, contando las de
+      ``invalid_input``. Es la cobertura si cada entrada inválida fue un fallo de inferencia de
+      una solicitud admisible; la consulta (DEV18) decide cuáles lo son (una solicitud
+      inadmisible no cuenta) y completa el indicador con los fallos de inferencia.
+
+    Las de entrada inválida no son predicciones evaluadas: se cuentan aparte. Si no hubo ninguna
+    propuesta evaluada, las cifras son None (no se inventa un 100 %). Un resultado «100 %
+    factible» sin los conteos de rechazos y de entradas inválidas no basta (plan de pruebas).
 
     - ``rejected_by_rule``: cuántas rechazadas violan cada regla (el reporte de restricciones).
     - ``corrected_by_slot``: en cuántas corregidas cambió la duración de cada slot variable.
@@ -484,8 +506,20 @@ class Coverage:
         return self.accepted + self.corrected + self.rejected
 
     @property
-    def coverage(self) -> float | None:
+    def feasibility_before(self) -> float | None:
+        return None if self.evaluated == 0 else self.accepted / self.evaluated
+
+    @property
+    def feasibility_after(self) -> float | None:
         return None if self.evaluated == 0 else self.admissible / self.evaluated
+
+    @property
+    def coverage(self) -> float | None:
+        return self.feasibility_after
+
+    @property
+    def coverage_with_invalid(self) -> float | None:
+        return None if self.total == 0 else self.admissible / self.total
 
 
 def summarize(corrections: Iterable[Correction]) -> Coverage:

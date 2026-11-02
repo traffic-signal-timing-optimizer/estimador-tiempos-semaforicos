@@ -276,3 +276,61 @@ def test_the_rejection_report_is_sorted_by_rule() -> None:
     summary = summarize(results)
     assert dict(summary.rejected_by_rule) == {"PLAN-05": 2}
     assert list(summary.rejected_by_rule) == sorted(summary.rejected_by_rule)
+
+
+# ---------------------------------------------------------------------------
+# Denominadores del indicador I4 del plan de pruebas
+# ---------------------------------------------------------------------------
+
+
+def test_i4_the_three_denominators_are_explicit() -> None:
+    summary = summarize(example_results())
+    # 2 aceptadas, 3 corregidas, 3 rechazadas y 2 de entrada inválida.
+    assert summary.feasibility_before == 2 / 8
+    assert summary.feasibility_after == 5 / 8
+    assert summary.coverage == summary.feasibility_after
+    assert summary.coverage_with_invalid == 5 / 10
+
+
+def test_i4_the_three_figures_differ_so_that_a_hundred_percent_cannot_hide_failures() -> None:
+    summary = summarize(example_results())
+    figures = {
+        summary.feasibility_before,
+        summary.feasibility_after,
+        summary.coverage_with_invalid,
+    }
+    assert len(figures) == 3
+
+
+def test_i4_a_set_without_rejections_or_invalid_inputs_gives_the_same_after_and_with_invalid() -> (
+    None
+):
+    ready = ready_case()
+    summary = summarize([run(ready, BASELINE_VARIABLE), run(ready, base(t1=500.0))])
+    assert summary.feasibility_before == 0.5
+    assert summary.feasibility_after == 1.0
+    assert summary.coverage_with_invalid == 1.0
+
+
+def test_i4_invalid_inputs_lower_only_the_coverage_that_counts_them() -> None:
+    ready = ready_case()
+    results = [run(ready, BASELINE_VARIABLE), run(ready, {"t1": float("nan")})]
+    summary = summarize(results)
+    assert summary.feasibility_after == 1.0
+    assert summary.coverage_with_invalid == 0.5
+
+
+def test_i4_without_evaluated_proposals_the_prediction_figures_are_none() -> None:
+    ready = ready_case()
+    summary = summarize([run(ready, None), run(ready, {"t1": float("nan")})])
+    assert summary.feasibility_before is None
+    assert summary.feasibility_after is None
+    assert summary.coverage is None
+    assert summary.coverage_with_invalid == 0.0
+
+
+def test_i4_an_empty_set_has_no_figures_at_all() -> None:
+    summary = summarize([])
+    assert summary.feasibility_before is None
+    assert summary.feasibility_after is None
+    assert summary.coverage_with_invalid is None
