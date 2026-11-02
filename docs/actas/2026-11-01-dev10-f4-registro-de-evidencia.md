@@ -48,7 +48,7 @@ Commit `42a81e4a`, con el ensayo de sensibilidad incluido. Ver `docs/evidencia/2
 
 ## Verificación
 
-**Pruebas.** 21 nuevas. Suite completa: **1920 pasan, 12 saltadas**. Formato, lint, tipos y contratos sin observaciones.
+**Pruebas.** 22 nuevas (21 del registro y 1 del catálogo). Suite completa: **1920 pasan, 12 saltadas**. Formato, lint, tipos y contratos sin observaciones.
 
 **Mutaciones.** 19 cambios a propósito sobre el registro y el catálogo. **16 detectados en la primera pasada; 3 sobrevivieron y eran huecos reales** (un error fuera de las pruebas clave no se contaba como fallo mayor; el nombre de la línea de la puerta; un archivo sin pruebas se tomaba por prueba clave). Se cerraron con pruebas y **los 19 quedan detectados**.
 
