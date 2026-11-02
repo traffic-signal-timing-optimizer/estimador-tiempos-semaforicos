@@ -117,9 +117,11 @@ def main() -> int:
     )
     public.mkdir(parents=True)
     (public / "registro.json").write_text(
-        scrub(report.model_dump_json(indent=2)) + "\n", encoding="utf-8"
+        scrub(report.model_dump_json(indent=2)) + "\n", encoding="utf-8", newline="\n"
     )
-    (public / "informe.md").write_text(scrub(render_markdown(report)), encoding="utf-8")
+    (public / "informe.md").write_text(
+        scrub(render_markdown(report)), encoding="utf-8", newline="\n"
+    )
     print(f"Resultado de la puerta: {report.gate.result}")
     print(f"Resumen versionable: {public.relative_to(ROOT)}")
     print(f"Registro completo (no versionado): {private.relative_to(ROOT)}")

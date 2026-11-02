@@ -96,6 +96,14 @@ powershell -ExecutionPolicy Bypass -File scripts/check.ps1
 
 Para que cada commit pase por ruff, instale los hooks una vez: `.venv\Scripts\pre-commit.exe install`.
 
+### Evidencia de pruebas (QA01 a QA10)
+
+```powershell
+.venv\Scripts\python.exe scripts\evidencia.py [--sensibilidad] [--allow-dirty]
+```
+
+Corre toda la suite y guarda el registro de la ejecución: comando, fecha, entorno, commit, huella de los datos de prueba, resultado por caso QA01 a QA10, pruebas saltadas con su motivo y fallos con su gravedad y tarea. El resumen, sin rutas de su equipo, queda en `docs/evidencia/<fecha>_<commit>/` (se versiona); el registro completo de pytest, en `datos/reportes/evidencia/` (no se versiona). Con `--sensibilidad` incluye el ensayo que rompe a propósito una regla de cada caso y comprueba que las pruebas lo detectan (varios minutos). Se niega a correr con cambios sin guardar, salvo `--allow-dirty`. Termina con código 1 si hay fallos críticos. Qué pruebas demuestran cada caso está en `tests/qa_catalog.py`.
+
 ## Documentación
 
 - `docs/actas/`: decisiones y registro de cada fase.

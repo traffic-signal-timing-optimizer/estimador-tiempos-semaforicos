@@ -1,0 +1,317 @@
+{
+  "schema_version": "1.0.0",
+  "generated_at": "2026-11-02T00:08:42+00:00",
+  "command": [
+    "python",
+    "-m",
+    "pytest",
+    "-q",
+    "tests"
+  ],
+  "commit": "42a81e4a712d3c55e8e60c11e92c840f22f97f15",
+  "dirty": false,
+  "environment": {
+    "python": "3.12.3",
+    "sistema": "Windows 11",
+    "sumo": "1.27.1",
+    "memoria_disponible_mib": "4389",
+    "semaforo": "0.1.0",
+    "pydantic": "2.14.1",
+    "defusedxml": "0.7.1",
+    "pytest": "9.1.1",
+    "hypothesis": "6.170.3"
+  },
+  "fixtures_files": 30,
+  "fixtures_id": "2383423ac2b3bd907fbb6d3df5431b4a1fe0bb284e9cf8756b00bfc9e952faa7",
+  "totals": {
+    "passed": 1920,
+    "failed": 0,
+    "skipped": 12,
+    "errors": 0
+  },
+  "qa": [
+    {
+      "qa_id": "QA01",
+      "kind": "Unitario",
+      "task": "DEV02",
+      "summary": "Caso válido aceptado; copias con ID repetido o referencia inexistente rechazadas con campo y motivo",
+      "key_tests": 9,
+      "passed": 9,
+      "failed": 0,
+      "skipped": 0,
+      "status": "cumplido",
+      "skips": [],
+      "failures": []
+    },
+    {
+      "qa_id": "QA02",
+      "kind": "Unitario",
+      "task": "DEV02",
+      "summary": "Sin doble conteo de solapes; los inválidos nunca se aceptan",
+      "key_tests": 44,
+      "passed": 44,
+      "failed": 0,
+      "skipped": 0,
+      "status": "cumplido",
+      "skips": [],
+      "failures": []
+    },
+    {
+      "qa_id": "QA03",
+      "kind": "Unitario",
+      "task": "DEV04",
+      "summary": "90 autos y 10 buses en 900 s: 400 veh/h, proporciones 0.9 y 0.1, original intacto",
+      "key_tests": 3,
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0,
+      "status": "cumplido",
+      "skips": [],
+      "failures": []
+    },
+    {
+      "qa_id": "QA04",
+      "kind": "Integración",
+      "task": "DEV04",
+      "summary": "Campo ausente, duplicado, -1, clase desconocida y fecha inválida: errores identificables, ninguna aceptación silenciosa",
+      "key_tests": 16,
+      "passed": 16,
+      "failed": 0,
+      "skipped": 0,
+      "status": "cumplido",
+      "skips": [],
+      "failures": []
+    },
+    {
+      "qa_id": "QA05",
+      "kind": "Unitario",
+      "task": "DEV04",
+      "summary": "Un cero conserva volumen 0 y composición nula; un faltante no se vuelve cero",
+      "key_tests": 4,
+      "passed": 4,
+      "failed": 0,
+      "skipped": 0,
+      "status": "cumplido",
+      "skips": [],
+      "failures": []
+    },
+    {
+      "qa_id": "QA06",
+      "kind": "Unitario",
+      "task": "DEV05",
+      "summary": "Control 100/0 y observado 90/5: error absoluto 10 y 5, relativo 0.1 y nulo, cobertura exacta",
+      "key_tests": 5,
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0,
+      "status": "cumplido",
+      "skips": [],
+      "failures": []
+    },
+    {
+      "qa_id": "QA07",
+      "kind": "Integración",
+      "task": "DEV06, DEV07",
+      "summary": "`succeeded` solo si proceso y salidas son válidos; versión registrada; originales intactos",
+      "key_tests": 10,
+      "passed": 10,
+      "failed": 0,
+      "skipped": 0,
+      "status": "cumplido",
+      "skips": [],
+      "failures": []
+    },
+    {
+      "qa_id": "QA08",
+      "kind": "Integración",
+      "task": "DEV07",
+      "summary": "Red inválida y salida truncada: `failed` con motivo, sin métricas",
+      "key_tests": 25,
+      "passed": 25,
+      "failed": 0,
+      "skipped": 0,
+      "status": "cumplido",
+      "skips": [],
+      "failures": []
+    },
+    {
+      "qa_id": "QA09",
+      "kind": "Integración",
+      "task": "DEV08",
+      "summary": "Mismas entradas y semilla: iguales dentro de tolerancia, horas fuera",
+      "key_tests": 14,
+      "passed": 14,
+      "failed": 0,
+      "skipped": 0,
+      "status": "cumplido",
+      "skips": [],
+      "failures": []
+    },
+    {
+      "qa_id": "QA10",
+      "kind": "Seguridad",
+      "task": "DEV00, DEV06, DEV07",
+      "summary": "Rutas, entidades y límites bloqueados; sin shell ni comando inyectado",
+      "key_tests": 128,
+      "passed": 117,
+      "failed": 0,
+      "skipped": 11,
+      "status": "cumplido con salvedad",
+      "skips": [
+        {
+          "test": "tests/unit/test_case_file.py::test_a_symlink_is_not_followed",
+          "reason": "este equipo no permite crear enlaces simbólicos sin privilegios",
+          "declared": true,
+          "note": "este equipo no permite crear enlaces simbólicos sin privilegios; se cubren al activar el Modo de desarrollador de Windows (o en un equipo que lo permita)"
+        },
+        {
+          "test": "tests/unit/test_case_network.py::test_a_network_reached_through_a_symlink_is_path_not_allowed",
+          "reason": "este equipo no permite crear enlaces simbólicos sin privilegios",
+          "declared": true,
+          "note": "este equipo no permite crear enlaces simbólicos sin privilegios; se cubren al activar el Modo de desarrollador de Windows (o en un equipo que lo permita)"
+        },
+        {
+          "test": "tests/unit/test_case_report.py::test_a_case_file_that_is_a_symlink_is_path_not_allowed",
+          "reason": "este equipo no permite crear enlaces simbólicos sin privilegios",
+          "declared": true,
+          "note": "este equipo no permite crear enlaces simbólicos sin privilegios; se cubren al activar el Modo de desarrollador de Windows (o en un equipo que lo permita)"
+        },
+        {
+          "test": "tests/unit/test_counts.py::test_a_counts_file_that_is_a_symlink_is_not_followed",
+          "reason": "este equipo no permite crear enlaces simbólicos sin privilegios",
+          "declared": true,
+          "note": "este equipo no permite crear enlaces simbólicos sin privilegios; se cubren al activar el Modo de desarrollador de Windows (o en un equipo que lo permita)"
+        },
+        {
+          "test": "tests/unit/test_json_input.py::test_a_link_is_not_followed",
+          "reason": "este equipo no permite crear enlaces simbólicos sin privilegios",
+          "declared": true,
+          "note": "este equipo no permite crear enlaces simbólicos sin privilegios; se cubren al activar el Modo de desarrollador de Windows (o en un equipo que lo permita)"
+        },
+        {
+          "test": "tests/unit/test_process_edges.py::test_a_folder_that_is_a_link_is_not_followed",
+          "reason": "este equipo no permite crear enlaces simbólicos sin privilegios",
+          "declared": true,
+          "note": "este equipo no permite crear enlaces simbólicos sin privilegios; se cubren al activar el Modo de desarrollador de Windows (o en un equipo que lo permita)"
+        },
+        {
+          "test": "tests/unit/test_reception.py::test_a_symlink_in_the_source_is_rejected",
+          "reason": "este equipo no permite crear enlaces simbólicos sin privilegios",
+          "declared": true,
+          "note": "este equipo no permite crear enlaces simbólicos sin privilegios; se cubren al activar el Modo de desarrollador de Windows (o en un equipo que lo permita)"
+        },
+        {
+          "test": "tests/unit/test_reconcile.py::test_a_sheet_that_is_a_link_is_refused",
+          "reason": "este equipo no permite crear enlaces simbólicos sin privilegios",
+          "declared": true,
+          "note": "este equipo no permite crear enlaces simbólicos sin privilegios; se cubren al activar el Modo de desarrollador de Windows (o en un equipo que lo permita)"
+        },
+        {
+          "test": "tests/unit/test_reconcile.py::test_a_tripinfo_that_is_a_link_is_refused",
+          "reason": "este equipo no permite crear enlaces simbólicos sin privilegios",
+          "declared": true,
+          "note": "este equipo no permite crear enlaces simbólicos sin privilegios; se cubren al activar el Modo de desarrollador de Windows (o en un equipo que lo permita)"
+        },
+        {
+          "test": "tests/unit/test_run_inputs.py::test_a_folder_that_is_a_link_is_refused",
+          "reason": "este equipo no permite crear enlaces simbólicos sin privilegios",
+          "declared": true,
+          "note": "este equipo no permite crear enlaces simbólicos sin privilegios; se cubren al activar el Modo de desarrollador de Windows (o en un equipo que lo permita)"
+        },
+        {
+          "test": "tests/unit/test_run_inputs.py::test_a_file_that_is_a_link_is_refused",
+          "reason": "este equipo no permite crear enlaces simbólicos sin privilegios",
+          "declared": true,
+          "note": "este equipo no permite crear enlaces simbólicos sin privilegios; se cubren al activar el Modo de desarrollador de Windows (o en un equipo que lo permita)"
+        }
+      ],
+      "failures": []
+    }
+  ],
+  "other_failures": [],
+  "suite_skips": [
+    {
+      "test": "tests/unit/test_case_file.py::test_a_symlink_is_not_followed",
+      "reason": "este equipo no permite crear enlaces simbólicos sin privilegios",
+      "declared": true,
+      "note": "este equipo no permite crear enlaces simbólicos sin privilegios; se cubren al activar el Modo de desarrollador de Windows (o en un equipo que lo permita)"
+    },
+    {
+      "test": "tests/unit/test_case_network.py::test_a_network_reached_through_a_symlink_is_path_not_allowed",
+      "reason": "este equipo no permite crear enlaces simbólicos sin privilegios",
+      "declared": true,
+      "note": "este equipo no permite crear enlaces simbólicos sin privilegios; se cubren al activar el Modo de desarrollador de Windows (o en un equipo que lo permita)"
+    },
+    {
+      "test": "tests/unit/test_case_report.py::test_a_case_file_that_is_a_symlink_is_path_not_allowed",
+      "reason": "este equipo no permite crear enlaces simbólicos sin privilegios",
+      "declared": true,
+      "note": "este equipo no permite crear enlaces simbólicos sin privilegios; se cubren al activar el Modo de desarrollador de Windows (o en un equipo que lo permita)"
+    },
+    {
+      "test": "tests/unit/test_counts.py::test_a_counts_file_that_is_a_symlink_is_not_followed",
+      "reason": "este equipo no permite crear enlaces simbólicos sin privilegios",
+      "declared": true,
+      "note": "este equipo no permite crear enlaces simbólicos sin privilegios; se cubren al activar el Modo de desarrollador de Windows (o en un equipo que lo permita)"
+    },
+    {
+      "test": "tests/unit/test_job.py::test_without_process_groups_nothing_is_attached",
+      "reason": "en Windows sí hay grupo",
+      "declared": true,
+      "note": "la prueba solo aplica fuera de Windows"
+    },
+    {
+      "test": "tests/unit/test_json_input.py::test_a_link_is_not_followed",
+      "reason": "este equipo no permite crear enlaces simbólicos sin privilegios",
+      "declared": true,
+      "note": "este equipo no permite crear enlaces simbólicos sin privilegios; se cubren al activar el Modo de desarrollador de Windows (o en un equipo que lo permita)"
+    },
+    {
+      "test": "tests/unit/test_process_edges.py::test_a_folder_that_is_a_link_is_not_followed",
+      "reason": "este equipo no permite crear enlaces simbólicos sin privilegios",
+      "declared": true,
+      "note": "este equipo no permite crear enlaces simbólicos sin privilegios; se cubren al activar el Modo de desarrollador de Windows (o en un equipo que lo permita)"
+    },
+    {
+      "test": "tests/unit/test_reception.py::test_a_symlink_in_the_source_is_rejected",
+      "reason": "este equipo no permite crear enlaces simbólicos sin privilegios",
+      "declared": true,
+      "note": "este equipo no permite crear enlaces simbólicos sin privilegios; se cubren al activar el Modo de desarrollador de Windows (o en un equipo que lo permita)"
+    },
+    {
+      "test": "tests/unit/test_reconcile.py::test_a_sheet_that_is_a_link_is_refused",
+      "reason": "este equipo no permite crear enlaces simbólicos sin privilegios",
+      "declared": true,
+      "note": "este equipo no permite crear enlaces simbólicos sin privilegios; se cubren al activar el Modo de desarrollador de Windows (o en un equipo que lo permita)"
+    },
+    {
+      "test": "tests/unit/test_reconcile.py::test_a_tripinfo_that_is_a_link_is_refused",
+      "reason": "este equipo no permite crear enlaces simbólicos sin privilegios",
+      "declared": true,
+      "note": "este equipo no permite crear enlaces simbólicos sin privilegios; se cubren al activar el Modo de desarrollador de Windows (o en un equipo que lo permita)"
+    },
+    {
+      "test": "tests/unit/test_run_inputs.py::test_a_folder_that_is_a_link_is_refused",
+      "reason": "este equipo no permite crear enlaces simbólicos sin privilegios",
+      "declared": true,
+      "note": "este equipo no permite crear enlaces simbólicos sin privilegios; se cubren al activar el Modo de desarrollador de Windows (o en un equipo que lo permita)"
+    },
+    {
+      "test": "tests/unit/test_run_inputs.py::test_a_file_that_is_a_link_is_refused",
+      "reason": "este equipo no permite crear enlaces simbólicos sin privilegios",
+      "declared": true,
+      "note": "este equipo no permite crear enlaces simbólicos sin privilegios; se cubren al activar el Modo de desarrollador de Windows (o en un equipo que lo permita)"
+    }
+  ],
+  "undeclared_skips": [],
+  "sensitivity": {
+    "ensayados": 32,
+    "detectados": 32,
+    "sobrevivieron": 0
+  },
+  "gate": {
+    "critical_failures": 0,
+    "major_findings": 0,
+    "result": "sin fallos críticos"
+  }
+}
