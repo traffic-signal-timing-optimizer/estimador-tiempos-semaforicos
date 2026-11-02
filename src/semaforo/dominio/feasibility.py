@@ -1,7 +1,9 @@
-"""Validador de factibilidad de un plan frente a las reglas temporales del caso (DEV13 F2, HU11).
+"""Validador y corrector de planes frente a las reglas temporales del caso (DEV13 F2 y F3, HU11).
 
-Dice, regla por regla, si un plan (una duración por cada slot del caso) cumple todo lo que el caso
-exige. No corrige nada: el corrector es de F3. Es puro: no lee archivos ni lanza procesos (ADR01).
+``check_plan`` dice, regla por regla, si un plan (una duración por cada slot del caso) cumple todo
+lo que el caso exige. ``correct`` recibe las duraciones variables que propone alguien (el modelo,
+una persona) y devuelve un plan admisible o un rechazo trazable. Es puro: no lee archivos ni lanza
+procesos (ADR01).
 
 Reglas, en el orden en que se evalúan:
 
@@ -22,12 +24,40 @@ reglas que se evaluaron quedaron cumplidas.
 Las reglas del caso (CASE-C01 a C13) se comprueban una sola vez al preparar el caso con
 ``prepare``. Así la secuencia y los estados (C06, C07, C11) quedan garantizados: un plan trae solo
 duraciones y no puede cambiarlos. Prepararlo una vez sirve a quien validará miles de planes.
+
+Corrección (diseño técnico, «Corrección determinista»; ADR06; decisiones D5 a D11 de F0):
+
+1. La entrada debe ser del caso y la versión preparados (TIME-02) y traer un número finito para
+   cada slot variable y para ningún otro (TIME-01, con negativos admitidos). Si no, el estado es
+   ``invalid_input`` y no se corrige nada.
+2. Cada duración se recorta a los límites de su slot, en segundos (así 1e308 no desborda).
+3. Se pasa a ticks enteros con aritmética exacta: al tick más cercano y, a medio tick, hacia
+   arriba. Como los límites ya son múltiplos del tick (CASE-C05), recortar y redondear en
+   cualquier orden da lo mismo.
+4. El ciclo se ajusta en ticks enteros a la ventana del caso (rango declarado cruzado con lo que
+   pueden sumar los slots) con el **orden de ajuste** del caso: si sobra, se quita a los slots uno
+   tras otro en ese orden, cada uno hasta su mínimo; si falta, se da a los slots en el orden de
+   ganar, cada uno hasta su máximo (ver ``PreparedCase``). Son dos recorridos: el número de pasos
+   tiene un tope fijo.
+5. Se reconstruye y se comprueba el plan final con ``check_plan``. Si el original ya cumplía todo
+   el estado es ``accepted``; si el final cumple todo, ``corrected``; si alguna regla sigue
+   fallando (por ejemplo, el verde de un grupo con límites más estrictos que sus slots),
+   ``rejected``: se registra con sus reglas y no hay plan admisible. No hay búsqueda ni
+   simulación como sustitución.
+
+El corrector no recibe flujos: la corrección es la misma para cualquier demanda (HU11).
 """
 
+import hashlib
+import json
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
+from fractions import Fraction
+from types import MappingProxyType
 from typing import Literal
 
+from semaforo.dominio.adjust_order import AdjustOrder, AdjustOrderInvalidError, order_issues
 from semaforo.dominio.case import Case, CaseIssue
 from semaforo.dominio.case_plan import (
     COMPLETE_RULE,
@@ -37,7 +67,7 @@ from semaforo.dominio.case_plan import (
     TICK_RULE,
     plan_issues,
 )
-from semaforo.dominio.case_rules import require_consistent
+from semaforo.dominio.case_rules import cycle_window, require_consistent
 from semaforo.dominio.timing import (
     INPUT_RULE,
     Timing,
@@ -47,17 +77,27 @@ from semaforo.dominio.timing import (
 )
 
 __all__ = [
+    "ALGORITHM_VERSION",
     "CLAIM_RULE",
     "RULE_TITLES",
+    "Correction",
+    "CorrectionStatus",
+    "OrderSource",
     "PlanCheck",
     "PreparedCase",
     "RuleOutcome",
     "RuleStatus",
     "check_plan",
+    "correct",
     "prepare",
 ]
 
 RuleStatus = Literal["satisfied", "violated", "skipped"]
+CorrectionStatus = Literal["accepted", "corrected", "rejected", "invalid_input"]
+OrderSource = Literal["declared", "sequence"]
+# Versión del algoritmo de corrección: entra en la versión de reglas (D14). Cambiarla obliga a que
+# lo corregido antes se pueda distinguir de lo corregido después.
+ALGORITHM_VERSION = "1.0.0"
 CLAIM_RULE = "TIME-02"
 RULE_TITLES = {
     CLAIM_RULE: "El plan es del caso y de la versión indicados",
@@ -84,12 +124,26 @@ class PreparedCase:
     ``slot_ids`` es la secuencia del caso (sin repetidos: lo garantiza CASE-C01), y
     ``variable_ids`` sus slots variables, en el mismo orden. ``warnings`` son los avisos de las
     reglas (CASE-C07), que no rechazan.
+
+    ``cut_order`` es el orden en que los slots variables pierden tiempo si el ciclo se pasa, y
+    ``give_order`` el orden en que lo ganan si se queda corto. Con el orden declarado en el archivo
+    del caso (``order_source`` ``declared``), se gana en el orden inverso al de perder: el último
+    en perder es el primero en ganar (D6). Sin archivo (``sequence``) los dos son el orden de la
+    secuencia, como dice el diseño técnico al pie de la letra.
+
+    ``rules_version`` es la huella SHA-256 de la parte temporal del caso (tick, ciclo, slots y
+    grupos), de los órdenes de ajuste y de la versión del algoritmo: cambia si cambia cualquiera
+    de ellos, y no si cambian la descripción, los movimientos o los flujos.
     """
 
     case: Case
     slot_ids: tuple[str, ...]
     variable_ids: tuple[str, ...]
     warnings: tuple[CaseIssue, ...]
+    cut_order: tuple[str, ...]
+    give_order: tuple[str, ...]
+    order_source: OrderSource
+    rules_version: str
 
 
 @dataclass(frozen=True)
@@ -129,19 +183,48 @@ class PlanCheck:
         return tuple(o.rule_id for o in self.outcomes if o.status == "violated")
 
 
-def prepare(case: Case) -> PreparedCase:
-    """Comprueba el caso una vez y lo deja listo para validar planes.
+def _rules_version(case: Case, cut_order: tuple[str, ...], give_order: tuple[str, ...]) -> str:
+    payload = {
+        "algorithm": ALGORITHM_VERSION,
+        "tick_s": case.tick_s,
+        "cycle_s": case.cycle_s.model_dump(mode="json"),
+        "slots": [slot.model_dump(mode="json") for slot in case.slots],
+        "green_groups": [group.model_dump(mode="json") for group in case.green_groups],
+        "cut_order": list(cut_order),
+        "give_order": list(give_order),
+    }
+    text = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def prepare(case: Case, order: AdjustOrder | None = None) -> PreparedCase:
+    """Comprueba el caso (y su orden de ajuste, si lo tiene) una vez y lo deja listo.
 
     Raises:
         CaseInvalidError: si el caso incumple alguna regla de error CASE-C01 a C13 (lleva todos
             los problemas). Los avisos no rechazan: quedan en ``warnings``.
+        AdjustOrderInvalidError: si el orden no es de este caso y versión, le falta o le sobra
+            algún slot variable, o nombra un slot fijo o desconocido (ORDER-C01 a C03).
     """
     results = require_consistent(case)
+    variable_ids = tuple(slot.id for slot in case.slots if slot.kind == "variable")
+    source: OrderSource = "sequence"
+    cut_order = give_order = variable_ids
+    if order is not None:
+        issues = order_issues(case, order)
+        if issues:
+            raise AdjustOrderInvalidError(issues)
+        cut_order, source = tuple(order.cut_order), "declared"
+        give_order = cut_order[::-1]
     return PreparedCase(
         case,
         tuple(slot.id for slot in case.slots),
-        tuple(slot.id for slot in case.slots if slot.kind == "variable"),
+        variable_ids,
         tuple(issue for result in results if result.status == "warning" for issue in result.issues),
+        cut_order,
+        give_order,
+        source,
+        _rules_version(case, cut_order, give_order),
     )
 
 
@@ -222,4 +305,140 @@ def check_plan(
             for rule_id in order
         ),
         timing,
+    )
+
+
+@dataclass(frozen=True)
+class Correction:
+    """Registro de una corrección: qué llegó, qué salió, cuánto cambió y qué reglas cumple.
+
+    - ``original_s``: las duraciones variables recibidas (None si la entrada no sirve).
+    - ``final_s``: el plan completo después de corregir, con los fijos del caso. Está también en
+      un rechazo, para que se vea qué se intentó; pero solo ``plan`` es admisible.
+    - ``changes_s``: final menos original, por slot variable.
+    - ``check``: las reglas sobre el plan final (ciclo, verdes y ventanas en ``check.timing``).
+    - ``issues``: por qué la entrada no sirve (solo en ``invalid_input``).
+    """
+
+    status: CorrectionStatus
+    case_id: str
+    case_version: str
+    rules_version: str
+    order_source: OrderSource
+    original_s: Mapping[str, float] | None
+    final_s: Mapping[str, float] | None
+    changes_s: Mapping[str, float]
+    check: PlanCheck | None
+    issues: tuple[CaseIssue, ...]
+
+    @property
+    def admissible(self) -> bool:
+        """El plan final se puede usar: el original cumplía todo o se corrigió y cumple todo."""
+        return self.status in ("accepted", "corrected")
+
+    @property
+    def plan(self) -> Mapping[str, float] | None:
+        """El plan completo admisible, o None si se rechazó o la entrada no servía."""
+        return self.final_s if self.admissible else None
+
+
+def _exact(value: float) -> Fraction:
+    """El número como decimal tal como se escribió (``repr``), sin el ruido del binario."""
+    return Fraction(repr(float(value)))
+
+
+def _ticks(seconds: Fraction, tick: Fraction) -> int:
+    """Ticks enteros más cercanos a ``seconds``; a medio tick, hacia arriba."""
+    return math.floor(seconds / tick + Fraction(1, 2))
+
+
+def _full_plan(case: Case, variable: Mapping[str, float]) -> dict[str, float]:
+    """Plan completo: las duraciones variables dadas y los fijos del caso."""
+    return {
+        slot.id: variable[slot.id] if slot.kind == "variable" else slot.min_s for slot in case.slots
+    }
+
+
+def _adjusted_ticks(prepared: PreparedCase, original: Mapping[str, Fraction]) -> dict[str, int]:
+    """Pasos 2 a 4: recortar, pasar a ticks y ajustar el ciclo con el orden del caso."""
+    case = prepared.case
+    tick = _exact(case.tick_s)
+    slots = {slot.id: slot for slot in case.slots}
+    low = {i: _ticks(_exact(slots[i].min_s), tick) for i in prepared.variable_ids}
+    high = {i: _ticks(_exact(slots[i].max_s), tick) for i in prepared.variable_ids}
+    ticks = {
+        i: _ticks(min(max(original[i], _exact(slots[i].min_s)), _exact(slots[i].max_s)), tick)
+        for i in prepared.variable_ids
+    }
+    window = cycle_window(case)
+    if window is None:  # no ocurre en un caso preparado (CASE-C10); el control final lo rechaza
+        return ticks
+    shortest, longest = _ticks(_exact(window.min), tick), _ticks(_exact(window.max), tick)
+    cycle = sum(ticks.values()) + sum(
+        _ticks(_exact(slot.min_s), tick) for slot in case.slots if slot.kind == "fixed"
+    )
+    for slot_id in prepared.cut_order:
+        taken = min(max(cycle - longest, 0), ticks[slot_id] - low[slot_id])
+        ticks[slot_id] -= taken
+        cycle -= taken
+    for slot_id in prepared.give_order:
+        given = min(max(shortest - cycle, 0), high[slot_id] - ticks[slot_id])
+        ticks[slot_id] += given
+        cycle += given
+    return ticks
+
+
+def correct(
+    prepared: PreparedCase,
+    durations: Mapping[str, float],
+    *,
+    case_id: str,
+    case_version: str,
+) -> Correction:
+    """Corrige las duraciones variables propuestas y devuelve el registro (ver el módulo).
+
+    ``durations`` lleva los segundos de cada slot variable del caso (los fijos salen del caso).
+    ``case_id`` y ``case_version`` son a lo que dice pertenecer la propuesta. Con datos hostiles
+    no lanza: el estado es ``invalid_input`` con sus problemas. Misma entrada, mismo resultado.
+    """
+    case = prepared.case
+    problems = _claim_issues(case, case_id, case_version) or duration_issues(
+        prepared.variable_ids, durations, allow_negative=True
+    )
+    if problems:
+        return Correction(
+            "invalid_input",
+            case.case_id,
+            case.case_version,
+            prepared.rules_version,
+            prepared.order_source,
+            None,
+            None,
+            MappingProxyType({}),
+            None,
+            tuple(problems),
+        )
+    original = {slot_id: float(durations[slot_id]) for slot_id in prepared.variable_ids}
+    exact = {slot_id: _exact(value) for slot_id, value in original.items()}
+    tick = _exact(case.tick_s)
+    ticks = _adjusted_ticks(prepared, exact)
+    final = _full_plan(case, {i: float(ticks[i] * tick) for i in prepared.variable_ids})
+    before = check_plan(prepared, _full_plan(case, original))
+    after = check_plan(prepared, final)
+    status: CorrectionStatus
+    if not after.feasible:
+        status = "rejected"
+    else:
+        status = "accepted" if before.feasible else "corrected"
+    return Correction(
+        status,
+        case.case_id,
+        case.case_version,
+        prepared.rules_version,
+        prepared.order_source,
+        MappingProxyType(original),
+        MappingProxyType(final),
+        MappingProxyType({i: float(ticks[i] * tick - exact[i]) for i in prepared.variable_ids}),
+        after,
+        (),
     )

@@ -408,6 +408,22 @@ def test_a_value_that_is_not_a_valid_duration_is_reported(value: object, reason:
     assert reason in issues[0].message
 
 
+@pytest.mark.parametrize("value", [-1.0, -1, -1e-300, -1e308])
+def test_a_negative_number_is_accepted_when_the_corrector_asks_for_it(value: float) -> None:
+    assert duration_issues(SLOTS, {"a": value, "b": 5.0}, allow_negative=True) == []
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("-inf"), True, "5", None, -(10**400)])
+def test_allowing_negatives_still_rejects_what_is_not_a_finite_number(value: object) -> None:
+    issues = duration_issues(SLOTS, {"a": value, "b": 5.0}, allow_negative=True)
+    assert [i.field for i in issues] == ["durations[a]"]
+
+
+def test_allowing_negatives_still_reports_missing_and_unknown_slots() -> None:
+    issues = duration_issues(SLOTS, {"x": -1.0, "a": -1.0}, allow_negative=True)
+    assert [i.field for i in issues] == ["durations[x]", "durations[b]"]
+
+
 def test_zero_and_negative_zero_are_valid_durations_for_the_input_check() -> None:
     assert duration_issues(SLOTS, {"a": 0, "b": -0.0}) == []
 

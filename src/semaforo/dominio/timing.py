@@ -129,7 +129,7 @@ def _shown(key: object) -> str:
     return text if len(text) <= MAX_SHOWN_CHARS else f"{text[:MAX_SHOWN_CHARS]}…"
 
 
-def _value_problem(value: object) -> str | None:
+def _value_problem(value: object, *, allow_negative: bool) -> str | None:
     """Por qué ``value`` no sirve como duración; None si sirve (cero incluido)."""
     if isinstance(value, bool) or not isinstance(value, int | float):
         return "debe ser un número"
@@ -139,12 +139,14 @@ def _value_problem(value: object) -> str | None:
         return "es demasiado grande para ser una duración"
     if not math.isfinite(number):
         return "debe ser un número finito (sin NaN ni infinito)"
-    if number < 0:
+    if number < 0 and not allow_negative:
         return "no puede ser negativa"
     return None
 
 
-def _problems(expected: Sequence[str], durations: object) -> Iterator[CaseIssue]:
+def _problems(
+    expected: Sequence[str], durations: object, *, allow_negative: bool
+) -> Iterator[CaseIssue]:
     """Los problemas de ``durations`` frente a los slots esperados: sobrantes, luego cada slot."""
     if not isinstance(durations, Mapping):
         yield CaseIssue(INPUT_RULE, "durations", "debe ser un objeto con la duración de cada slot")
@@ -159,20 +161,26 @@ def _problems(expected: Sequence[str], durations: object) -> Iterator[CaseIssue]
         if slot_id not in given:
             yield CaseIssue(INPUT_RULE, field, "falta la duración del slot")
             continue
-        problem = _value_problem(given[slot_id])
+        problem = _value_problem(given[slot_id], allow_negative=allow_negative)
         if problem is not None:
             yield CaseIssue(INPUT_RULE, field, problem)
 
 
-def duration_issues(expected: Sequence[str], durations: object) -> list[CaseIssue]:
+def duration_issues(
+    expected: Sequence[str], durations: object, *, allow_negative: bool = False
+) -> list[CaseIssue]:
     """Problemas de ``durations`` como entrada de un plan, o lista vacía si sirve.
 
     ``durations`` debe tener un número finito y no negativo (``int`` o ``float``, nunca un
     booleano) para cada ID de ``expected`` y ninguna otra clave. Se informan todos los problemas,
     hasta ``MAX_ISSUES``; si hay más, el último dice cuántos no se muestran. Los límites del caso
     no se miran.
+
+    Con ``allow_negative`` un número negativo también sirve: es lo que necesita el corrector
+    (F3), porque una predicción de -3 s no es un dato roto sino una duración que se recorta al
+    mínimo del slot (diseño técnico, «Corrección determinista», paso 2).
     """
-    found = _problems(expected, durations)
+    found = _problems(expected, durations, allow_negative=allow_negative)
     issues = list(islice(found, MAX_ISSUES))
     omitted = sum(1 for _ in found)
     if omitted:
