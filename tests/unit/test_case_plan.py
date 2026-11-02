@@ -47,6 +47,17 @@ def test_a_duration_that_is_not_finite_is_reported() -> None:
         assert rules_and_fields(issues) == [("PLAN-01", "durations[s1]")]
 
 
+def test_a_value_that_is_not_a_number_is_reported_and_does_not_break_the_check() -> None:
+    for bad in (True, False, "30", [30.0], {"s": 1}, 10**400, b"30"):
+        issues = plan_issues(make_case(), {**VALID, "s1": bad})  # type: ignore[dict-item]
+        assert rules_and_fields(issues) == [("PLAN-01", "durations[s1]")], bad
+        assert issues[0].message == "la duración debe ser un número finito"
+
+
+def test_an_integer_is_a_valid_duration() -> None:
+    assert plan_issues(make_case(), {**VALID, "s1": 30}) == []
+
+
 def test_a_duration_below_or_above_its_slot_limits_is_reported() -> None:
     for value in (9.0, 51.0):
         issues = plan_issues(make_case(), {**VALID, "s1": value})

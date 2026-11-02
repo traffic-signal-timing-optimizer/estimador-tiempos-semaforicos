@@ -32,6 +32,7 @@ __all__ = [
     "cycle_window",
     "evaluate_rules",
     "group_window",
+    "require_consistent",
 ]
 
 RuleStatus = Literal["passed", "warning", "failed"]
@@ -510,12 +511,22 @@ def accept_case(data: object) -> Case:
             (CASE-C01 a C13); lleva todos los problemas, hasta ``MAX_ISSUES``.
     """
     case = parse_case(data)
-    issues = [
-        issue
-        for result in evaluate_rules(case)
-        if result.status == "failed"
-        for issue in result.issues
-    ]
+    require_consistent(case)
+    return case
+
+
+def require_consistent(case: Case) -> list[RuleResult]:
+    """Resultado de las reglas de consistencia de ``case``, si ninguna de error falló.
+
+    Sirve a quien ya tiene un ``Case`` armado (DEV13) y necesita la misma garantía que
+    ``accept_case``. Los avisos (CASE-C07) no rechazan el caso: vienen en los resultados.
+
+    Raises:
+        CaseInvalidError: si alguna regla de error (CASE-C01 a C13) falló; lleva todos los
+            problemas, hasta ``MAX_ISSUES``.
+    """
+    results = evaluate_rules(case)
+    issues = [issue for result in results if result.status == "failed" for issue in result.issues]
     if issues:
         raise CaseInvalidError(cap_issues(issues))
-    return case
+    return results

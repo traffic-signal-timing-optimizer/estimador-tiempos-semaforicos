@@ -6,7 +6,8 @@ cualquier otro módulo que necesite saber si unas duraciones son admisibles.
 
 Reglas (los problemas se informan todos juntos, cada uno con su regla y su campo):
 
-- PLAN-01: hay una duración finita para cada slot del caso y para ningún otro.
+- PLAN-01: hay una duración finita (un número, nunca un booleano ni un texto) para cada slot
+  del caso y para ningún otro.
 - PLAN-02: cada duración está dentro de los límites de su slot.
 - PLAN-03: cada duración es múltiplo del tick del caso.
 - PLAN-04: el ciclo (la suma de los slots) está dentro del rango del caso.
@@ -50,13 +51,23 @@ def _completeness_issues(case: Case, durations: Mapping[str, float]) -> list[Cas
         if slot_id not in known
     ]
     for slot in case.slots:
-        value = durations.get(slot.id)
+        value: object = durations.get(slot.id)
         field = f"durations[{slot.id}]"
         if value is None:
             issues.append(CaseIssue(COMPLETE_RULE, field, "falta la duración del slot"))
-        elif not math.isfinite(value):
+        elif not _is_finite_number(value):
             issues.append(CaseIssue(COMPLETE_RULE, field, "la duración debe ser un número finito"))
     return issues
+
+
+def _is_finite_number(value: object) -> bool:
+    """Un ``int`` o ``float`` finito. Un booleano, un texto o una lista no son una duración."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
 
 
 def _slot_issues(case: Case, durations: Mapping[str, float]) -> list[CaseIssue]:
