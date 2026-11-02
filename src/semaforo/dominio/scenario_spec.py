@@ -61,6 +61,7 @@ __all__ = [
     "Family",
     "FamilyRow",
     "FlowRange",
+    "SafeId",
     "ScenarioSpec",
     "SpecInvalidError",
     "accept_spec",

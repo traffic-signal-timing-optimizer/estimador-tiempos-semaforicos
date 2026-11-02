@@ -7,6 +7,7 @@ from typing import Any
 
 from semaforo.datos.scenarios import GeneratedScenario, generate_scenarios
 from semaforo.dominio.case import Case, parse_case
+from semaforo.dominio.scenario import Scenario
 from semaforo.dominio.scenario_spec import ScenarioSpec, parse_spec
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -42,3 +43,24 @@ def write_inputs(folder: Path, spec: dict[str, Any] | None = None) -> tuple[Path
     spec_path = folder / "spec.json"
     spec_path.write_text(json.dumps(spec_data() if spec is None else spec), encoding="utf-8")
     return case_path, spec_path
+
+
+def families_spec(count: int, variants: int = 2, seeds: int = 2) -> dict[str, Any]:
+    """La especificación de ejemplo con ``count`` familias iguales a FAM_PUNTA (FAM_01...)."""
+    data = spec_data()
+    template = data["families"][0]
+    data["families"] = [
+        {
+            **copy.deepcopy(template),
+            "family_id": f"FAM_{n:02d}",
+            "variants": variants,
+            "seeds": seeds,
+        }
+        for n in range(1, count + 1)
+    ]
+    return data
+
+
+def scenarios_of(count: int, variants: int = 2, seeds: int = 2) -> list[Scenario]:
+    """Los escenarios de ``count`` familias (``variants`` x ``seeds`` escenarios cada una)."""
+    return [m.scenario for m in generated(families_spec(count, variants, seeds))]
