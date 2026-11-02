@@ -49,6 +49,7 @@ __all__ = [
     "TimingInputError",
     "duration_issues",
     "reconstruct",
+    "shown",
 ]
 
 INPUT_RULE = "TIME-01"
@@ -123,7 +124,7 @@ class TimingInputError(DomainError):
         self.issues = tuple(issues)
 
 
-def _shown(key: object) -> str:
+def shown(key: object) -> str:
     """Una clave tal como se muestra en un mensaje: acotada, porque puede ser hostil."""
     text = key if isinstance(key, str) else repr(key)
     return text if len(text) <= MAX_SHOWN_CHARS else f"{text[:MAX_SHOWN_CHARS]}…"
@@ -155,9 +156,9 @@ def _problems(
     known = set(expected)
     for key in given:
         if not isinstance(key, str) or key not in known:
-            yield CaseIssue(INPUT_RULE, f"durations[{_shown(key)}]", "no es un slot esperado")
+            yield CaseIssue(INPUT_RULE, f"durations[{shown(key)}]", "no es un slot esperado")
     for slot_id in expected:
-        field = f"durations[{_shown(slot_id)}]"
+        field = f"durations[{shown(slot_id)}]"
         if slot_id not in given:
             yield CaseIssue(INPUT_RULE, field, "falta la duración del slot")
             continue

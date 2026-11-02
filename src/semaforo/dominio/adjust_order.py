@@ -35,6 +35,7 @@ from semaforo.dominio.case import (
     issues_of,
 )
 from semaforo.dominio.errors import DomainError, ErrorCode
+from semaforo.dominio.timing import shown
 
 __all__ = [
     "AdjustOrder",
@@ -104,7 +105,8 @@ def order_issues(case: Case, order: AdjustOrder) -> list[CaseIssue]:
             CaseIssue(
                 CASE_RULE,
                 "case_id",
-                f"el orden es del caso {order.case_id!r} y el caso es {case.case_id!r}",
+                f"el orden es del caso {shown(order.case_id)!r} y el caso es "
+                f"{shown(case.case_id)!r}",
             )
         )
     if order.case_version != case.case_version:
@@ -112,8 +114,8 @@ def order_issues(case: Case, order: AdjustOrder) -> list[CaseIssue]:
             CaseIssue(
                 CASE_RULE,
                 "case_version",
-                f"el orden es de la versión {order.case_version!r} y el caso es "
-                f"{case.case_version!r}",
+                f"el orden es de la versión {shown(order.case_version)!r} y el caso es "
+                f"{shown(case.case_version)!r}",
             )
         )
     kinds = {slot.id: slot.kind for slot in case.slots}
@@ -121,12 +123,18 @@ def order_issues(case: Case, order: AdjustOrder) -> list[CaseIssue]:
     for index, slot_id in enumerate(order.cut_order):
         field = f"cut_order[{index}]"
         if slot_id in seen:
-            issues.append(CaseIssue(COVERAGE_RULE, field, f"el slot {slot_id!r} está repetido"))
+            issues.append(
+                CaseIssue(COVERAGE_RULE, field, f"el slot {shown(slot_id)!r} está repetido")
+            )
         elif slot_id not in kinds:
-            issues.append(CaseIssue(KNOWN_RULE, field, f"el slot {slot_id!r} no es del caso"))
+            issues.append(
+                CaseIssue(KNOWN_RULE, field, f"el slot {shown(slot_id)!r} no es del caso")
+            )
         elif kinds[slot_id] == "fixed":
             issues.append(
-                CaseIssue(KNOWN_RULE, field, f"el slot {slot_id!r} es fijo: su duración no cambia")
+                CaseIssue(
+                    KNOWN_RULE, field, f"el slot {shown(slot_id)!r} es fijo: su duración no cambia"
+                )
             )
         seen.add(slot_id)
     issues.extend(

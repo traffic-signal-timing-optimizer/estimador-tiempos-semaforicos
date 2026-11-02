@@ -51,7 +51,7 @@ El corrector no recibe flujos: la corrección es la misma para cualquier demanda
 import hashlib
 import json
 import math
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from fractions import Fraction
 from types import MappingProxyType
@@ -74,6 +74,7 @@ from semaforo.dominio.timing import (
     TimingInputError,
     duration_issues,
     reconstruct,
+    shown,
 )
 
 __all__ = [
@@ -82,6 +83,7 @@ __all__ = [
     "RULE_TITLES",
     "Correction",
     "CorrectionStatus",
+    "Coverage",
     "OrderSource",
     "PlanCheck",
     "PreparedCase",
@@ -90,6 +92,7 @@ __all__ = [
     "check_plan",
     "correct",
     "prepare",
+    "summarize",
 ]
 
 RuleStatus = Literal["satisfied", "violated", "skipped"]
@@ -239,7 +242,9 @@ def _claim_issues(case: Case, case_id: str | None, case_version: str | None) -> 
     if case_id is not None and case_id != case.case_id:
         issues.append(
             CaseIssue(
-                CLAIM_RULE, "case_id", f"el plan es de {case_id!r} y el caso es {case.case_id!r}"
+                CLAIM_RULE,
+                "case_id",
+                f"el plan es de {shown(case_id)!r} y el caso es {shown(case.case_id)!r}",
             )
         )
     if case_version is not None and case_version != case.case_version:
@@ -247,7 +252,8 @@ def _claim_issues(case: Case, case_id: str | None, case_version: str | None) -> 
             CaseIssue(
                 CLAIM_RULE,
                 "case_version",
-                f"el plan es de la versión {case_version!r} y el caso es {case.case_version!r}",
+                f"el plan es de la versión {shown(case_version)!r} y el caso es "
+                f"{shown(case.case_version)!r}",
             )
         )
     return issues
@@ -441,4 +447,86 @@ def correct(
         MappingProxyType({i: float(ticks[i] * tick - exact[i]) for i in prepared.variable_ids}),
         after,
         (),
+    )
+
+
+@dataclass(frozen=True)
+class Coverage:
+    """Cobertura de la corrección sobre un conjunto de propuestas (HU11, QA22).
+
+    La cobertura es ``(aceptadas + corregidas) / (aceptadas + corregidas + rechazadas)``: las
+    rechazadas **cuentan** en el denominador, porque son propuestas admisibles que la corrección
+    no logró arreglar. Las de entrada inválida (``invalid_input``) no son propuestas admisibles:
+    se cuentan aparte y no entran en la cobertura. Si no hubo ninguna propuesta evaluada, la
+    cobertura es None (no se inventa un 100 %).
+
+    - ``rejected_by_rule``: cuántas rechazadas violan cada regla (el reporte de restricciones).
+    - ``corrected_by_slot``: en cuántas corregidas cambió la duración de cada slot variable.
+    - ``largest_change_s``: el mayor cambio absoluto de cada slot variable entre las corregidas.
+    """
+
+    rules_version: str | None
+    total: int
+    accepted: int
+    corrected: int
+    rejected: int
+    invalid_input: int
+    rejected_by_rule: Mapping[str, int]
+    corrected_by_slot: Mapping[str, int]
+    largest_change_s: Mapping[str, float]
+
+    @property
+    def admissible(self) -> int:
+        return self.accepted + self.corrected
+
+    @property
+    def evaluated(self) -> int:
+        return self.accepted + self.corrected + self.rejected
+
+    @property
+    def coverage(self) -> float | None:
+        return None if self.evaluated == 0 else self.admissible / self.evaluated
+
+
+def summarize(corrections: Iterable[Correction]) -> Coverage:
+    """Cuenta los estados de ``corrections`` y arma el reporte de restricciones.
+
+    Todas las correcciones deben haberse hecho con las mismas reglas (``rules_version``): la
+    admisibilidad no se redefine después de ver las predicciones (diseño técnico), así que no se
+    mezclan resultados de reglas distintas.
+
+    Raises:
+        ValueError: si las correcciones tienen versiones de reglas distintas.
+    """
+    version: str | None = None
+    counts = dict.fromkeys(("accepted", "corrected", "rejected", "invalid_input"), 0)
+    by_rule: dict[str, int] = {}
+    by_slot: dict[str, int] = {}
+    largest: dict[str, float] = {}
+    for correction in corrections:
+        if version is None:
+            version = correction.rules_version
+        elif correction.rules_version != version:
+            raise ValueError(
+                "las correcciones se hicieron con reglas distintas: no se resumen juntas"
+            )
+        counts[correction.status] += 1
+        if correction.status == "rejected" and correction.check is not None:
+            for rule_id in correction.check.violated:
+                by_rule[rule_id] = by_rule.get(rule_id, 0) + 1
+        if correction.status == "corrected":
+            for slot_id, change in correction.changes_s.items():
+                if change != 0:
+                    by_slot[slot_id] = by_slot.get(slot_id, 0) + 1
+                    largest[slot_id] = max(largest.get(slot_id, 0.0), abs(change))
+    return Coverage(
+        version,
+        sum(counts.values()),
+        counts["accepted"],
+        counts["corrected"],
+        counts["rejected"],
+        counts["invalid_input"],
+        MappingProxyType(dict(sorted(by_rule.items()))),
+        MappingProxyType(dict(sorted(by_slot.items()))),
+        MappingProxyType(dict(sorted(largest.items()))),
     )
