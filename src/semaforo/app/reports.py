@@ -17,7 +17,8 @@ from pathlib import Path
 from typing import Literal
 
 from semaforo.app.report_case_view import render_case
-from semaforo.app.report_inputs import CaseInputs
+from semaforo.app.report_data_view import render_data
+from semaforo.app.report_inputs import CaseInputs, DataInputs
 from semaforo.dominio.base_model import FrozenModel
 from semaforo.dominio.errors import ErrorCode
 from semaforo.trazabilidad.fs import publish_files
@@ -30,6 +31,7 @@ __all__ = [
     "REPORTS",
     "ReportManifest",
     "publish_case_report",
+    "publish_data_report",
     "read_report",
 ]
 
@@ -74,6 +76,29 @@ def publish_case_report(workspace: Path, inputs: CaseInputs, now: datetime | Non
     if inputs.report.case_sha256 is not None:
         case_inputs["case_sha256"] = inputs.report.case_sha256
     report = _Report("caso", inputs.report.case_id, html, case_inputs)
+    return _publish(workspace, report, moment)
+
+
+def publish_data_report(workspace: Path, inputs: DataInputs, now: datetime | None = None) -> Path:
+    """Publica el informe de los datos y devuelve su carpeta.
+
+    El manifiesto guarda las huellas del caso, de los dos conteos y de cada archivo del reporte de
+    calidad del que salieron los números.
+
+    Raises:
+        TrazabilidadError: RUN_EXISTS si la carpeta de destino ya existe (no se sobrescribe).
+    """
+    moment = utc_now() if now is None else now
+    html = render_data(inputs, moment).encode("utf-8")
+    quality = inputs.quality.manifest
+    used = {
+        "case_sha256": quality.case_sha256,
+        "observed_sha256": quality.observed_sha256,
+        "control_sha256": quality.control_sha256,
+    }
+    for name, digest in sorted(quality.files.items()):
+        used[f"calidad/{name}"] = digest
+    report = _Report("datos", inputs.case.report.case_id, html, used)
     return _publish(workspace, report, moment)
 
 

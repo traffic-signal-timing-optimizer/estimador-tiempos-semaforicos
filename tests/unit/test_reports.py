@@ -10,14 +10,15 @@ from pathlib import Path
 import pytest
 
 from html_checks import assert_safe_page
-from quality_tools import DEMO_CASE_TEXT, write_case
-from semaforo.app.report_inputs import CaseInputs, load_case_inputs
+from quality_tools import DEMO_CASE_TEXT, publish_demo_quality, write_case
+from semaforo.app.report_inputs import CaseInputs, DataInputs, load_case_inputs, load_data_inputs
 from semaforo.app.reports import (
     INDEX_FILE,
     MANIFEST_FILE,
     REPORTS,
     ReportManifest,
     publish_case_report,
+    publish_data_report,
     read_report,
 )
 from semaforo.dominio.errors import ErrorCode
@@ -210,3 +211,72 @@ def test_a_case_without_identity_is_published_as_unidentified(tmp_path: Path) ->
     manifest = read_report(folder)
     assert manifest.case_id is None
     assert manifest.inputs == {}
+
+
+# --- informe de los datos ---------------------------------------------------------------------
+
+
+def data_inputs(tmp_path: Path) -> DataInputs:
+    folder = publish_demo_quality(tmp_path / "calidad", tmp_path / "trabajo")
+    return load_data_inputs(write_case(tmp_path / "caso"), folder)
+
+
+def test_the_data_report_is_published_in_the_data_folder_of_its_case(tmp_path: Path) -> None:
+    folder = publish_data_report(tmp_path / "datos", data_inputs(tmp_path), NOW)
+    assert (
+        folder.parent == tmp_path / "datos" / "reportes" / "informes" / "datos" / "SYNTHETIC_DEMO"
+    )
+    assert sorted(path.name for path in folder.iterdir()) == [INDEX_FILE, MANIFEST_FILE]
+    seen = assert_safe_page((folder / INDEX_FILE).read_text(encoding="utf-8"))
+    assert "Informe de los datos: SYNTHETIC_DEMO" in seen.visible_text
+    assert "Generado el 2026-11-01 14:00 UTC" in seen.visible_text
+
+
+def test_the_data_manifest_lists_the_hashes_of_what_the_numbers_came_from(tmp_path: Path) -> None:
+    inputs = data_inputs(tmp_path)
+    folder = publish_data_report(tmp_path / "datos", inputs, NOW)
+    manifest = read_report(folder)
+    quality = inputs.quality.manifest
+    assert manifest.kind == "datos"
+    assert manifest.case_id == "SYNTHETIC_DEMO"
+    assert manifest.inputs == {
+        "case_sha256": quality.case_sha256,
+        "observed_sha256": quality.observed_sha256,
+        "control_sha256": quality.control_sha256,
+        "calidad/calidad.csv": quality.files["calidad.csv"],
+        "calidad/resumen.json": quality.files["resumen.json"],
+    }
+    digest = hashlib.sha256((folder / INDEX_FILE).read_bytes()).hexdigest()
+    assert manifest.files == {INDEX_FILE: digest}
+    assert folder.name == f"20261101T140005Z_{digest[:8]}"
+
+
+def test_a_data_report_is_never_overwritten(tmp_path: Path) -> None:
+    inputs = data_inputs(tmp_path)
+    publish_data_report(tmp_path / "datos", inputs, NOW)
+    with pytest.raises(TrazabilidadError) as raised:
+        publish_data_report(tmp_path / "datos", inputs, NOW)
+    assert raised.value.code == ErrorCode.RUN_EXISTS
+
+
+def test_the_case_and_data_reports_of_the_same_moment_do_not_collide(tmp_path: Path) -> None:
+    case_folder = publish_case_report(tmp_path / "datos", inputs_of(tmp_path), NOW)
+    data_folder = publish_data_report(tmp_path / "datos", data_inputs(tmp_path), NOW)
+    assert case_folder.parent.parent.name == "caso"
+    assert data_folder.parent.parent.name == "datos"
+    assert read_report(case_folder).kind == "caso"
+    assert read_report(data_folder).kind == "datos"
+
+
+def test_without_a_moment_the_data_report_uses_the_current_time(tmp_path: Path) -> None:
+    folder = publish_data_report(tmp_path / "datos", data_inputs(tmp_path))
+    created = datetime.fromisoformat(read_report(folder).created_at)
+    assert abs(datetime.now(UTC) - created) < timedelta(minutes=5)
+
+
+def test_a_changed_data_report_is_refused(tmp_path: Path) -> None:
+    folder = publish_data_report(tmp_path / "datos", data_inputs(tmp_path), NOW)
+    writable(folder / INDEX_FILE).write_text("<h1>otro</h1>", encoding="utf-8")
+    with pytest.raises(TrazabilidadError) as raised:
+        read_report(folder)
+    assert raised.value.code == ErrorCode.HASH_MISMATCH
