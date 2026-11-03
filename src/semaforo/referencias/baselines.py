@@ -8,6 +8,8 @@
 - ``webster_inputs``: el flujo equivalente de cada carril, su relación de flujo y el recorrido
   crítico (F1 y F2).
 - ``webster_timing``: el ciclo de Webster y el verde efectivo de cada carril (F2).
+- ``webster_plan``: esos verdes como plan de tramos, redondeado a ticks y revisado con las reglas
+  del caso (F3). Lo que no cabe queda «no aplicable»; no se corrige.
 
 Regla de ``webster-solapes-v1``:
 
@@ -49,12 +51,14 @@ __all__ = [
     "Problem",
     "WebsterInputs",
     "WebsterParameters",
+    "WebsterPlan",
     "WebsterTiming",
     "crossing_structure",
     "read_current_plan",
     "read_parameters",
     "webster_cycle",
     "webster_inputs",
+    "webster_plan",
     "webster_timing",
 ]
 
@@ -81,6 +85,10 @@ ProblemCode = Literal[
     "no_demand",
     "oversaturated",
     "cycle_out_of_bounds",
+    "path_without_variable_slot",
+    "path_green_too_short",
+    "lane_not_served",
+    "plan_infeasible",
 ]
 
 
@@ -625,19 +633,22 @@ class WebsterTiming:
     adaptation: str = ADAPTATION
 
 
-def webster_timing(
-    structure: CrossingStructure, case: Case, request: Request, parameters: WebsterParameters
-) -> WebsterTiming:
-    """El ciclo de Webster y el verde efectivo de cada carril para ``request``.
+@dataclass(frozen=True)
+class _ExactTiming:
+    path: _Path | None
+    problems: list[Problem]
+    cycle: Fraction | None
+    greens: dict[str, Fraction]
 
-    Raises:
-        ReferenciasError: INPUT_SCHEMA si la solicitud o los parámetros son de otro caso.
-    """
+
+def _exact_timing(
+    structure: CrossingStructure, case: Case, request: Request, parameters: WebsterParameters
+) -> _ExactTiming:
     evaluation = _evaluate(structure, case, request, parameters)
     problems = list(evaluation.problems)
     path = evaluation.path
     cycle: Fraction | None = None
-    greens: dict[str, float] = {}
+    greens: dict[str, Fraction] = {}
     if path is not None:
         cycle = webster_cycle(path.y, path.lost)
         low, high = Fraction(case.cycle_s.min), Fraction(case.cycle_s.max)
@@ -653,16 +664,208 @@ def webster_timing(
         else:
             usable = cycle - path.lost
             greens = {
-                lane_id: float(ratio * usable / path.y)
+                lane_id: ratio * usable / path.y
                 for lane_id, ratio in evaluation.ratios.items()
                 if ratio > 0
             }
+    return _ExactTiming(path, problems, cycle, greens)
+
+
+def webster_timing(
+    structure: CrossingStructure, case: Case, request: Request, parameters: WebsterParameters
+) -> WebsterTiming:
+    """El ciclo de Webster y el verde efectivo de cada carril para ``request``.
+
+    Raises:
+        ReferenciasError: INPUT_SCHEMA si la solicitud o los parámetros son de otro caso.
+    """
+    exact = _exact_timing(structure, case, request, parameters)
     return WebsterTiming(
+        status="not_applicable" if exact.problems else "applicable",
+        problems=tuple(exact.problems),
+        cycle_s=None if exact.cycle is None else float(exact.cycle),
+        effective_green_s={lane_id: float(green) for lane_id, green in exact.greens.items()},
+        critical_path=None if exact.path is None else _public_path(exact.path),
+        parameter_set=parameters.parameter_set,
+        provisional=parameters.provisional,
+    )
+
+
+# --- plan de tramos de Webster (F3) ------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class WebsterPlan:
+    """El plan de tramos que sale de Webster, o por qué no hay uno.
+
+    ``durations_s`` es la propuesta ya redondeada a ticks, cuando se pudo traducir; si incumple
+    las reglas del caso, ``status`` es ``not_applicable`` y ``violated`` dice cuáles. Nunca se
+    corrige: se informa.
+    """
+
+    status: Literal["applicable", "not_applicable"]
+    problems: tuple[Problem, ...]
+    durations_s: Mapping[str, float] | None
+    cycle_s: float | None
+    webster_cycle_s: float | None
+    violated: tuple[str, ...]
+    critical_path: CriticalPath | None
+    parameter_set: str
+    provisional: bool
+    adaptation: str = ADAPTATION
+
+
+def _variable_in(case: Case, span: tuple[int, int]) -> list[int]:
+    return [k for k in range(span[0], span[1] + 1) if case.slots[k].kind == "variable"]
+
+
+def _fixed_in(case: Case, span: tuple[int, int]) -> Fraction:
+    return sum(
+        (
+            Fraction(case.slots[k].min_s)
+            for k in range(span[0], span[1] + 1)
+            if case.slots[k].kind == "fixed"
+        ),
+        Fraction(0),
+    )
+
+
+def _span(lanes: Mapping[str, LaneService], lane_id: str) -> tuple[int, int]:
+    span = lanes[lane_id].span
+    if span is None:  # el recorrido y los verdes solo tienen carriles con atención seguida
+        raise _bad(f"el carril {lane_id} no tiene una atención seguida", "lanes")
+    return span
+
+
+def _split(
+    case: Case,
+    lanes: Mapping[str, LaneService],
+    lane_id: str,
+    greens: Mapping[str, Fraction],
+    on_path: frozenset[str],
+) -> dict[int, Fraction] | Problem:
+    """Reparte el verde de un carril del recorrido entre sus tramos variables.
+
+    Cada tramo parte de su mínimo o de lo que pida un carril que se atiende solo dentro de este
+    carril; lo que sobra va al tramo que atienden menos carriles con flujo (si empatan, al último).
+    """
+    span = _span(lanes, lane_id)
+    own = _variable_in(case, span)
+    if not own:
+        return Problem(
+            "path_without_variable_slot",
+            lane_id,
+            "un carril del recorrido crítico solo tiene tramos fijos: su verde no se puede ajustar",
+        )
+    lower = {k: Fraction(case.slots[k].min_s) for k in own}
+    inner = [
+        lanes[other]
+        for other in greens
+        if other not in on_path
+        and span[0] <= _span(lanes, other)[0]
+        and _span(lanes, other)[1] <= span[1]
+    ]
+    for other in sorted(inner, key=lambda lane: (_span(lanes, lane.lane_id), lane.lane_id)):
+        mine = _variable_in(case, _span(lanes, other.lane_id))
+        if mine:
+            need = greens[other.lane_id] - _fixed_in(case, _span(lanes, other.lane_id))
+            missing = need - sum((lower[k] for k in mine), Fraction(0))
+            if missing > 0:
+                lower[mine[0]] += missing
+    extra = greens[lane_id] - _fixed_in(case, span) - sum(lower.values(), Fraction(0))
+    if extra < 0:
+        return Problem(
+            "path_green_too_short",
+            lane_id,
+            f"su verde de Webster ({float(greens[lane_id]):.1f} s) no alcanza para los mínimos de "
+            "sus tramos y los carriles que atiende con ellos",
+        )
+    served = {
+        k: sum(1 for other in greens if _span(lanes, other)[0] <= k <= _span(lanes, other)[1])
+        for k in own
+    }
+    target = min(own, key=lambda k: (served[k], -k))
+    lower[target] += extra
+    return lower
+
+
+def _translate(
+    case: Case, structure: CrossingStructure, path: _Path, greens: Mapping[str, Fraction]
+) -> dict[str, Fraction] | Problem:
+    """Duración exacta de cada tramo, o el problema que impide traducir los verdes."""
+    lanes = {lane.lane_id: lane for lane in structure.lanes}
+    durations = {
+        k: Fraction(slot.min_s) for k, slot in enumerate(case.slots) if slot.kind == "fixed"
+    }
+    on_path = frozenset(path.lanes)
+    for lane_id in path.lanes:
+        split = _split(case, lanes, lane_id, greens, on_path)
+        if isinstance(split, Problem):
+            return split
+        durations.update(split)
+    for lane_id, need in sorted(greens.items()):
+        start, end = _span(lanes, lane_id)
+        got = sum((durations[k] for k in range(start, end + 1)), Fraction(0))
+        if got < need:
+            return Problem(
+                "lane_not_served",
+                lane_id,
+                f"el plan le da {float(got):.1f} s de verde y Webster le pide {float(need):.1f} s",
+            )
+    return {slot.id: durations[k] for k, slot in enumerate(case.slots)}
+
+
+def _rounded(case: Case, durations: Mapping[str, Fraction]) -> dict[str, float]:
+    """Los tramos variables al tick más cercano (la mitad hacia arriba); los fijos, igual."""
+    tick = Fraction(case.tick_s)
+    result: dict[str, float] = {}
+    for slot in case.slots:
+        value = durations[slot.id]
+        if slot.kind == "variable":
+            value = math.floor(value / tick + Fraction(1, 2)) * tick
+        result[slot.id] = float(value)
+    return result
+
+
+def webster_plan(
+    structure: CrossingStructure,
+    prepared: PreparedCase,
+    request: Request,
+    parameters: WebsterParameters,
+) -> WebsterPlan:
+    """El plan de tramos de Webster para ``request``, revisado con las reglas del caso.
+
+    Raises:
+        ReferenciasError: INPUT_SCHEMA si la solicitud o los parámetros son de otro caso.
+    """
+    case = prepared.case
+    exact = _exact_timing(structure, case, request, parameters)
+    problems = list(exact.problems)
+    durations: dict[str, float] | None = None
+    violated: tuple[str, ...] = ()
+    if not problems and exact.path is not None:
+        translated = _translate(case, structure, exact.path, exact.greens)
+        if isinstance(translated, Problem):
+            problems.append(translated)
+        else:
+            durations = _rounded(case, translated)
+            violated = check_plan(prepared, durations).violated
+            if violated:
+                problems.append(
+                    Problem(
+                        "plan_infeasible",
+                        "plan",
+                        f"el plan de Webster incumple {', '.join(violated)}; no se corrige",
+                    )
+                )
+    return WebsterPlan(
         status="not_applicable" if problems else "applicable",
         problems=tuple(problems),
-        cycle_s=None if cycle is None else float(cycle),
-        effective_green_s=greens,
-        critical_path=None if path is None else _public_path(path),
+        durations_s=durations,
+        cycle_s=None if durations is None else math.fsum(durations.values()),
+        webster_cycle_s=None if exact.cycle is None else float(exact.cycle),
+        violated=violated,
+        critical_path=None if exact.path is None else _public_path(exact.path),
         parameter_set=parameters.parameter_set,
         provisional=parameters.provisional,
     )

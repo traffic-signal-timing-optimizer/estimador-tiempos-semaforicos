@@ -22,12 +22,14 @@ from semaforo.referencias.baselines import (
     ADAPTATION,
     WebsterInputs,
     WebsterParameters,
+    WebsterPlan,
     WebsterTiming,
     crossing_structure,
     read_current_plan,
     read_parameters,
     webster_cycle,
     webster_inputs,
+    webster_plan,
     webster_timing,
 )
 from semaforo.referencias.errors import ReferenciasError
@@ -61,22 +63,25 @@ def case_from(
     *,
     fixed: Mapping[str, float] | None = None,
     cycle: tuple[float, float] = (40, 100),
+    limits: Mapping[str, tuple[float, float]] | None = None,
 ) -> Case:
     """Caso de un semáforo ``T`` con los tramos y movimientos dados: (id, carriles, enlaces).
 
     ``fixed`` da la duración de los tramos fijos; por defecto son fijos, de 1 s, los tramos sin
-    ningún verde (como un ámbar o un todo rojo).
+    ningún verde (como un ámbar o un todo rojo). ``limits`` da el mínimo y el máximo de un tramo
+    variable; por defecto, 1 a 100 s.
     """
     if fixed is None:
         fixed = {slot_id: 1.0 for slot_id, state in states.items() if not set(state) & set("Gg")}
+    bounds = limits or {}
     data = json_of("case.json")
     data["cycle_s"] = {"min": cycle[0], "max": cycle[1]}
     data["slots"] = [
         {
             "id": slot_id,
             "kind": "fixed" if slot_id in fixed else "variable",
-            "min_s": fixed.get(slot_id, 1),
-            "max_s": fixed.get(slot_id, 100),
+            "min_s": fixed.get(slot_id, bounds.get(slot_id, (1, 100))[0]),
+            "max_s": fixed.get(slot_id, bounds.get(slot_id, (1, 100))[1]),
             "states": [{"tls_id": TLS, "state": state}],
         }
         for slot_id, state in states.items()
@@ -511,6 +516,142 @@ def test_the_timing_carries_its_parameters() -> None:
     assert timing.provisional
     assert timing.parameter_set == "webster-parametros-v2"
     assert timing.adaptation == ADAPTATION
+
+
+# --- plan de tramos de Webster (F3, calculado a mano) ------------------------------------------
+
+
+def plan_of(case: Case, flows: Mapping[str, float], **changes: Any) -> WebsterPlan:  # noqa: ANN401
+    request = request_with(case, flows)
+    return webster_plan(crossing_structure(case), prepare(case), request, parameters(**changes))
+
+
+def test_the_two_phase_plan_by_hand() -> None:
+    # Verdes de F2: N 27,810 s y E 20,857 s; al tick de 1 s: 28 y 21. Ciclo 28 + 3 + 1 + 21 + 3 + 1.
+    plan = plan_of(parse_case(json_of("case.json")), {"N_S": 720, "E_W": 540})
+    assert plan.status == "applicable"
+    assert plan.durations_s == {"s1": 28, "s2": 3, "s3": 1, "s4": 21, "s5": 3, "s6": 1}
+    assert plan.cycle_s == 57
+    assert plan.webster_cycle_s == pytest.approx(17 / 0.3)
+    assert plan.violated == ()
+
+
+def test_the_caso_001_shape_plan_by_hand() -> None:
+    # Verdes de F2 (y * 122,25 s): E 50,9375; O3 12,904; N 17,658; S 6,792.
+    # t1 = 50,9375 → 51 y t3 = 12,904 → 13 (cada uno es el único tramo variable de su carril).
+    # N (t5, t6 fijo de 5 s, t7): 17,658 - 5 = 12,658 s para t5 y t7. t5 parte de lo que pide S
+    # (6,792 s, que solo se atiende en t5) y lo que sobra va a t7, que atiende solo a N:
+    # t7 = 12,658 - 6,792 = 5,867 → 6 y t5 = 6,792 → 7. Ciclo: 51 + 13 + 7 + 6 + 24 = 101.
+    flows = {"E": 750, "O": 750, "O3": 190, "S": 100, "N": 260}
+    plan = plan_of(shape_case(cycle=(60, 240)), flows)
+    assert plan.status == "applicable"
+    assert plan.durations_s == {
+        "t1": 51,
+        "t2": 5,
+        "t3": 13,
+        "t4": 5,
+        "t5": 7,
+        "t6": 5,
+        "t7": 6,
+        "t8": 5,
+        "t9": 4,
+    }
+    assert plan.cycle_s == 101
+
+
+def test_what_an_inner_lane_needs_goes_to_its_first_slot() -> None:
+    # P atiende v1, v2 y v3; I, dentro de P, atiende v2 y v3. Recorrido: P; Y = 0,4, L = 0,
+    # C0 = 5 / 0,6 = 8,333 s. Verdes: P 8,333; I = 0,3 * 8,333 / 0,4 = 6,25.
+    # Mínimos de 1 s; I pide 6,25 - 2 = 4,25 más y va a su primer tramo: v2 = 5,25.
+    # Sobra 8,333 - 7,25 = 1,083 para v1, que atiende solo a P: v1 = 2,083.
+    # Al tick: v1 2, v2 5, v3 1.
+    case = case_from(
+        {"v1": "Gr", "v2": "GG", "v3": "GG"},
+        [("P", ["P_0"], [0]), ("I", ["I_0"], [1])],
+        fixed={},
+        cycle=(1, 240),
+    )
+    plan = plan_of(case, {"P": 720, "I": 540})
+    assert plan.status == "applicable"
+    assert plan.durations_s == {"v1": 2, "v2": 5, "v3": 1}
+
+
+def test_the_spare_green_goes_to_the_last_slot_when_slots_tie() -> None:
+    # P atiende v1 y v2, y nadie más: Y = 0,4, C0 = 8,333 s; mínimos de 1 s y el sobrante
+    # (6,333 s) va al último tramo: v1 = 1 y v2 = 7,333 → 7.
+    case = case_from({"v1": "G", "v2": "G"}, [("P", ["P_0"], [0])], fixed={}, cycle=(1, 240))
+    plan = plan_of(case, {"P": 720})
+    assert plan.durations_s == {"v1": 1, "v2": 7}
+
+
+def test_a_webster_green_below_a_slot_minimum_is_not_applicable() -> None:
+    # La flecha O3 pide 12,9 s y su tramo t3 exige al menos 15 s: Webster no alcanza y no se sube.
+    case = case_from(
+        SHAPE, SHAPE_MOVEMENTS, fixed=SHAPE_FIXED, cycle=(60, 240), limits={"t3": (15, 60)}
+    )
+    plan = plan_of(case, {"E": 750, "O": 750, "O3": 190, "S": 100, "N": 260})
+    assert plan.status == "not_applicable"
+    assert [(p.code, p.subject) for p in plan.problems] == [("path_green_too_short", "O_3")]
+    assert plan.durations_s is None
+
+
+def test_a_lane_the_plan_cannot_serve_is_not_applicable() -> None:
+    # P atiende v1, f (fijo, 1 s) y v2; R atiende v2 y v3; P2 solo v3. El único recorrido es P+P2:
+    # Y = 0,3 + 0,1 = 0,4; L = 0; C0 = 5 / 0,6 = 8,333 s. Verdes: P 6,25; P2 2,083; R 6,25.
+    # P reparte 6,25 - 1 = 5,25 entre v1 y v2: v2 queda en su mínimo (1 s) y el resto va a v1, que
+    # atiende solo a P. R recibe v2 + v3 = 1 + 2,083 = 3,083 s < 6,25: no aplica.
+    case = case_from(
+        {"v1": "Grr", "f": "Grr", "v2": "GGr", "v3": "rGG"},
+        [("P", ["P_0"], [0]), ("R", ["R_0"], [1]), ("P2", ["Q_0"], [2])],
+        fixed={"f": 1.0},
+        cycle=(1, 240),
+    )
+    plan = plan_of(case, {"P": 540, "R": 540, "P2": 180})
+    assert [(p.code, p.subject) for p in plan.problems] == [("lane_not_served", "R_0")]
+    assert plan.status == "not_applicable"
+
+
+def test_a_plan_that_breaks_a_case_rule_is_reported_and_not_corrected() -> None:
+    # El grupo NS admite hasta 25 s y Webster pide 28 s en s1.
+    data = json_of("case.json")
+    data["green_groups"][0]["max_s"] = 25
+    plan = plan_of(parse_case(data), {"N_S": 720, "E_W": 540})
+    assert plan.status == "not_applicable"
+    assert [p.code for p in plan.problems] == ["plan_infeasible"]
+    assert plan.violated
+    assert plan.durations_s is not None
+    assert plan.durations_s["s1"] == 28
+
+
+def test_a_critical_lane_with_only_fixed_slots_is_not_applicable() -> None:
+    # A en v; B solo en f (fijo, 1 s). A+B: Y = 0,6, L = 0, C0 = 12,5 s; A solo: Y = 0,1, L = 1,
+    # C0 = 6,5 / 0,9 = 7,2 s. Manda A+B, y el verde de B no se puede ajustar.
+    case = case_from(
+        {"v": "Gr", "f": "rG"},
+        [("A", ["A_0"], [0]), ("B", ["B_0"], [1])],
+        fixed={"f": 1.0},
+        cycle=(1, 240),
+    )
+    plan = plan_of(case, {"A": 180, "B": 900})
+    assert [(p.code, p.subject) for p in plan.problems] == [("path_without_variable_slot", "B_0")]
+
+
+def test_a_cycle_problem_carries_over_to_the_plan() -> None:
+    plan = plan_of(
+        shape_case(cycle=(120, 240)), {"E": 750, "O": 750, "O3": 190, "S": 100, "N": 260}
+    )
+    assert [p.code for p in plan.problems] == ["cycle_out_of_bounds"]
+    assert plan.durations_s is None
+    assert plan.cycle_s is None
+    assert plan.webster_cycle_s == pytest.approx(100.5)
+
+
+def test_the_plan_carries_its_parameters() -> None:
+    plan = plan_of(parse_case(json_of("case.json")), {"N_S": 720, "E_W": 540})
+    assert plan.provisional
+    assert plan.parameter_set == "webster-parametros-v2"
+    assert plan.adaptation == ADAPTATION
+    assert plan.critical_path is not None
 
 
 # --- no aplicable ------------------------------------------------------------------------------
