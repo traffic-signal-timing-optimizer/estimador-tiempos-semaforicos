@@ -34,6 +34,31 @@ PUBLICATION_CAUSE = "el programa que publicaba la carpeta terminó sin publicarl
 # Tamaño de cada parte al leer con tope (DEV07 F0, D17).
 READ_CHUNK_BYTES = 1024 * 1024
 
+# Renombrar una carpeta recién escrita puede fallar un instante en Windows con «acceso denegado»
+# mientras otro programa (el antivirus) revisa sus archivos (DEV14 F2: 1 de 116 renombrados con
+# corridas en paralelo, liberado en menos de 50 ms). Se reintenta durante unos 2 s.
+RENAME_ATTEMPTS = 40
+RENAME_PAUSE_S = 0.05
+
+
+def replace_patiently(
+    source: Path, target: Path, *, pause: Callable[[float], object] = time.sleep
+) -> None:
+    """Renombra ``source`` a ``target`` y reintenta si el sistema lo niega un instante.
+
+    Solo reintenta ``PermissionError`` mientras ``target`` no exista; cualquier otro error, o el
+    mismo después de ``RENAME_ATTEMPTS`` intentos, se lanza tal cual.
+    """
+    for attempt in range(1, RENAME_ATTEMPTS + 1):
+        try:
+            source.replace(target)
+        except PermissionError:
+            if attempt == RENAME_ATTEMPTS or target.exists():
+                raise
+            pause(RENAME_PAUSE_S)
+        else:
+            return
+
 
 class Readable(Protocol):
     """Algo de lo que se leen bytes: un archivo abierto en binario o un ``GzipFile``."""
@@ -189,7 +214,7 @@ def publication(final: Path) -> Generator[Path]:
             yield temporary
             make_read_only(temporary)
             try:
-                temporary.replace(final)
+                replace_patiently(temporary, final)
             except OSError as error:
                 if final.exists():  # apareció mientras se escribía: no se sobrescribe
                     raise FileExistsError(final.name) from error

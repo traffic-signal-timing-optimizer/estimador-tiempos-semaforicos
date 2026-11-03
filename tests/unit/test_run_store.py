@@ -335,3 +335,25 @@ def test_a_junction_among_the_outputs_is_refused(runs: Path, tmp_path: Path) -> 
             assert raised.value.code is ErrorCode.PATH_NOT_ALLOWED
         finally:
             link.rmdir()
+
+
+def test_a_run_is_published_although_the_rename_is_denied_for_an_instant(
+    runs: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # DEV14 F2: con corridas en paralelo, Windows negó un renombrado durante menos de 50 ms.
+    original = Path.replace
+    denied = 2
+
+    def flaky(self: Path, target: Path) -> Path:
+        nonlocal denied
+        if denied > 0 and self.name.startswith(".tmp-"):
+            denied -= 1
+            raise PermissionError("acceso denegado")
+        return original(self, target)
+
+    monkeypatch.setattr(Path, "replace", flaky)
+    monkeypatch.setattr("semaforo.trazabilidad.fs.RENAME_PAUSE_S", 0.0)
+    with RunWriter(runs, SPEC, clock=clock) as writer:
+        manifest = publish_succeeded(writer)
+    assert denied == 0
+    assert read_run(runs, manifest.run_id) == manifest

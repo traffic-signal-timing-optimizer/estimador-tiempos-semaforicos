@@ -30,7 +30,7 @@ from typing import Self
 from pydantic import ValidationError
 
 from semaforo.dominio.errors import DomainError, ErrorCode
-from semaforo.trazabilidad.fs import make_read_only
+from semaforo.trazabilidad.fs import make_read_only, replace_patiently
 from semaforo.trazabilidad.hashing import sha256_file
 from semaforo.trazabilidad.lock import RunLock
 from semaforo.trazabilidad.manifest import (
@@ -257,7 +257,7 @@ class RunWriter:
         self._write_manifest(manifest)
         make_read_only(self.path)
         try:
-            self.path.replace(final)
+            replace_patiently(self.path, final)
         except OSError as failure:
             raise TrazabilidadError(
                 ErrorCode.RUN_EXISTS, "no se pudo publicar: el destino ya existe", "run_id"
