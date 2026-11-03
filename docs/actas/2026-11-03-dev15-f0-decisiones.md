@@ -23,13 +23,15 @@ Lo recalculé con el flujo del carril más cargado en cada tramo variable del es
 |---|---|---|
 | t1 (Javier Prado, este→oeste y oeste→este recto) | 750 | 0,417 |
 | t3 (Javier Prado, oeste→este) | 750 | 0,417 |
-| t5 (Frutales, sur→norte) | 260 | 0,144 |
-| t7 (Frutales, norte→sur) | 260 | 0,144 |
+| t5 (Frutales, los dos sentidos) | 260 | 0,144 |
+| t7 (Frutales, sur→norte) | 260 | 0,144 |
 | **Suma** | | **Y ≈ 1,12** |
 
 **Lectura:** Y está por encima de 1. Webster no es aplicable para este escenario con esta saturación. Hay un problema de conteo: los carriles de Javier Prado aparecen en t1 y en t3, así que se cuentan dos veces. Si cada acceso se cuenta una sola vez, Y ≈ 0,98. Aun así queda al límite. **En ambas cuentas, Webster sale no aplicable o en el borde.**
 
 Consecuencia: la regla de F1 para contar las fases (qué se cuenta una vez y qué no) decide la aplicabilidad. Por eso se fija en F1 antes de calcular nada.
+
+> **Corrección hecha en F1 (2026-11-03).** La suma por tramo de esta tabla cuenta dos veces los carriles que siguen en verde de un tramo al siguiente. Con la regla de F1, el camino crítico, **Y = 0,686** para ESC-SINT-001 con 1 800 veh/h por carril y las equivalencias de D3 (0,823 con 1 500; 0,650 con 1 900). Y queda por debajo de 1, así que Webster **no** queda descartado por Y. Las frases de D2 y D6 que dicen lo contrario quedan reemplazadas. La aplicabilidad depende ahora del tiempo perdido, que se decide en F2. Detalle en `2026-11-03-dev15-f1-estructura.md`.
 
 ## Decisiones
 
