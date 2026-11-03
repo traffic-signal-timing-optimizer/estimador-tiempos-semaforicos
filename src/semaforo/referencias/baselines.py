@@ -1,24 +1,28 @@
 """Comparadores de DEV15: plan vigente y Webster (HU08, HU12).
 
-Primera parte (F1), sin calcular todavía el ciclo:
-
 - ``read_parameters``: los parámetros de Webster (``configs/webster``), marcados como provisionales
   mientras no los apruebe un especialista (DEC08).
 - ``read_current_plan``: el plan vigente como dato observado, con su fuente, leído de la carpeta del
   programa publicado (verificada) y revisado con las reglas del caso (DEV13).
 - ``crossing_structure``: en qué tramos tiene cada carril verde con prioridad (``G``).
-- ``webster_inputs``: el flujo equivalente de cada carril, su relación de flujo y el camino crítico.
+- ``webster_inputs``: el flujo equivalente de cada carril, su relación de flujo y el recorrido
+  crítico (F1 y F2).
+- ``webster_timing``: el ciclo de Webster y el verde efectivo de cada carril (F2).
 
-Regla de conteo de ``webster-solapes-v1``: un carril se atiende en los tramos seguidos donde
-alguno de sus movimientos tiene ``G``. Y es la mayor suma de relaciones de flujo entre carriles
-cuyos tramos de atención no se tocan (el camino crítico). Es el mínimo verde que el ciclo debe dar:
-el verde de un tramo que atiende a dos carriles a la vez no se cuenta dos veces. Un carril con
-flujo y solo verde que cede el paso (``g``), sin verde, o con su atención partida, deja a Webster
-«no aplicable»: la fórmula no sabe dimensionarlo y no se inventa un valor.
+Regla de ``webster-solapes-v1``:
+
+- Un carril se atiende en los tramos seguidos donde alguno de sus movimientos tiene ``G``.
+- Un *recorrido* del ciclo pasa por todos sus tramos: cada tramo variable lo atiende uno de sus
+  carriles y cada tramo fijo lo atiende uno de ellos o se pierde. Su Y es la suma de las relaciones
+  de flujo de sus carriles y su L, la de los tramos fijos que pierde. El verde de un tramo que
+  atiende a dos carriles a la vez no se cuenta dos veces.
+- El recorrido crítico es el que exige el ciclo de Webster más largo, C0 = (1,5 L + 5) / (1 - Y).
+- Webster no aplica si un carril con flujo solo tiene verde que cede el paso (``g``), no tiene
+  verde o tiene su atención partida; si falta un dato; si ningún recorrido cubre el ciclo; si Y es 0
+  o llega al límite; o si C0 sale de los límites del caso. Nunca se inventa ni se recorta un valor.
 """
 
 import math
-from bisect import bisect_left
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
@@ -45,17 +49,22 @@ __all__ = [
     "Problem",
     "WebsterInputs",
     "WebsterParameters",
+    "WebsterTiming",
     "crossing_structure",
     "read_current_plan",
     "read_parameters",
+    "webster_cycle",
     "webster_inputs",
+    "webster_timing",
 ]
 
 ADAPTATION = "webster-solapes-v1"
 PROTECTED = "G"
 GREEN = frozenset("Ggs")
-BOUNDS = 2
 CYCLE_TOLERANCE_S = 1e-6
+# Fórmula de Webster: C0 = (1,5 L + 5) / (1 - Y).
+LOST_TIME_FACTOR = Fraction(3, 2)
+LOST_TIME_EXTRA_S = Fraction(5)
 
 Positive = Annotated[float, Field(gt=0)]
 NonNegative = Annotated[float, Field(ge=0)]
@@ -68,6 +77,10 @@ ProblemCode = Literal[
     "permissive_only",
     "split_service",
     "wrapping_service",
+    "no_covering_path",
+    "no_demand",
+    "oversaturated",
+    "cycle_out_of_bounds",
 ]
 
 
@@ -85,7 +98,7 @@ class Approval(FrozenModel):
 class ApplicabilityRules(FrozenModel):
     """Cuándo Webster deja de aplicar. No se recorta nunca (diseño técnico)."""
 
-    y_must_be_below: Positive
+    y_must_be_below: Annotated[float, Field(gt=0, le=1)]
     cycle_must_be_inside_bounds: Literal[True]
     clipping_allowed: Literal[False]
 
@@ -100,7 +113,11 @@ class CurrentPlanRecord(FrozenModel):
 
 
 class WebsterParameters(FrozenModel):
-    """Parámetros de Webster de un caso (``configs/webster/parametros-v1.json``)."""
+    """Parámetros de Webster de un caso (``configs/webster/parametros-v2.json``).
+
+    El tiempo perdido no es un número: lo da la regla ``lost_time_rule`` sobre el camino crítico.
+    Los límites del ciclo son los del caso.
+    """
 
     schema_version: Literal["1.0.0"] = "1.0.0"
     parameter_set: str = Field(min_length=1)
@@ -112,17 +129,13 @@ class WebsterParameters(FrozenModel):
     saturation_flow_veh_h_lane: Positive
     saturation_flow_sensitivity_veh_h_lane: list[Positive]
     vehicle_equivalence: dict[str, NonNegative]
-    lost_time_s: NonNegative
-    lost_time_source: str = Field(min_length=1)
-    cycle_bounds_s: list[Positive]
+    lost_time_rule: Literal["intergreens_outside_critical_path"]
+    lost_time_note: str = Field(min_length=1)
     applicability: ApplicabilityRules
     current_plan: CurrentPlanRecord
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
-        bounds = self.cycle_bounds_s
-        if len(bounds) != BOUNDS or bounds[0] > bounds[1]:
-            raise ValueError("cycle_bounds_s debe ser [mínimo, máximo] con el mínimo primero")
         if self.status == "approved" and self.approval.especialista is None:
             raise ValueError("unos parámetros aprobados necesitan al especialista que los aprobó")
         return self
@@ -345,11 +358,19 @@ class Problem:
 
 @dataclass(frozen=True)
 class CriticalPath:
-    """Los carriles cuyos tramos de atención no se tocan y cuya suma de relaciones de flujo es la
-    mayor. ``y`` es esa suma, Y de Webster. Los carriles van en el orden del ciclo."""
+    """El recorrido del ciclo que exige el ciclo de Webster más largo.
+
+    Un recorrido pasa por todos los tramos del ciclo: cada tramo variable lo atiende uno de sus
+    carriles, y cada tramo fijo lo atiende uno de ellos o se pierde. ``y`` es la suma de las
+    relaciones de flujo de sus carriles (Y), ``lost_time_s`` la de los tramos fijos que pierde (L)
+    y ``cycle_s`` el ciclo de Webster de ese par. Los carriles y tramos van en el orden del ciclo.
+    """
 
     y: float
+    lost_time_s: float
+    cycle_s: float
     lane_ids: tuple[str, ...]
+    lost_slot_ids: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -425,42 +446,107 @@ def _lane_problem(lane: LaneService) -> Problem | None:
     return Problem("split_service", lane.lane_id, "su verde está partido en tramos no seguidos")
 
 
-def _better(
-    first: tuple[Fraction, tuple[str, ...]], second: tuple[Fraction, tuple[str, ...]]
-) -> bool:
-    """Mayor suma; si empatan, los carriles con nombres menores (para que el orden no cambie)."""
-    return first[0] > second[0] or (first[0] == second[0] and sorted(first[1]) < sorted(second[1]))
+@dataclass(frozen=True)
+class _Path:
+    """Un recorrido (o el resto de uno) con cifras exactas."""
+
+    y: Fraction
+    lost: Fraction
+    lanes: tuple[str, ...]
+    lost_slots: tuple[str, ...]
 
 
-def _critical_path(lanes: Sequence[tuple[LaneService, Fraction]]) -> tuple[Fraction, list[str]]:
-    """Mayor suma de relaciones de flujo entre carriles cuyos tramos no se tocan."""
-    items: list[tuple[tuple[int, int], Fraction, str]] = sorted(
-        (
-            (lane.span, ratio, lane.lane_id)
-            for lane, ratio in lanes
-            if lane.span is not None and ratio > 0
-        ),
-        key=lambda item: (item[0][1], item[0][0], item[2]),
-    )
-    ends = [span[1] for span, _, _ in items]
-    best: list[tuple[Fraction, tuple[str, ...]]] = [(Fraction(0), ())]
-    for position, (span, ratio, lane_id) in enumerate(items):
-        before = bisect_left(ends, span[0], 0, position)
-        take = (best[before][0] + ratio, (*best[before][1], lane_id))
-        best.append(take if _better(take, best[position]) else best[position])
-    total, chosen = best[-1]
-    starts = {lane_id: span[0] for span, _, lane_id in items}
-    return total, sorted(chosen, key=lambda lane_id: (starts[lane_id], lane_id))
+def webster_cycle(y: Fraction, lost_time_s: Fraction) -> Fraction:
+    """Ciclo de Webster C0 = (1,5 L + 5) / (1 - Y), con 0 <= Y < 1 y L >= 0."""
+    return (LOST_TIME_FACTOR * lost_time_s + LOST_TIME_EXTRA_S) / (1 - y)
 
 
-def webster_inputs(
-    structure: CrossingStructure, case: Case, request: Request, parameters: WebsterParameters
-) -> WebsterInputs:
-    """Relación de flujo de cada carril y camino crítico, o por qué Webster no aplica.
+def _pareto(paths: Sequence[_Path]) -> list[_Path]:
+    """Los recorridos que ningún otro supera a la vez en Y y en L (los demás piden menos ciclo)."""
+    kept: list[_Path] = []
+    for path in sorted(paths, key=lambda p: (-p.y, -p.lost, p.lanes, p.lost_slots)):
+        if not any(other.y >= path.y and other.lost >= path.lost for other in kept):
+            kept.append(path)
+    return kept
 
-    Raises:
-        ReferenciasError: INPUT_SCHEMA si la solicitud o los parámetros son de otro caso.
+
+def _covering_paths(
+    case: Case, structure: CrossingStructure, ratios: Mapping[str, Fraction]
+) -> list[_Path]:
+    """Recorridos del ciclo que atienden todos los tramos variables, sin repetir un tramo.
+
+    Por cada tramo de atención basta el carril de mayor relación de flujo: los demás con el mismo
+    tramo tienen la misma pérdida y menos Y.
     """
+    count = len(case.slots)
+    best: dict[tuple[int, int], tuple[Fraction, str]] = {}
+    for lane in structure.lanes:
+        if lane.span is None:
+            continue
+        ratio = ratios[lane.lane_id]
+        current = best.get(lane.span)
+        if current is None or (-ratio, lane.lane_id) < (-current[0], current[1]):
+            best[lane.span] = (ratio, lane.lane_id)
+    starting: dict[int, list[tuple[int, Fraction, str]]] = {}
+    for (start, end), (ratio, lane_id) in sorted(best.items()):
+        starting.setdefault(start, []).append((end, ratio, lane_id))
+    suffix: list[list[_Path]] = [[] for _ in range(count + 1)]
+    suffix[count] = [_Path(Fraction(0), Fraction(0), (), ())]
+    for position in range(count - 1, -1, -1):
+        options = [
+            _Path(rest.y + ratio, rest.lost, (lane_id, *rest.lanes), rest.lost_slots)
+            for end, ratio, lane_id in starting.get(position, [])
+            for rest in suffix[end + 1]
+        ]
+        slot = case.slots[position]
+        if slot.kind == "fixed":
+            options.extend(
+                _Path(
+                    rest.y,
+                    rest.lost + Fraction(slot.min_s),
+                    rest.lanes,
+                    (slot.id, *rest.lost_slots),
+                )
+                for rest in suffix[position + 1]
+            )
+        suffix[position] = _pareto(options)
+    return suffix[0]
+
+
+@dataclass(frozen=True)
+class _Evaluation:
+    """Lo calculado con cifras exactas, antes de pasarlo a los resultados."""
+
+    ratios: dict[str, Fraction]
+    problems: list[Problem]
+    path: _Path | None
+
+
+def _choose(paths: Sequence[_Path], parameters: WebsterParameters) -> _Path | Problem:
+    if not paths:
+        return Problem(
+            "no_covering_path",
+            "ciclo",
+            "ningún recorrido del ciclo atiende todos los tramos variables",
+        )
+    highest = max(path.y for path in paths)
+    if highest == 0:
+        return Problem("no_demand", "ciclo", "ningún carril del recorrido tiene flujo (Y = 0)")
+    if highest >= Fraction(parameters.applicability.y_must_be_below):
+        return Problem(
+            "oversaturated",
+            "ciclo",
+            f"Y = {float(highest):.3f}: el cruce está saturado y Webster no da un ciclo",
+        )
+    return min(
+        paths,
+        key=lambda path: (-webster_cycle(path.y, path.lost), -path.y, path.lanes, path.lost_slots),
+    )
+
+
+def _evaluate(
+    structure: CrossingStructure, case: Case, request: Request, parameters: WebsterParameters
+) -> _Evaluation:
     pair = (case.case_id, case.case_version)
     if (request.case_id, request.case_version) != pair:
         raise _bad("la solicitud es de otro caso o versión", "request")
@@ -480,16 +566,103 @@ def webster_inputs(
             problem = _lane_problem(lane)
             if problem is not None:
                 problems.append(problem)
-    flow_ratios = {lane_id: float(ratio) for lane_id, ratio in ratios.items() if ratio > 0}
-    path = None
-    if not problems:
-        total, chosen = _critical_path([(lane, ratios[lane.lane_id]) for lane in structure.lanes])
-        path = CriticalPath(float(total), tuple(chosen))
+    if problems:
+        return _Evaluation(ratios, problems, None)
+    chosen = _choose(_covering_paths(case, structure, ratios), parameters)
+    if isinstance(chosen, Problem):
+        return _Evaluation(ratios, [chosen], None)
+    return _Evaluation(ratios, [], chosen)
+
+
+def _public_path(path: _Path) -> CriticalPath:
+    return CriticalPath(
+        y=float(path.y),
+        lost_time_s=float(path.lost),
+        cycle_s=float(webster_cycle(path.y, path.lost)),
+        lane_ids=path.lanes,
+        lost_slot_ids=path.lost_slots,
+    )
+
+
+def webster_inputs(
+    structure: CrossingStructure, case: Case, request: Request, parameters: WebsterParameters
+) -> WebsterInputs:
+    """Relación de flujo de cada carril y recorrido crítico, o por qué Webster no aplica.
+
+    Raises:
+        ReferenciasError: INPUT_SCHEMA si la solicitud o los parámetros son de otro caso.
+    """
+    evaluation = _evaluate(structure, case, request, parameters)
     return WebsterInputs(
+        status="not_applicable" if evaluation.problems else "applicable",
+        problems=tuple(evaluation.problems),
+        flow_ratios={k: float(v) for k, v in evaluation.ratios.items() if v > 0},
+        critical_path=None if evaluation.path is None else _public_path(evaluation.path),
+        parameter_set=parameters.parameter_set,
+        provisional=parameters.provisional,
+    )
+
+
+# --- ciclo y verdes de Webster -----------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class WebsterTiming:
+    """Ciclo de Webster y verde efectivo que pide cada carril con flujo, o por qué no aplica.
+
+    El verde efectivo reparte C0 - L en proporción a la relación de flujo de cada carril, así que
+    todos los carriles del recorrido crítico quedan con el mismo grado de saturación. Si el ciclo
+    sale fuera de los límites del caso, se informa y no se recorta (D6).
+    """
+
+    status: Literal["applicable", "not_applicable"]
+    problems: tuple[Problem, ...]
+    cycle_s: float | None
+    effective_green_s: Mapping[str, float]
+    critical_path: CriticalPath | None
+    parameter_set: str
+    provisional: bool
+    adaptation: str = ADAPTATION
+
+
+def webster_timing(
+    structure: CrossingStructure, case: Case, request: Request, parameters: WebsterParameters
+) -> WebsterTiming:
+    """El ciclo de Webster y el verde efectivo de cada carril para ``request``.
+
+    Raises:
+        ReferenciasError: INPUT_SCHEMA si la solicitud o los parámetros son de otro caso.
+    """
+    evaluation = _evaluate(structure, case, request, parameters)
+    problems = list(evaluation.problems)
+    path = evaluation.path
+    cycle: Fraction | None = None
+    greens: dict[str, float] = {}
+    if path is not None:
+        cycle = webster_cycle(path.y, path.lost)
+        low, high = Fraction(case.cycle_s.min), Fraction(case.cycle_s.max)
+        if not low <= cycle <= high:
+            problems.append(
+                Problem(
+                    "cycle_out_of_bounds",
+                    "ciclo",
+                    f"Webster da {float(cycle):.1f} s y el caso admite de {case.cycle_s.min:g} "
+                    f"a {case.cycle_s.max:g} s; no se recorta",
+                )
+            )
+        else:
+            usable = cycle - path.lost
+            greens = {
+                lane_id: float(ratio * usable / path.y)
+                for lane_id, ratio in evaluation.ratios.items()
+                if ratio > 0
+            }
+    return WebsterTiming(
         status="not_applicable" if problems else "applicable",
         problems=tuple(problems),
-        flow_ratios=flow_ratios,
-        critical_path=path,
+        cycle_s=None if cycle is None else float(cycle),
+        effective_green_s=greens,
+        critical_path=None if path is None else _public_path(path),
         parameter_set=parameters.parameter_set,
         provisional=parameters.provisional,
     )

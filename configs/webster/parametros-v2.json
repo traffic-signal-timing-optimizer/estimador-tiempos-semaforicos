@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "parameter_set": "webster-parametros-v1",
+  "parameter_set": "webster-parametros-v2",
   "status": "provisional",
   "approval": {
     "decision": "DEC08",
@@ -18,9 +18,8 @@
     "truck": 2.0,
     "bus": 2.0
   },
-  "lost_time_s": 24,
-  "lost_time_source": "suma de los tiempos fijos del caso: cuatro ámbares de 5 s (t2, t4, t6, t8) y un todo rojo de 4 s (t9)",
-  "cycle_bounds_s": [120, 240],
+  "lost_time_rule": "intergreens_outside_critical_path",
+  "lost_time_note": "L = suma de los tramos fijos (ámbares y todo rojo) que ningún carril del recorrido crítico usa en verde. Reemplaza el L fijo de 24 s de v1 (DEV15 F2): en t2 y t6 un sentido sigue en verde y ese tiempo no se pierde para su recorrido.",
   "applicability": {
     "y_must_be_below": 1.0,
     "cycle_must_be_inside_bounds": true,

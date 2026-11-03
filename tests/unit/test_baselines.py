@@ -7,6 +7,7 @@ cifras esperadas del camino crítico están calculadas a mano en cada prueba.
 import json
 import stat
 from collections.abc import Mapping
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
@@ -21,17 +22,20 @@ from semaforo.referencias.baselines import (
     ADAPTATION,
     WebsterInputs,
     WebsterParameters,
+    WebsterTiming,
     crossing_structure,
     read_current_plan,
     read_parameters,
+    webster_cycle,
     webster_inputs,
+    webster_timing,
 )
 from semaforo.referencias.errors import ReferenciasError
 from semaforo.simulacion.compiler import SLOTS_FILE
 from semaforo.trazabilidad.store import TrazabilidadError
 
 ROOT = Path(__file__).resolve().parents[2]
-CONFIG = ROOT / "configs" / "webster" / "parametros-v1.json"
+CONFIG = ROOT / "configs" / "webster" / "parametros-v2.json"
 TLS = "T"
 
 
@@ -51,15 +55,28 @@ def parameters(**changes: Any) -> WebsterParameters:  # noqa: ANN401 - campos de
     return WebsterParameters.model_validate(parameters_data(**changes))
 
 
-def case_from(states: dict[str, str], movements: list[tuple[str, list[str], list[int]]]) -> Case:
-    """Caso de un semáforo ``T`` con los tramos y movimientos dados: (id, carriles, enlaces)."""
+def case_from(
+    states: dict[str, str],
+    movements: list[tuple[str, list[str], list[int]]],
+    *,
+    fixed: Mapping[str, float] | None = None,
+    cycle: tuple[float, float] = (40, 100),
+) -> Case:
+    """Caso de un semáforo ``T`` con los tramos y movimientos dados: (id, carriles, enlaces).
+
+    ``fixed`` da la duración de los tramos fijos; por defecto son fijos, de 1 s, los tramos sin
+    ningún verde (como un ámbar o un todo rojo).
+    """
+    if fixed is None:
+        fixed = {slot_id: 1.0 for slot_id, state in states.items() if not set(state) & set("Gg")}
     data = json_of("case.json")
+    data["cycle_s"] = {"min": cycle[0], "max": cycle[1]}
     data["slots"] = [
         {
             "id": slot_id,
-            "kind": "variable",
-            "min_s": 1,
-            "max_s": 100,
+            "kind": "fixed" if slot_id in fixed else "variable",
+            "min_s": fixed.get(slot_id, 1),
+            "max_s": fixed.get(slot_id, 100),
             "states": [{"tls_id": TLS, "state": state}],
         }
         for slot_id, state in states.items()
@@ -102,12 +119,19 @@ def request_with(
     return Request.model_validate(data)
 
 
-def inputs_of(case: Case, flows: Mapping[str, float]) -> WebsterInputs:
-    return webster_inputs(crossing_structure(case), case, request_with(case, flows), parameters())
+def inputs_of(case: Case, flows: Mapping[str, float], **changes: Any) -> WebsterInputs:  # noqa: ANN401
+    request = request_with(case, flows)
+    return webster_inputs(crossing_structure(case), case, request, parameters(**changes))
 
 
-# Forma del caso-001: Javier Prado este (E) solo en t1; Javier Prado oeste (O) en t1, t2 y t3, y su
-# giro (O3) solo en t3; Frutales sur (S) en t5; Frutales norte (N) en t5, t6 y t7.
+def timing_of(case: Case, flows: Mapping[str, float], **changes: Any) -> WebsterTiming:  # noqa: ANN401
+    request = request_with(case, flows)
+    return webster_timing(crossing_structure(case), case, request, parameters(**changes))
+
+
+# Forma del caso-001: Javier Prado este→oeste (E) solo en t1; Javier Prado oeste→este (O) en t1, t2
+# y t3, y su flecha (O3) solo en t3; Frutales norte→sur (S) en t5; Frutales sur→norte (N) en t5, t6
+# y t7. Fijos como en el caso: t2, t4, t6 y t8 de 5 s y t9 de 4 s.
 SHAPE = {
     "t1": "GGgrr",
     "t2": "yGgrr",
@@ -117,7 +141,15 @@ SHAPE = {
     "t6": "rrryG",
     "t7": "rrrrG",
     "t8": "rrrry",
+    "t9": "rrrrr",
 }
+SHAPE_FIXED = {"t2": 5.0, "t4": 5.0, "t6": 5.0, "t8": 5.0, "t9": 4.0}
+
+
+def shape_case(cycle: tuple[float, float] = (40, 100)) -> Case:
+    return case_from(SHAPE, SHAPE_MOVEMENTS, fixed=SHAPE_FIXED, cycle=cycle)
+
+
 SHAPE_MOVEMENTS = [
     ("E", ["E_0"], [0]),
     ("O", ["O_0"], [1]),
@@ -135,7 +167,8 @@ def test_the_committed_parameters_are_valid_and_provisional() -> None:
     assert committed.provisional
     assert committed.approval.especialista is None
     assert committed.adaptation == ADAPTATION
-    assert committed.lost_time_s >= 0
+    assert committed.lost_time_rule == "intergreens_outside_critical_path"
+    assert committed.parameter_set == "webster-parametros-v2"
     assert committed.case_id == "caso-001"
 
 
@@ -154,10 +187,15 @@ def test_parameters_are_read_for_their_case(tmp_path: Path) -> None:
     "changes",
     [
         {"saturation_flow_veh_h_lane": 0},
-        {"lost_time_s": -1},
+        {"lost_time_rule": "fixed_24_s"},
         {"vehicle_equivalence": {"car": -1.0}},
-        {"cycle_bounds_s": [240, 120]},
-        {"cycle_bounds_s": [120]},
+        {
+            "applicability": {
+                "y_must_be_below": 1.5,
+                "cycle_must_be_inside_bounds": True,
+                "clipping_allowed": False,
+            }
+        },
         {"status": "approved"},
         {
             "applicability": {
@@ -171,10 +209,9 @@ def test_parameters_are_read_for_their_case(tmp_path: Path) -> None:
     ],
     ids=[
         "saturacion-cero",
-        "perdida-negativa",
+        "otra-regla-de-perdida",
         "equivalencia-negativa",
-        "limites-al-reves",
-        "un-limite",
+        "limite-de-y-sobre-uno",
         "aprobado-sin-especialista",
         "con-recorte",
         "otra-adaptacion",
@@ -208,7 +245,7 @@ def test_the_demo_lanes_are_served_in_their_own_slot() -> None:
 
 
 def test_a_lane_is_served_across_consecutive_slots_including_fixed_ones() -> None:
-    structure = crossing_structure(case_from(SHAPE, SHAPE_MOVEMENTS))
+    structure = crossing_structure(shape_case())
     by_lane = {lane.lane_id: lane for lane in structure.lanes}
     assert by_lane["O_0"].protected == ("t1", "t2", "t3")
     assert by_lane["O_0"].span == (0, 2)
@@ -259,32 +296,54 @@ def test_a_slot_without_the_signal_of_a_movement_is_an_error() -> None:
 
 
 def test_the_critical_path_of_the_caso_001_shape() -> None:
-    # E 750, O 750, O3 190, S 100, N 260 veh/h; saturación 1800.
-    # Caminos posibles sin tramos compartidos: E+O3+N = 1200; O+N = 1010; E+O3+S = 1040; O+S = 850.
-    # Y = 1200/1800 = 2/3, con los carriles E_0, O_3 y N_1.
-    inputs = inputs_of(
-        case_from(SHAPE, SHAPE_MOVEMENTS), {"E": 750, "O": 750, "O3": 190, "S": 100, "N": 260}
-    )
+    # E 750, O 750, O3 190, S 100, N 260 veh/h; saturación 1800. Recorridos que cubren t1, t3, t5
+    # y t7 (S no sirve: t7 solo lo atiende N, que empieza en t5):
+    # - E+O3+N: Y = 1200/1800 = 2/3; pierde t2, t4, t8 y t9: L = 19; C0 = 33,5 / (1/3) = 100,5 s.
+    # - O+N:    Y = 1010/1800;       pierde t4, t8 y t9:     L = 14; C0 = 26 / (790/1800) = 59,2 s.
+    # Gana E+O3+N, el que pide más ciclo.
+    inputs = inputs_of(shape_case(), {"E": 750, "O": 750, "O3": 190, "S": 100, "N": 260})
     assert inputs.status == "applicable"
-    assert inputs.critical_path is not None
-    assert inputs.critical_path.y == pytest.approx(2 / 3)
-    assert inputs.critical_path.lane_ids == ("E_0", "O_3", "N_1")
+    path = inputs.critical_path
+    assert path is not None
+    assert path.y == pytest.approx(2 / 3)
+    assert path.lost_time_s == pytest.approx(19)
+    assert path.cycle_s == pytest.approx(100.5)
+    assert path.lane_ids == ("E_0", "O_3", "N_1")
+    assert path.lost_slot_ids == ("t2", "t4", "t8", "t9")
 
 
 def test_the_critical_path_changes_with_the_flows() -> None:
-    # Con E en 300: E+O3+N = 750 y O+N = 1010; gana O+N: Y = 1010/1800.
-    inputs = inputs_of(
-        case_from(SHAPE, SHAPE_MOVEMENTS), {"E": 300, "O": 750, "O3": 190, "S": 100, "N": 260}
+    # Con E en 300: E+O3+N da Y = 750/1800 y C0 = 33,5 / (1050/1800) = 57,4 s; O+N da
+    # Y = 1010/1800 y C0 = 26 / (790/1800) = 59,2 s. Gana O+N.
+    inputs = inputs_of(shape_case(), {"E": 300, "O": 750, "O3": 190, "S": 100, "N": 260})
+    path = inputs.critical_path
+    assert path is not None
+    assert path.y == pytest.approx(1010 / 1800)
+    assert path.lost_time_s == pytest.approx(14)
+    assert path.cycle_s == pytest.approx(26 / (790 / 1800))
+    assert path.lane_ids == ("O_0", "N_1")
+
+
+def test_the_path_that_asks_for_more_cycle_wins_even_with_less_y() -> None:
+    # A atiende v1, f (fijo, 10 s) y v2: Y = 0,5, L = 0, C0 = 5 / 0,5 = 10 s.
+    # B (v1) y C (v2) pierden f: Y = 0,25 + 0,2 = 0,45, L = 10, C0 = 20 / 0,55 = 36,4 s.
+    # Gana B+C aunque su Y es menor: con su pérdida exige un ciclo más largo.
+    case = case_from(
+        {"v1": "GGr", "f": "Gyr", "v2": "GrG"},
+        [("A", ["A_0"], [0]), ("B", ["B_0"], [1]), ("C", ["C_0"], [2])],
+        fixed={"f": 10.0},
+        cycle=(1, 240),
     )
-    assert inputs.critical_path is not None
-    assert inputs.critical_path.y == pytest.approx(1010 / 1800)
-    assert inputs.critical_path.lane_ids == ("O_0", "N_1")
+    path = inputs_of(case, {"A": 900, "B": 450, "C": 360}).critical_path
+    assert path is not None
+    assert path.lane_ids == ("B_0", "C_0")
+    assert path.cycle_s == pytest.approx(20 / 0.55)
 
 
 def test_a_green_shared_by_two_lanes_is_not_counted_twice() -> None:
     # Sumar el carril mayor de cada tramo contaría O en t1 y otra vez en t3: (750+750+260+260)/1800.
     flows = {"E": 750, "O": 750, "O3": 190, "S": 100, "N": 260}
-    inputs = inputs_of(case_from(SHAPE, SHAPE_MOVEMENTS), flows)
+    inputs = inputs_of(shape_case(), flows)
     assert inputs.critical_path is not None
     assert inputs.critical_path.y < (750 + 750 + 260 + 260) / 1800
 
@@ -322,8 +381,136 @@ def test_a_movement_on_two_lanes_splits_its_flow() -> None:
 def test_inputs_are_marked_with_their_parameters_and_adaptation() -> None:
     inputs = inputs_of(case_from({"a": "G", "b": "r"}, [("X", ["X_0"], [0])]), {"X": 100})
     assert inputs.provisional
-    assert inputs.parameter_set == "webster-parametros-v1"
+    assert inputs.parameter_set == "webster-parametros-v2"
     assert inputs.adaptation == ADAPTATION
+
+
+# --- ciclo y verdes de Webster (QA17, calculado a mano) ----------------------------------------
+
+
+def test_the_webster_formula() -> None:
+    # C0 = (1,5 * 10 + 5) / (1 - 0,5) = 40 s.
+    assert webster_cycle(Fraction(1, 2), Fraction(10)) == 40
+    assert webster_cycle(Fraction(0), Fraction(0)) == 5
+
+
+def test_two_phases_by_hand() -> None:
+    # Caso de demostración: N 720 y E 540 veh/h, saturación 1800: y = 0,4 y 0,3; Y = 0,7.
+    # Pierde los fijos s2, s3, s5 y s6: L = 3 + 1 + 3 + 1 = 8 s.
+    # C0 = (1,5 * 8 + 5) / 0,3 = 17 / 0,3 = 56,667 s. Verde efectivo C0 - L = 48,667 s:
+    # N = 48,667 * 0,4 / 0,7 = 27,810 s y E = 48,667 * 0,3 / 0,7 = 20,857 s.
+    case = parse_case(json_of("case.json"))
+    timing = webster_timing(
+        crossing_structure(case), case, request_with(case, {"N_S": 720, "E_W": 540}), parameters()
+    )
+    assert timing.status == "applicable"
+    assert timing.cycle_s == pytest.approx(17 / 0.3)
+    assert timing.effective_green_s == {
+        "demo_N_0": pytest.approx((17 / 0.3 - 8) * 4 / 7),
+        "demo_E_0": pytest.approx((17 / 0.3 - 8) * 3 / 7),
+    }
+
+
+def test_the_caso_001_shape_by_hand() -> None:
+    # Recorrido E+O3+N: Y = 2/3, L = 19, C0 = 100,5 s, verde efectivo 81,5 s.
+    # Cada carril recibe y * 81,5 / (2/3) = y * 122,25 s:
+    # E y O 750/1800 → 50,9375 s; O3 190/1800 → 12,904 s;
+    # N 260/1800 → 17,658 s; S 100/1800 → 6,792 s.
+    timing = timing_of(
+        shape_case(cycle=(60, 240)), {"E": 750, "O": 750, "O3": 190, "S": 100, "N": 260}
+    )
+    assert timing.status == "applicable"
+    assert timing.cycle_s == pytest.approx(100.5)
+    factor = 81.5 / (2 / 3)
+    assert timing.effective_green_s == {
+        "E_0": pytest.approx(750 / 1800 * factor),
+        "O_0": pytest.approx(750 / 1800 * factor),
+        "O_3": pytest.approx(190 / 1800 * factor),
+        "S_0": pytest.approx(100 / 1800 * factor),
+        "N_1": pytest.approx(260 / 1800 * factor),
+    }
+    critical = sum(timing.effective_green_s[lane] for lane in ("E_0", "O_3", "N_1"))
+    assert critical == pytest.approx(100.5 - 19)
+
+
+def test_a_cycle_outside_the_case_bounds_is_reported_and_not_clipped() -> None:
+    # La misma forma con los límites del caso real (120 a 240 s): C0 = 100,5 s queda fuera.
+    timing = timing_of(
+        shape_case(cycle=(120, 240)), {"E": 750, "O": 750, "O3": 190, "S": 100, "N": 260}
+    )
+    assert timing.status == "not_applicable"
+    assert [problem.code for problem in timing.problems] == ["cycle_out_of_bounds"]
+    assert timing.cycle_s == pytest.approx(100.5)
+    assert timing.effective_green_s == {}
+    assert "100.5" in timing.problems[0].message
+
+
+def test_a_cycle_above_the_case_maximum_is_not_applicable() -> None:
+    # Demostración (40 a 100 s): N 900 y E 720 dan Y = 0,5 + 0,4 = 0,9; C0 = 17 / 0,1 = 170 s.
+    case = parse_case(json_of("case.json"))
+    timing = webster_timing(
+        crossing_structure(case), case, request_with(case, {"N_S": 900, "E_W": 720}), parameters()
+    )
+    assert [problem.code for problem in timing.problems] == ["cycle_out_of_bounds"]
+    assert timing.cycle_s == pytest.approx(170)
+
+
+def test_an_oversaturated_crossing_has_no_webster_cycle() -> None:
+    # N 900 y E 900: Y = 0,5 + 0,5 = 1.
+    case = parse_case(json_of("case.json"))
+    timing = webster_timing(
+        crossing_structure(case), case, request_with(case, {"N_S": 900, "E_W": 900}), parameters()
+    )
+    assert timing.status == "not_applicable"
+    assert [problem.code for problem in timing.problems] == ["oversaturated"]
+    assert timing.cycle_s is None
+
+
+def test_the_saturation_limit_comes_from_the_parameters() -> None:
+    # Y = 0,7 con un límite de 0,6: no aplica.
+    case = parse_case(json_of("case.json"))
+    rules = {"y_must_be_below": 0.6, "cycle_must_be_inside_bounds": True, "clipping_allowed": False}
+    timing = webster_timing(
+        crossing_structure(case),
+        case,
+        request_with(case, {"N_S": 720, "E_W": 540}),
+        parameters(applicability=rules),
+    )
+    assert [problem.code for problem in timing.problems] == ["oversaturated"]
+
+
+def test_without_demand_there_is_no_webster_cycle() -> None:
+    case = parse_case(json_of("case.json"))
+    timing = webster_timing(
+        crossing_structure(case), case, request_with(case, {"N_S": 0, "E_W": 0}), parameters()
+    )
+    assert [problem.code for problem in timing.problems] == ["no_demand"]
+
+
+def test_a_variable_slot_that_nobody_uses_leaves_no_covering_path() -> None:
+    case = case_from({"a": "G", "b": "r"}, [("X", ["X_0"], [0])], fixed={})
+    timing = timing_of(case, {"X": 300})
+    assert [problem.code for problem in timing.problems] == ["no_covering_path"]
+    assert timing.critical_path is None
+
+
+def test_missing_data_also_stops_the_cycle() -> None:
+    case = case_from({"a": "GG", "b": "rr"}, [("X", ["X_0"], [0]), ("W", ["W_0"], [1])])
+    timing = webster_timing(
+        crossing_structure(case), case, request_with(case, {"X": 300}), parameters()
+    )
+    assert timing.status == "not_applicable"
+    assert [problem.code for problem in timing.problems] == ["missing_flow"]
+    assert timing.cycle_s is None
+
+
+def test_the_timing_carries_its_parameters() -> None:
+    timing = timing_of(
+        case_from({"a": "G", "b": "r"}, [("X", ["X_0"], [0])], cycle=(1, 240)), {"X": 900}
+    )
+    assert timing.provisional
+    assert timing.parameter_set == "webster-parametros-v2"
+    assert timing.adaptation == ADAPTATION
 
 
 # --- no aplicable ------------------------------------------------------------------------------
