@@ -6,7 +6,8 @@ mano. Las corridas reales están en ``tests/integration/test_search_sumo.py``.
 
 import json
 import stat
-from datetime import UTC, datetime
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -14,12 +15,18 @@ import pytest
 from pydantic import ValidationError
 
 from prepared_inputs import FIXTURES
-from search_tools import FINALIST_SEEDS, SEARCH_SEEDS, Search, search_in
+from search_tools import (
+    FINALIST_SEEDS,
+    SEARCH_SEEDS,
+    Search,
+    new_search,
+    outcome_for,
+    protocol,
+    reference_outcome,
+)
 from semaforo.app.integrity import verify_workspace
 from semaforo.dominio.errors import ErrorCode
-from semaforo.evaluacion.cohort import CohortDelay, DelaySummary
-from semaforo.evaluacion.metrics import QueueSummary, StopsSummary, ZoneMetrics
-from semaforo.evaluacion.run_metrics import RunMetrics
+from semaforo.dominio.feasibility import prepare
 from semaforo.referencias.errors import ReferenciasError
 from semaforo.referencias.evaluation import SearchOutcome, search_identity
 from semaforo.referencias.label import (
@@ -33,13 +40,7 @@ from semaforo.referencias.label import (
     publish_label,
     read_label,
 )
-from semaforo.referencias.selection import (
-    SeedOutcome,
-    failed_seed,
-    score_candidate,
-    seed_outcome,
-    select,
-)
+from semaforo.referencias.search import generate_candidates
 from semaforo.trazabilidad.hashing import sha256_bytes
 from semaforo.trazabilidad.store import TrazabilidadError
 
@@ -61,78 +62,6 @@ def without_documentation(node: Json) -> Json:
     if isinstance(node, list):
         return [without_documentation(item) for item in node]
     return node
-
-
-def metrics(seed: int, delay: float) -> RunMetrics:
-    total = DelaySummary.model_construct(status="complete", mean_delay_s=delay)
-    zone = ZoneMetrics.model_construct(
-        queue=QueueSummary.model_construct(status="complete", mean_vehicles=5.0),
-        stops=StopsSummary.model_construct(mean_stops=1.0),
-    )
-    return RunMetrics.model_construct(
-        run_id=f"run-{seed}",
-        sumo_seed=seed,
-        cohort=CohortDelay.model_construct(total=total),
-        zone=zone,
-        teleports_total=0,
-        collisions=0,
-    )
-
-
-def clean_outcomes(seeds: list[int]) -> list[SeedOutcome]:
-    return [seed_outcome(seed, metrics(seed, 100.0)) for seed in seeds]
-
-
-def broken_outcomes(seeds: list[int]) -> list[SeedOutcome]:
-    return [
-        failed_seed(seed, None, "run_failed", "run_failed", "la corrida falló") for seed in seeds
-    ]
-
-
-def outcome_for(search: Search, *, search_clean: bool, finalists_clean: bool) -> SearchOutcome:
-    candidate = search.candidates.candidates[0]
-    vector = tuple(candidate.ticks.values())
-    search_score = score_candidate(
-        candidate.candidate_id,
-        vector,
-        "search",
-        SEARCH_SEEDS,
-        clean_outcomes(SEARCH_SEEDS) if search_clean else broken_outcomes(SEARCH_SEEDS),
-    )
-    finalist_score = score_candidate(
-        candidate.candidate_id,
-        vector,
-        "finalists",
-        FINALIST_SEEDS,
-        clean_outcomes(FINALIST_SEEDS) if finalists_clean else broken_outcomes(FINALIST_SEEDS),
-    )
-    protocol = search.setup.protocol
-    finalist_scores = (finalist_score,) if search_clean else ()
-    selection = select(
-        [search_score],
-        list(finalist_scores),
-        protocol.finalist_count,
-        protocol.tie_epsilon_s,
-    )
-    return SearchOutcome(
-        identity=search_identity(search.setup, search.candidates),
-        candidates=search.candidates,
-        search_scores=(search_score,),
-        finalist_scores=finalist_scores,
-        selection=selection,
-        simulation_count=len(SEARCH_SEEDS) + len(FINALIST_SEEDS),
-        interrupted=False,
-    )
-
-
-def reference_outcome(search: Search) -> SearchOutcome:
-    return outcome_for(search, search_clean=True, finalists_clean=True)
-
-
-def new_search(tmp_path: Path) -> Search:
-    root = tmp_path / "busqueda"
-    root.mkdir()
-    return search_in(root)
 
 
 def tamper(path: Path, data: dict[str, Any]) -> None:
@@ -270,6 +199,14 @@ def test_a_search_without_eligible_candidate_is_a_no_reference_label(tmp_path: P
     assert label.reason == "no_eligible_candidate"
 
 
+def test_a_search_without_a_selection_is_not_published(tmp_path: Path) -> None:
+    search = new_search(tmp_path)
+    outcome = replace(reference_outcome(search), selection=None)
+    with pytest.raises(ReferenciasError) as error:
+        publish_label(tmp_path / "datos", search.setup, outcome, now=MOMENT)
+    assert error.value.code == ErrorCode.INPUT_SCHEMA
+
+
 def test_an_unfinished_search_is_not_published(tmp_path: Path) -> None:
     search = new_search(tmp_path)
     unfinished = SearchOutcome(
@@ -313,6 +250,112 @@ def test_the_same_label_cannot_be_published_twice_in_the_same_instant(tmp_path: 
     assert error.value.code == ErrorCode.RUN_EXISTS
 
 
+def test_the_folder_is_named_in_utc_even_from_lima_time(tmp_path: Path) -> None:
+    search = new_search(tmp_path)
+    lima = datetime(2026, 11, 3, 7, 0, 0, tzinfo=timezone(timedelta(hours=-5)))
+    folder = publish_label(tmp_path / "datos", search.setup, reference_outcome(search), now=lima)
+    assert folder.name.startswith("20261103T120000Z_")
+    assert read_label(folder).manifest.created_at == MOMENT
+
+
+def test_the_winner_need_not_be_the_first_candidate(tmp_path: Path) -> None:
+    search = new_search(tmp_path)
+    outcome = outcome_for(search, search_clean=True, finalists_clean=True, index=2)
+    plan = read_label(
+        publish_label(tmp_path / "datos", search.setup, outcome, now=MOMENT)
+    ).label.plan
+    third = dict(search.candidates.candidates[2].durations_s)
+    assert third != dict(search.candidates.candidates[0].durations_s)
+    assert plan is not None
+    assert plan.slot_durations_s == pytest.approx(third)
+
+
+def test_a_winner_that_is_not_a_candidate_is_refused(tmp_path: Path) -> None:
+    search = new_search(tmp_path)
+    outcome = outcome_for(search, search_clean=True, finalists_clean=True, candidate_id="cand-x")
+    with pytest.raises(ReferenciasError) as error:
+        publish_label(tmp_path / "datos", search.setup, outcome, now=MOMENT)
+    assert error.value.code == ErrorCode.OUTPUT_INVALID
+    assert not (tmp_path / "datos").exists()
+
+
+def test_a_search_marked_interrupted_is_not_published_even_with_a_selection(
+    tmp_path: Path,
+) -> None:
+    search = new_search(tmp_path)
+    outcome = replace(reference_outcome(search), interrupted=True)
+    with pytest.raises(ReferenciasError) as error:
+        publish_label(tmp_path / "datos", search.setup, outcome, now=MOMENT)
+    assert error.value.code == ErrorCode.INPUT_SCHEMA
+
+
+def test_only_a_main_experiment_label_is_evaluated(tmp_path: Path) -> None:
+    search = new_search(tmp_path)
+    main = search.setup.protocol.model_copy(update={"purpose": "main_experiment"})
+    other = Search(replace(search.setup, protocol=main), search.candidates, search.journal)
+    folder = publish_label(tmp_path / "datos", other.setup, reference_outcome(other), now=MOMENT)
+    assert read_label(folder).label.evidence_status == "evaluated"
+
+
+def test_the_identifiers_come_from_the_search_not_from_the_clock(tmp_path: Path) -> None:
+    labels: list[Label] = []
+    for name, moment in (("a", MOMENT), ("b", MOMENT + timedelta(hours=1))):
+        (tmp_path / name).mkdir()
+        search = new_search(tmp_path / name)
+        folder = publish_label(tmp_path / "datos", search.setup, reference_outcome(search), moment)
+        labels.append(read_label(folder).label)
+    first, second = labels
+    assert first.label_id == second.label_id
+    assert first.search_run_id == second.search_run_id
+    assert first.label_id.startswith("label-")
+    assert first.search_run_id.startswith("search-")
+    assert first.label_id.removeprefix("label-") == first.search_run_id.removeprefix("search-")
+
+
+def test_the_manifest_records_the_case_and_its_network(tmp_path: Path) -> None:
+    search = new_search(tmp_path)
+    folder = publish_label(tmp_path / "datos", search.setup, reference_outcome(search), now=MOMENT)
+    manifest = read_label(folder).manifest
+    case = search.setup.case
+    assert case.network is not None
+    assert manifest.network_sha256 == case.network.sha256
+    assert manifest.case_id == case.case_id
+
+
+def test_the_coverage_tells_the_budget_apart_from_what_was_used(tmp_path: Path) -> None:
+    search = new_search(tmp_path)
+    rules = protocol(search_budget=1000)
+    candidates = generate_candidates(
+        prepare(search.setup.case),
+        scenario_id=search.setup.scenario.scenario_id,
+        budget=rules.search_budget,
+        attempt_limit=rules.sampling_attempt_limit,
+        seed=rules.seeds.search[0],
+    )
+    big = Search(replace(search.setup, protocol=rules), candidates, search.journal)
+    folder = publish_label(tmp_path / "datos", big.setup, reference_outcome(big), now=MOMENT)
+    coverage = json.loads((folder / COVERAGE_FILE).read_text(encoding="utf-8"))
+    assert coverage["budget"] == 1000
+    assert coverage["budget_used"] == candidates.budget_used
+    assert candidates.budget_used < 1000
+
+
+def test_the_coverage_of_a_no_reference_says_why(tmp_path: Path) -> None:
+    search = new_search(tmp_path)
+    outcome = outcome_for(search, search_clean=True, finalists_clean=False)
+    folder = publish_label(tmp_path / "datos", search.setup, outcome, now=MOMENT)
+    coverage = json.loads((folder / COVERAGE_FILE).read_text(encoding="utf-8"))
+    assert coverage["search"] == {"evaluated": 1, "eligible": 1, "ineligible": {}}
+    assert coverage["finalists"] == {
+        "evaluated": 1,
+        "eligible": 0,
+        "ineligible": {"run_failed": 1},
+    }
+    assert coverage["simulations"] == len(SEARCH_SEEDS) + len(FINALIST_SEEDS)
+    assert coverage["budget"] == search.candidates.budget
+    assert coverage["budget_used"] == search.candidates.budget_used
+
+
 # --- verificar ----------------------------------------------------------------------------------
 
 
@@ -349,6 +392,45 @@ def test_a_label_that_contradicts_its_manifest_is_refused(tmp_path: Path) -> Non
     manifest["files"][LABEL_FILE] = sha256_bytes(new_bytes)
     (folder / LABEL_FILE).chmod(stat.S_IWRITE)
     (folder / LABEL_FILE).write_bytes(new_bytes)
+    tamper(manifest_path, manifest)
+    with pytest.raises(TrazabilidadError) as error:
+        read_label(folder)
+    assert error.value.code == ErrorCode.INPUT_SCHEMA
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("label_id", "label-otra"),
+        ("scenario_id", "OTRO"),
+        ("case_version", "9.9.9"),
+        ("status", "no_reference"),
+        ("search_run_id", "search-otra"),
+        ("protocol_id", "OTRO"),
+        ("evidence_status", "evaluated"),
+    ],
+)
+def test_a_manifest_that_contradicts_its_label_is_refused(
+    tmp_path: Path, field: str, value: str
+) -> None:
+    folder = published(tmp_path)
+    manifest_path = folder / MANIFEST_FILE
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest[field] = value
+    tamper(manifest_path, manifest)
+    with pytest.raises(TrazabilidadError) as error:
+        read_label(folder)
+    assert error.value.code == ErrorCode.INPUT_SCHEMA
+
+
+def test_a_manifest_that_lists_only_the_label_is_refused(tmp_path: Path) -> None:
+    folder = published(tmp_path)
+    for name in (TRACE_FILE, COVERAGE_FILE):
+        (folder / name).chmod(stat.S_IWRITE)
+        (folder / name).unlink()
+    manifest_path = folder / MANIFEST_FILE
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"] = {LABEL_FILE: manifest["files"][LABEL_FILE]}
     tamper(manifest_path, manifest)
     with pytest.raises(TrazabilidadError) as error:
         read_label(folder)

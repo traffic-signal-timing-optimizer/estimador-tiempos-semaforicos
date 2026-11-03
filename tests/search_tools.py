@@ -14,8 +14,23 @@ from prepared_inputs import DURATIONS, FIXTURES, request_for
 from semaforo.caso.network_map import build_network_map
 from semaforo.dominio.feasibility import prepare
 from semaforo.dominio.protocol import Protocol, parse_protocol
-from semaforo.referencias.evaluation import SearchOutcome, SearchSetup, run_search
+from semaforo.evaluacion.cohort import CohortDelay, DelaySummary
+from semaforo.evaluacion.metrics import QueueSummary, StopsSummary, ZoneMetrics
+from semaforo.evaluacion.run_metrics import RunMetrics
+from semaforo.referencias.evaluation import (
+    SearchOutcome,
+    SearchSetup,
+    run_search,
+    search_identity,
+)
 from semaforo.referencias.search import CandidateSet, generate_candidates
+from semaforo.referencias.selection import (
+    SeedOutcome,
+    failed_seed,
+    score_candidate,
+    seed_outcome,
+    select,
+)
 
 SEARCH_SEEDS = [101, 102]
 FINALIST_SEEDS = [201, 202]
@@ -83,3 +98,86 @@ def run_folders(search: Search) -> int:
 
 def journal_lines(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+# --- búsquedas terminadas sin SUMO (cifras de las corridas armadas a mano) ---------------------
+
+
+def new_search(tmp_path: Path) -> Search:
+    root = tmp_path / "busqueda"
+    root.mkdir()
+    return search_in(root)
+
+
+def clean_metrics(seed: int, delay: float) -> RunMetrics:
+    total = DelaySummary.model_construct(status="complete", mean_delay_s=delay)
+    zone = ZoneMetrics.model_construct(
+        queue=QueueSummary.model_construct(status="complete", mean_vehicles=5.0),
+        stops=StopsSummary.model_construct(mean_stops=1.0),
+    )
+    return RunMetrics.model_construct(
+        run_id=f"run-{seed}",
+        sumo_seed=seed,
+        cohort=CohortDelay.model_construct(total=total),
+        zone=zone,
+        teleports_total=0,
+        collisions=0,
+    )
+
+
+def clean_outcomes(seeds: list[int]) -> list[SeedOutcome]:
+    return [seed_outcome(seed, clean_metrics(seed, 100.0)) for seed in seeds]
+
+
+def broken_outcomes(seeds: list[int]) -> list[SeedOutcome]:
+    return [
+        failed_seed(seed, None, "run_failed", "run_failed", "la corrida falló") for seed in seeds
+    ]
+
+
+def outcome_for(
+    search: Search,
+    *,
+    search_clean: bool,
+    finalists_clean: bool,
+    index: int = 0,
+    candidate_id: str | None = None,
+) -> SearchOutcome:
+    """Búsqueda terminada con un solo candidato evaluado (el ``index``): limpio o con todas sus
+    corridas fallidas. ``candidate_id`` lo reemplaza por uno que no está entre los candidatos.
+    """
+    candidate = search.candidates.candidates[index]
+    vector = tuple(candidate.ticks.values())
+    name = candidate.candidate_id if candidate_id is None else candidate_id
+    search_score = score_candidate(
+        name,
+        vector,
+        "search",
+        SEARCH_SEEDS,
+        clean_outcomes(SEARCH_SEEDS) if search_clean else broken_outcomes(SEARCH_SEEDS),
+    )
+    finalist_score = score_candidate(
+        name,
+        vector,
+        "finalists",
+        FINALIST_SEEDS,
+        clean_outcomes(FINALIST_SEEDS) if finalists_clean else broken_outcomes(FINALIST_SEEDS),
+    )
+    rules = search.setup.protocol
+    finalist_scores = (finalist_score,) if search_clean else ()
+    selection = select(
+        [search_score], list(finalist_scores), rules.finalist_count, rules.tie_epsilon_s
+    )
+    return SearchOutcome(
+        identity=search_identity(search.setup, search.candidates),
+        candidates=search.candidates,
+        search_scores=(search_score,),
+        finalist_scores=finalist_scores,
+        selection=selection,
+        simulation_count=len(SEARCH_SEEDS) + len(FINALIST_SEEDS),
+        interrupted=False,
+    )
+
+
+def reference_outcome(search: Search) -> SearchOutcome:
+    return outcome_for(search, search_clean=True, finalists_clean=True)

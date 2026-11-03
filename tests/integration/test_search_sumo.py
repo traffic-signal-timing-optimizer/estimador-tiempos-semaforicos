@@ -249,3 +249,8 @@ def test_f3_the_label_of_a_real_search_is_published_and_read_back(
     assert stored.label.simulation_count == outcome.simulation_count
     assert stored.label.plan is not None
     assert stored.label.plan.cycle_s > 0
+    root = search.setup.runs_root.parent
+    needles = {str(root), root.as_posix(), json.dumps(str(root))[1:-1]}
+    for path in folder.iterdir():
+        text = path.read_text(encoding="utf-8")
+        assert not any(needle in text for needle in needles), path.name
