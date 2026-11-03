@@ -8,6 +8,7 @@ import json
 import shutil
 import threading
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,7 @@ from search_tools import journal_lines as read_lines
 from semaforo.dominio.errors import ErrorCode
 from semaforo.referencias.errors import ReferenciasError
 from semaforo.referencias.evaluation import SearchOutcome, run_search
+from semaforo.referencias.label import publish_label, read_label
 from semaforo.simulacion.runner import RunLimits
 
 pytestmark = pytest.mark.sumo
@@ -233,3 +235,17 @@ def test_a_run_that_cannot_be_measured_is_recorded_as_such(tmp_path: Path) -> No
     seeds = [line["outcome"] for line in journal_lines(search) if line["type"] == "seed"]
     assert {seed["run_status"] for seed in seeds} == {"succeeded"}
     assert all("zona" in seed["message"] for seed in seeds)
+
+
+def test_f3_the_label_of_a_real_search_is_published_and_read_back(
+    finished: tuple[Search, SearchOutcome], tmp_path: Path
+) -> None:
+    search, outcome = finished
+    folder = publish_label(
+        tmp_path / "datos", search.setup, outcome, now=datetime(2026, 11, 3, tzinfo=UTC)
+    )
+    stored = read_label(folder)
+    assert stored.label.status == "reference"
+    assert stored.label.simulation_count == outcome.simulation_count
+    assert stored.label.plan is not None
+    assert stored.label.plan.cycle_s > 0

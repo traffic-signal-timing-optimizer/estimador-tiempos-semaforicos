@@ -29,6 +29,7 @@ from semaforo.datos.scenario_set import SCENARIO_SETS, read_scenario_set
 from semaforo.dominio.base_model import FrozenModel
 from semaforo.dominio.case import canonical_sha256
 from semaforo.dominio.errors import DomainError, ErrorCode
+from semaforo.referencias.label import LABELS, read_label
 from semaforo.simulacion.compiler import read_program
 from semaforo.simulacion.prepare import InputsManifest
 from semaforo.simulacion.run_inputs import verify_inputs
@@ -313,6 +314,7 @@ Family = Literal[
     "replicas",
     "scenarios",
     "splits",
+    "labels",
 ]
 ItemStatus = Literal["intact", "altered", "incomplete", "temporary", "unknown"]
 
@@ -408,7 +410,7 @@ def verify_workspace(
     Familias: corridas (``ejecuciones``), recepciones, copias de originales, programas derivados,
     carpetas de entradas, reportes de calidad (``derivados/calidad``), reportes de réplica
     (``derivados/replicas``), conjuntos de escenarios (``derivados/escenarios``) y particiones
-    (``derivados/particiones``). Los casos, los
+    (``derivados/particiones``) y etiquetas (``derivados/referencias``). Los casos, los
     escenarios escritos a mano y demás archivos editables no son carpetas publicadas y no se
     revisan aquí.
     """
@@ -438,6 +440,7 @@ def verify_workspace(
         ("replicas", workspace / REPLICAS, lambda f: _check(read_replica, f), False),
         ("scenarios", workspace / SCENARIO_SETS, lambda f: _check(read_scenario_set, f), True),
         ("splits", workspace / SPLITS, lambda f: _check(read_split, f), True),
+        ("labels", workspace / LABELS, lambda f: _check(read_label, f), True),
     ]
     items = [
         item
