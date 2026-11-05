@@ -22,8 +22,10 @@ Invoke-Step "contratos de referencia" { & "$bin\python.exe" -B tools\contracts\v
 
 Write-Output "==> código que .gitignore oculta a git"
 $caches = '(^|/)(__pycache__|\.hypothesis|\.pytest_cache|\.ruff_cache)(/|$)'
+# docs/presentaciones: guiones personales para asesores; se ignoran a propósito y no son código.
+$personal = '^docs/presentaciones/'
 $hidden = @(git ls-files --others --ignored --exclude-standard -- src tests schemas tools scripts docs |
-    Where-Object { $_ -notmatch $caches -and $_ -ne "tools/sumo/vigilar_sumo_baseline.json" })
+    Where-Object { $_ -notmatch $caches -and $_ -notmatch $personal -and $_ -ne "tools/sumo/vigilar_sumo_baseline.json" })
 if ($hidden.Count -gt 0) {
     throw "Archivos de código que .gitignore oculta a git: $($hidden -join ', ')"
 }
