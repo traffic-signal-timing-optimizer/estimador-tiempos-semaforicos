@@ -2,6 +2,8 @@ Escrito para: el Product Owner (qué plan da Webster en Frutales) y el equipo t�
 
 # DEV15 F3: los verdes de Webster como plan de tramos
 
+> **Enmienda del 2026-11-04 (auditoría A05).** Las direcciones de Frutales estaban invertidas en este documento. En el caso, la entrada del sur (`frutales_sur`, de sur a norte) solo tiene verde en t5, y la del norte (`frutales_norte`, de norte a sur) lo tiene en t5, t6 y t7. Se corrigió el texto. Las cifras no cambian: el cálculo usa los identificadores de carril.
+
 - **Fecha:** 2026-11-03
 - **Plan y decisiones:** `2026-11-03-plan-dev15.md`, actas de F0 a F2 de DEV15
 - **Historias:** HU08 y HU12. QA17, parte de la traducción.
@@ -17,8 +19,8 @@ Después el plan se revisa con las mismas reglas del caso que usan la búsqueda 
 
 1. **Tramos fijos** (ámbares y todo rojo): quedan como están.
 2. **Carril del recorrido crítico con un solo tramo variable**, como Javier Prado este→oeste en t1: ese tramo recibe el verde de Webster del carril, menos los fijos que tenga dentro.
-3. **Carril del recorrido crítico con varios tramos variables**, como Frutales sur→norte en t5, t6 (fijo) y t7:
-   - cada tramo parte de su mínimo, o de lo que pida un carril que se atiende solo dentro de él (Frutales norte→sur, que solo tiene verde en t5);
+3. **Carril del recorrido crítico con varios tramos variables**, como Frutales norte→sur en t5, t6 (fijo) y t7:
+   - cada tramo parte de su mínimo, o de lo que pida un carril que se atiende solo dentro de él (Frutales sur→norte, que solo tiene verde en t5);
    - lo que sobra va al tramo que atienden menos carriles (t7). Si empatan, va al último.
 4. **Carriles fuera del recorrido crítico**, como Javier Prado oeste→este en t1, t2 y t3: se comprueba que el plan les dé el verde que piden. Si no se lo da, no aplica.
 5. **Redondeo:** cada tramo variable se lleva al tick de 1 s más cercano (la mitad, hacia arriba). El ciclo del plan puede diferir en algunos décimos del ciclo de Webster; se informan los dos.
@@ -49,7 +51,7 @@ El sobrante de un carril crítico va al tramo que atienden menos carriles. No se
 
 - Con la saturación elegida, Webster sigue fuera para Frutales (ya lo dijo F2).
 - Con 1 500, sí da un plan válido, y se parece al vigente en dónde pone el tiempo: mucho verde para Javier Prado (t1 de 108 s frente a los 82 s vigentes) y Frutales cerca de sus mínimos.
-- En t5 quedan 25 s, el mínimo del tramo: Webster pedía menos para Frutales norte→sur. El sobrante de Frutales sur→norte fue a t7, como dice la regla.
+- En t5 quedan 25 s, el mínimo del tramo: Webster pedía menos para Frutales sur→norte. El sobrante de Frutales norte→sur fue a t7, como dice la regla.
 - No se compara con medidas de SUMO: eso es F5 (control) y DEV20 (comparación).
 
 ## Casos calculados a mano

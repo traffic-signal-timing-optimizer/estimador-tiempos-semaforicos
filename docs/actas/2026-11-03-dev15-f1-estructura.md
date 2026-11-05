@@ -2,6 +2,8 @@ Escrito para: el Product Owner (qué se hizo y qué cambió) y el equipo técnic
 
 # DEV15 F1: plan vigente, estructura del cruce y regla de conteo de Webster
 
+> **Enmienda del 2026-11-04 (auditoría A05).** Las direcciones de Frutales estaban invertidas en este documento. En el caso, la entrada del sur (`frutales_sur`, de sur a norte) solo tiene verde en t5, y la del norte (`frutales_norte`, de norte a sur) lo tiene en t5, t6 y t7. Se corrigió el texto. Las cifras no cambian: el cálculo usa los identificadores de carril.
+
 - **Fecha:** 2026-11-03
 - **Plan y decisiones:** `2026-11-03-plan-dev15.md` y `2026-11-03-dev15-f0-decisiones.md`
 - **Historias:** HU08 y HU12. QA17, primera parte.
@@ -38,18 +40,18 @@ Todo esto lo debe revisar el especialista (DEC08).
 
 ## Corrección de lo dicho en F0
 
-F0 decía que Y ≈ 1,12 y que Webster probablemente no aplicaba. **No es así.** Aquella suma contaba dos veces los carriles de Javier Prado oeste→este (en t1 y en t3) y los de Frutales sur→norte (en t5 y en t7). Con la regla de conteo, para ESC-SINT-001:
+F0 decía que Y ≈ 1,12 y que Webster probablemente no aplicaba. **No es así.** Aquella suma contaba dos veces los carriles de Javier Prado oeste→este (en t1 y en t3) y los de Frutales norte→sur (en t5 y en t7). Con la regla de conteo, para ESC-SINT-001:
 
 | Saturación (veh/h por carril) | Y | Camino crítico |
 |---|---|---|
-| 1 500 | 0,823 | JP este→oeste carril 0 (t1) + JP oeste→este carril 3, la flecha (t3) + Frutales sur→norte carril 1 (t5–t7) |
+| 1 500 | 0,823 | JP este→oeste carril 0 (t1) + JP oeste→este carril 3, la flecha (t3) + Frutales norte→sur carril 1 (t5–t7) |
 | **1 800** (D2) | **0,686** | el mismo |
 | 1 900 | 0,650 | el mismo |
 
 Y queda por debajo de 1 en los tres casos, así que **Webster sigue en juego**. Ahora la aplicabilidad depende del ciclo, que se calcula en F2, y en especial del **tiempo perdido**. Con Y = 0,686:
 
 - Con L = 24 s (D4), el ciclo de Webster sería unos **131 s**, dentro de 120 a 240 s: aplicable.
-- Si el tiempo perdido se cuenta según el camino crítico, L = 19 s. En t6 Frutales sur→norte sigue en verde, así que ese tramo no se pierde para ese camino. El ciclo bajaría a unos **107 s**, fuera del rango: no aplicable.
+- Si el tiempo perdido se cuenta según el camino crítico, L = 19 s. En t6 Frutales norte→sur sigue en verde, así que ese tramo no se pierde para ese camino. El ciclo bajaría a unos **107 s**, fuera del rango: no aplicable.
 
 Son cifras de anticipo para dimensionar F2; no son resultados. **D4 se revisa en F2.** Esto confirma por qué la documentación pide que el especialista valide las pérdidas.
 

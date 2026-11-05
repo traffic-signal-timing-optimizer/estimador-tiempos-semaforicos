@@ -2,6 +2,8 @@ Escrito para: el Product Owner (qué sale de Webster en Frutales) y el equipo t�
 
 # DEV15 F2: núcleo de Webster (ciclo y verdes)
 
+> **Enmienda del 2026-11-04 (auditoría A05).** Las direcciones de Frutales estaban invertidas en este documento. En el caso, la entrada del sur (`frutales_sur`, de sur a norte) solo tiene verde en t5, y la del norte (`frutales_norte`, de norte a sur) lo tiene en t5, t6 y t7. Se corrigió el texto. Las cifras no cambian: el cálculo usa los identificadores de carril.
+
 - **Fecha:** 2026-11-03
 - **Plan y decisiones:** `2026-11-03-plan-dev15.md`, `2026-11-03-dev15-f0-decisiones.md` y `2026-11-03-dev15-f1-estructura.md`
 - **Historias:** HU08 y HU12. QA17 (cálculo a mano y no aplicables).
@@ -30,7 +32,7 @@ Todavía no convierte esos verdes en un plan de tramos t1 a t9: eso es F3.
 
 **F2-2. El tiempo perdido sale del recorrido, no es fijo (revisa D4).**
 - L es la suma de los tramos fijos (ámbares y todo rojo) que ningún carril del recorrido usa en verde.
-- En Frutales, t2 y t6 son ámbar para un sentido, pero el otro sigue en verde. En el recorrido crítico, t6 es verde para Frutales sur→norte, así que no se pierde.
+- En Frutales, t2 y t6 son ámbar para un sentido, pero el otro sigue en verde. En el recorrido crítico, t6 es verde para Frutales norte→sur, así que no se pierde.
 - Resultado: **L = 19 s** (t2, t4, t8 y t9), y no los 24 s fijos de F0.
 - Contar t6 como perdido sería contar como perdido un verde que se usa.
 - Lo debe confirmar el especialista.
@@ -57,7 +59,7 @@ El resto queda igual: 1 800 veh/h por carril, las equivalencias, el plan vigente
 En los tres casos manda el mismo recorrido crítico:
 - Javier Prado este→oeste, carril 0 (t1);
 - Javier Prado oeste→este, carril 3, la flecha (t3);
-- Frutales sur→norte, carril 1 (t5 a t7).
+- Frutales norte→sur, carril 1 (t5 a t7).
 
 **Lectura:**
 

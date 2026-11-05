@@ -2,6 +2,8 @@ Escrito para: el Product Owner (qué se decidió y qué cambió) y el equipo té
 
 # DEV15 F0: decisiones de los comparadores
 
+> **Enmienda del 2026-11-04 (auditoría A05).** Las direcciones de Frutales estaban invertidas en este documento. En el caso, la entrada del sur (`frutales_sur`, de sur a norte) solo tiene verde en t5, y la del norte (`frutales_norte`, de norte a sur) lo tiene en t5, t6 y t7. Se corrigió el texto. Las cifras no cambian: el cálculo usa los identificadores de carril.
+
 - **Fecha:** 2026-11-03
 - **Plan:** `docs/actas/2026-11-03-plan-dev15.md`
 - **Delegación:** el Product Owner pidió que las decisiones D1 a D8 las tome el equipo técnico, y respondió dos preguntas (abajo).
@@ -24,7 +26,7 @@ Lo recalculé con el flujo del carril más cargado en cada tramo variable del es
 | t1 (Javier Prado, este→oeste y oeste→este recto) | 750 | 0,417 |
 | t3 (Javier Prado, oeste→este) | 750 | 0,417 |
 | t5 (Frutales, los dos sentidos) | 260 | 0,144 |
-| t7 (Frutales, sur→norte) | 260 | 0,144 |
+| t7 (Frutales, norte→sur) | 260 | 0,144 |
 | **Suma** | | **Y ≈ 1,12** |
 
 **Lectura:** Y está por encima de 1. Webster no es aplicable para este escenario con esta saturación. Hay un problema de conteo: los carriles de Javier Prado aparecen en t1 y en t3, así que se cuentan dos veces. Si cada acceso se cuenta una sola vez, Y ≈ 0,98. Aun así queda al límite. **En ambas cuentas, Webster sale no aplicable o en el borde.**
