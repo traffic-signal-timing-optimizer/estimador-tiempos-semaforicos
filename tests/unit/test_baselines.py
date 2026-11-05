@@ -13,11 +13,11 @@ from typing import Any
 
 import pytest
 
+from baselines_tools import CONFIG, parameters, parameters_data, request_with
 from prepared_inputs import DURATIONS, json_of, request_for
 from semaforo.dominio.case import Case, parse_case
 from semaforo.dominio.errors import ErrorCode
 from semaforo.dominio.feasibility import prepare
-from semaforo.dominio.scenario import Request
 from semaforo.referencias.baselines import (
     ADAPTATION,
     WebsterInputs,
@@ -36,25 +36,7 @@ from semaforo.referencias.errors import ReferenciasError
 from semaforo.simulacion.compiler import SLOTS_FILE
 from semaforo.trazabilidad.store import TrazabilidadError
 
-ROOT = Path(__file__).resolve().parents[2]
-CONFIG = ROOT / "configs" / "webster" / "parametros-v2.json"
 TLS = "T"
-
-
-def parameters_data(**changes: Any) -> dict[str, Any]:  # noqa: ANN401 - campos del archivo
-    data: dict[str, Any] = json.loads(CONFIG.read_text(encoding="utf-8"))
-    data.update(
-        case_id="SYNTHETIC_DEMO",
-        case_version="1.0.0",
-        vehicle_equivalence={"car": 1.0, "bus": 2.0},
-    )
-    data["current_plan"] = {**data["current_plan"], "cycle_s": sum(DURATIONS.values())}
-    data.update(changes)
-    return data
-
-
-def parameters(**changes: Any) -> WebsterParameters:  # noqa: ANN401 - campos del archivo
-    return WebsterParameters.model_validate(parameters_data(**changes))
 
 
 def case_from(
@@ -110,20 +92,6 @@ def case_from(
     return parse_case(data)
 
 
-def request_with(
-    case: Case, flows: Mapping[str, float], composition: dict[str, float] | None = None
-) -> Request:
-    """Solicitud con esos flujos; por defecto, todos autos."""
-    data = json_of("request.json")
-    data.update(case_id=case.case_id, case_version=case.case_version)
-    mix = {"car": 1.0, "bus": 0.0} if composition is None else composition
-    data["demand"] = [
-        {"movement_id": movement_id, "flow_vph": flow, "composition": mix if flow > 0 else None}
-        for movement_id, flow in flows.items()
-    ]
-    return Request.model_validate(data)
-
-
 def inputs_of(case: Case, flows: Mapping[str, float], **changes: Any) -> WebsterInputs:  # noqa: ANN401
     request = request_with(case, flows)
     return webster_inputs(crossing_structure(case), case, request, parameters(**changes))
@@ -135,8 +103,8 @@ def timing_of(case: Case, flows: Mapping[str, float], **changes: Any) -> Webster
 
 
 # Forma del caso-001: Javier Prado este→oeste (E) solo en t1; Javier Prado oeste→este (O) en t1, t2
-# y t3, y su flecha (O3) solo en t3; Frutales norte→sur (S) en t5; Frutales sur→norte (N) en t5, t6
-# y t7. Fijos como en el caso: t2, t4, t6 y t8 de 5 s y t9 de 4 s.
+# y t3, y su flecha (O3) solo en t3; Frutales sur→norte (S, entrada sur) en t5; Frutales norte→sur
+# (N, entrada norte) en t5, t6 y t7. Fijos como en el caso: t2, t4, t6 y t8 de 5 s y t9 de 4 s.
 SHAPE = {
     "t1": "GGgrr",
     "t2": "yGgrr",
@@ -634,6 +602,53 @@ def test_a_critical_lane_with_only_fixed_slots_is_not_applicable() -> None:
     )
     plan = plan_of(case, {"A": 180, "B": 900})
     assert [(p.code, p.subject) for p in plan.problems] == [("path_without_variable_slot", "B_0")]
+
+
+def test_an_access_without_flow_gets_its_minimum_and_is_not_an_error() -> None:
+    # N 1200 y E 0: Y = 2/3, L = 8, C0 = 17 / (1/3) = 51 s, verde efectivo 43 s para N.
+    # E no pide verde: su tramo s4 queda en su mínimo de 10 s. El ciclo del plan, 43 + 10 + 8 =
+    # 61 s, pasa el de Webster y está dentro de los límites del caso (40 a 100 s).
+    case = parse_case(json_of("case.json"))
+    plan = plan_of(case, {"N_S": 1200, "E_W": 0})
+    assert plan.status == "applicable"
+    assert plan.durations_s == {"s1": 43, "s2": 3, "s3": 1, "s4": 10, "s5": 3, "s6": 1}
+    assert plan.cycle_s == 61
+    assert plan.webster_cycle_s == pytest.approx(51)
+    mirror = plan_of(case, {"N_S": 0, "E_W": 1200})
+    assert mirror.durations_s == {"s1": 10, "s2": 3, "s3": 1, "s4": 43, "s5": 3, "s6": 1}
+
+
+def test_a_lane_without_flow_on_the_critical_path_keeps_its_slot_at_the_minimum() -> None:
+    # Forma del caso-001 con la flecha (O3) en cero: el recorrido E+O3+N sigue pidiendo más ciclo
+    # (Y = 1010/1800, L = 19, C0 = 33,5 / (790/1800) = 76,33 s). Verde efectivo 57,33 s; factor
+    # 57,33 / Y = 102,2. E 750 → 42,6 → 43; el tramo t3 de O3 queda en su mínimo (1 s);
+    # S 100 → 5,7 (6 s, en t5); N 260 → 14,8 menos 5 s fijos de t6 = 9,8 para t5 y t7:
+    # t5 = 5,7 y t7 = 9,8 - 5,7 = 4,1 → 4. Ciclo: 43 + 1 + 6 + 4 + 24 = 78 s.
+    flows = {"E": 750, "O": 750, "O3": 0, "S": 100, "N": 260}
+    plan = plan_of(shape_case(cycle=(60, 240)), flows)
+    assert plan.status == "applicable"
+    assert plan.critical_path is not None
+    assert plan.critical_path.lane_ids == ("E_0", "O_3", "N_1")
+    assert plan.durations_s == {
+        "t1": 43,
+        "t2": 5,
+        "t3": 1,
+        "t4": 5,
+        "t5": 6,
+        "t6": 5,
+        "t7": 4,
+        "t8": 5,
+        "t9": 4,
+    }
+    assert plan.cycle_s == 78
+    assert plan.webster_cycle_s == pytest.approx(33.5 / (790 / 1800))
+
+
+def test_a_plan_without_any_demand_is_a_typed_result() -> None:
+    plan = plan_of(parse_case(json_of("case.json")), {"N_S": 0, "E_W": 0})
+    assert plan.status == "not_applicable"
+    assert [p.code for p in plan.problems] == ["no_demand"]
+    assert plan.durations_s is None
 
 
 def test_a_cycle_problem_carries_over_to_the_plan() -> None:

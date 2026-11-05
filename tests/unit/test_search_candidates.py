@@ -202,6 +202,84 @@ def test_without_a_current_plan_it_is_declared_absent() -> None:
     assert result.current_plan_violated == ()
 
 
+WEBSTER = BASELINE | {"t1": 90.0, "t3": 40.0}
+
+
+def test_a_webster_plan_goes_after_the_current_plan_and_does_not_consume_the_budget() -> None:
+    result = search(budget=20, current_plan=BASELINE, webster_plan=WEBSTER)
+    assert [c.origin for c in result.candidates[:2]] == ["current_plan", "webster"]
+    webster = result.candidates[1]
+    assert not webster.consumes_budget
+    assert dict(webster.durations_s) == WEBSTER
+    assert result.webster == "included"
+    assert result.webster_violated == ()
+    assert len(result.candidates) == 22
+    assert result.budget_used == 20
+
+
+def test_a_webster_plan_alone_goes_first() -> None:
+    result = search(budget=5, webster_plan=WEBSTER)
+    assert result.candidates[0].origin == "webster"
+    assert result.current_plan == "absent"
+    assert result.webster == "included"
+
+
+def test_a_webster_plan_equal_to_the_current_plan_is_a_duplicate_and_not_evaluated_twice() -> None:
+    result = search(budget=5, current_plan=BASELINE, webster_plan=BASELINE)
+    assert result.webster == "duplicate"
+    assert [c.origin for c in result.candidates].count("current_plan") == 1
+    assert "webster" not in [c.origin for c in result.candidates]
+    assert result.budget_used == 5
+
+
+def test_a_sampled_copy_of_the_webster_plan_is_a_duplicate() -> None:
+    feasible = small_feasible()
+    plan = dict(FIXED) | dict(zip(VARIABLE_IDS, map(float, feasible[0]), strict=True))
+    result = search(small_case(), budget=len(feasible) - 1, webster_plan=plan)
+    assert result.method == "grid"
+    assert result.duplicates == 1
+    assert vectors(result) == feasible
+    assert result.budget_used == len(feasible) - 1
+
+
+def test_an_infeasible_webster_plan_is_excluded_with_its_rules() -> None:
+    result = search(budget=5, webster_plan=BASELINE | {"t1": 200.0})
+    assert result.webster == "excluded"
+    assert result.webster_violated == ("PLAN-02",)
+    assert all(c.origin == "sampled" for c in result.candidates)
+
+
+def test_a_webster_plan_with_missing_slots_is_excluded_not_an_error() -> None:
+    plan = {key: value for key, value in WEBSTER.items() if key != "t9"}
+    result = search(budget=5, webster_plan=plan)
+    assert result.webster == "excluded"
+    assert result.webster_violated == ("TIME-01",)
+
+
+def test_without_a_webster_plan_the_trace_is_the_same_as_before() -> None:
+    trace = search(budget=4, current_plan=BASELINE).trace()
+    assert "webster" not in trace
+    assert search(budget=4, webster_plan=None).webster == "absent"
+
+
+def test_the_trace_records_the_webster_plan_only_when_one_is_given() -> None:
+    assert search(budget=4, webster_plan=WEBSTER).trace()["webster"] == {
+        "status": "included",
+        "violated": [],
+    }
+    excluded = search(budget=4, webster_plan=BASELINE | {"t1": 200.0}).trace()
+    assert excluded["webster"] == {"status": "excluded", "violated": ["PLAN-02"]}
+    duplicate = search(budget=4, current_plan=BASELINE, webster_plan=BASELINE).trace()
+    assert duplicate["webster"] == {"status": "duplicate", "violated": []}
+
+
+def test_a_webster_plan_changes_the_trace_and_so_the_identity_of_the_search() -> None:
+    plain = search(budget=4, current_plan=BASELINE)
+    with_webster = search(budget=4, current_plan=BASELINE, webster_plan=WEBSTER)
+    assert plain.trace() != with_webster.trace()
+    assert plain.trace()["candidates"] != with_webster.trace()["candidates"]
+
+
 def test_the_identifier_depends_on_the_plan_not_on_its_origin() -> None:
     grid = search(small_case(), budget=len(small_feasible()))
     current = grid.candidates[3]

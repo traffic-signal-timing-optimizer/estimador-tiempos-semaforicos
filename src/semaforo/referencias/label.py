@@ -212,6 +212,7 @@ def _coverage(outcome: SearchOutcome, selection: Selection) -> dict[str, object]
         "infeasible_by_rule": dict(candidates.infeasible_by_rule),
         "exhausted": candidates.exhausted,
         "current_plan": candidates.current_plan,
+        "webster": candidates.webster,
         "search": _stage_coverage(outcome.search_scores, selection.ineligible_search),
         "finalists": _stage_coverage(outcome.finalist_scores, selection.ineligible_finalists),
         "simulations": outcome.simulation_count,

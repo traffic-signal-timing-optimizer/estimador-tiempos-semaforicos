@@ -20,9 +20,11 @@ Reglas de este módulo (acta de DEV14 F0):
   vector ya visto (factible o no) es un duplicado y no se vuelve a evaluar. Se para al llenar B
   o al agotar los intentos (``exhausted``): entonces hay menos candidatos que B, y queda
   registrado.
-- **B cuenta candidatos únicos y factibles** generados por la búsqueda. El plan vigente, si se da
-  y es factible, entra como candidato auxiliar que **no consume B**; si es inviable, queda
-  excluido con sus reglas. Un vector muestreado igual al vigente es un duplicado.
+- **B cuenta candidatos únicos y factibles** generados por la búsqueda. El plan vigente y el de
+  Webster (DEV15), si se dan y son factibles, entran como candidatos auxiliares que **no consumen
+  B**; si son inviables, quedan excluidos con sus reglas. Un vector muestreado igual a uno
+  auxiliar es un duplicado, y un Webster igual al vigente queda como duplicado y no se evalúa dos
+  veces.
 
 Es puro: no lee archivos, no lanza procesos y no simula (ADR01). La evaluación con SUMO es de F2.
 """
@@ -43,17 +45,17 @@ from semaforo.referencias.errors import ReferenciasError
 __all__ = [
     "GRID_SCAN_LIMIT",
     "SEARCH_VERSION",
+    "AuxiliaryStatus",
     "Candidate",
     "CandidateOrigin",
     "CandidateSet",
-    "CurrentPlanStatus",
     "SearchMethod",
     "generate_candidates",
 ]
 
 SearchMethod = Literal["grid", "sampling"]
-CandidateOrigin = Literal["grid", "sampled", "current_plan"]
-CurrentPlanStatus = Literal["absent", "included", "excluded"]
+CandidateOrigin = Literal["grid", "sampled", "current_plan", "webster"]
+AuxiliaryStatus = Literal["absent", "included", "excluded", "duplicate"]
 # Versión del algoritmo de candidatos: entra en la traza. Cambiarla obliga a distinguir lo buscado
 # antes de lo buscado después.
 SEARCH_VERSION = "1.0.0"
@@ -94,18 +96,24 @@ class CandidateSet:
     infeasible: int
     infeasible_by_rule: Mapping[str, int]
     exhausted: bool
-    current_plan: CurrentPlanStatus
+    current_plan: AuxiliaryStatus
     current_plan_violated: tuple[str, ...]
     candidates: tuple[Candidate, ...]
+    webster: AuxiliaryStatus = "absent"
+    webster_violated: tuple[str, ...] = ()
 
     @property
     def budget_used(self) -> int:
-        """Candidatos que consumen B (los de la búsqueda, no el plan vigente)."""
+        """Candidatos que consumen B (los de la búsqueda, no los planes auxiliares)."""
         return sum(1 for candidate in self.candidates if candidate.consumes_budget)
 
     def trace(self) -> dict[str, object]:
-        """La traza en forma de JSON, con todos los candidatos y los conteos de la búsqueda."""
-        return {
+        """La traza en forma de JSON, con todos los candidatos y los conteos de la búsqueda.
+
+        La clave ``webster`` solo aparece si se dio un plan de Webster: sin él, la traza es la misma
+        de antes y las bitácoras y etiquetas ya publicadas siguen siendo de la misma búsqueda.
+        """
+        trace: dict[str, object] = {
             "search_version": SEARCH_VERSION,
             "scenario_id": self.scenario_id,
             "rules_version": self.rules_version,
@@ -138,6 +146,9 @@ class CandidateSet:
                 for candidate in self.candidates
             ],
         }
+        if self.webster != "absent":
+            trace["webster"] = {"status": self.webster, "violated": list(self.webster_violated)}
+        return trace
 
 
 def _invalid(message: str, field: str) -> ReferenciasError:
@@ -208,18 +219,38 @@ def _first_violation(prepared: PreparedCase, durations: Mapping[str, float]) -> 
     return None if result.feasible else result.violated[0]
 
 
-def _current_vector(
-    space: _Space, current_plan: Mapping[str, float]
+def _auxiliary_vector(
+    space: _Space, plan: Mapping[str, float]
 ) -> tuple[tuple[int, ...] | None, tuple[str, ...]]:
-    """El vector del plan vigente si es factible; si no, las reglas que viola."""
-    result = check_plan(space.prepared, current_plan)
+    """El vector de un plan auxiliar si es factible; si no, las reglas que viola."""
+    result = check_plan(space.prepared, plan)
     if not result.feasible:
         return None, result.violated
     vector = tuple(
-        math.floor(_exact(current_plan[slot_id]) / space.tick + Fraction(1, 2))
+        math.floor(_exact(plan[slot_id]) / space.tick + Fraction(1, 2))
         for slot_id, _, _ in space.ranges
     )
     return vector, ()
+
+
+def _add_auxiliary(
+    space: _Space,
+    plan: Mapping[str, float] | None,
+    origin: CandidateOrigin,
+    seen: set[tuple[int, ...]],
+    candidates: list[Candidate],
+) -> tuple[AuxiliaryStatus, tuple[str, ...]]:
+    """Agrega un plan auxiliar a los candidatos si es factible y no estaba ya."""
+    if plan is None:
+        return "absent", ()
+    vector, violated = _auxiliary_vector(space, plan)
+    if vector is None:
+        return "excluded", violated
+    if vector in seen:
+        return "duplicate", ()
+    seen.add(vector)
+    candidates.append(space.candidate(vector, origin, False))
+    return "included", ()
 
 
 def _draw(key: str, upper: int) -> int:
@@ -315,11 +346,13 @@ def generate_candidates(  # noqa: PLR0913  (todos son de solo palabra clave)
     attempt_limit: int,
     seed: int,
     current_plan: Mapping[str, float] | None = None,
+    webster_plan: Mapping[str, float] | None = None,
 ) -> CandidateSet:
     """Genera los candidatos de un escenario: grilla si cabe en B, si no muestra reproducible.
 
-    ``current_plan`` es el plan vigente (una duración por slot del caso); si se da y es factible,
-    va primero, como candidato auxiliar que no consume B.
+    ``current_plan`` es el plan vigente y ``webster_plan`` el de Webster, cada uno con una
+    duración por slot del caso. Si se dan y son factibles, van primero (el vigente y luego Webster)
+    como candidatos auxiliares que no consumen B. Un Webster que no aplica se pasa como ``None``.
 
     Raises:
         ReferenciasError: si B, el límite de intentos o la semilla no son enteros válidos, o si el
@@ -333,14 +366,10 @@ def generate_candidates(  # noqa: PLR0913  (todos son de solo palabra clave)
 
     candidates: list[Candidate] = []
     seen: set[tuple[int, ...]] = set()
-    status: CurrentPlanStatus = "absent"
-    violated: tuple[str, ...] = ()
-    if current_plan is not None:
-        vector, violated = _current_vector(space, current_plan)
-        status = "excluded" if vector is None else "included"
-        if vector is not None:
-            seen.add(vector)
-            candidates.append(space.candidate(vector, "current_plan", False))
+    status, violated = _add_auxiliary(space, current_plan, "current_plan", seen, candidates)
+    webster_status, webster_violated = _add_auxiliary(
+        space, webster_plan, "webster", seen, candidates
+    )
 
     grid_feasible, grid, tally = _grid(space, seen, budget)
     method: SearchMethod = "grid"
@@ -371,4 +400,6 @@ def generate_candidates(  # noqa: PLR0913  (todos son de solo palabra clave)
         current_plan=status,
         current_plan_violated=violated,
         candidates=tuple(candidates),
+        webster=webster_status,
+        webster_violated=webster_violated,
     )

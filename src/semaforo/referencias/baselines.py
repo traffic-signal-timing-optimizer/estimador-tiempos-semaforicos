@@ -748,6 +748,8 @@ def _split(
 
     Cada tramo parte de su mínimo o de lo que pida un carril que se atiende solo dentro de este
     carril; lo que sobra va al tramo que atienden menos carriles con flujo (si empatan, al último).
+    Un carril del recorrido sin flujo no pide verde: sus tramos quedan en ese mínimo y el plan
+    puede pasar el ciclo de Webster, algo que revisan después las reglas del caso.
     """
     span = _span(lanes, lane_id)
     own = _variable_in(case, span)
@@ -772,12 +774,15 @@ def _split(
             missing = need - sum((lower[k] for k in mine), Fraction(0))
             if missing > 0:
                 lower[mine[0]] += missing
-    extra = greens[lane_id] - _fixed_in(case, span) - sum(lower.values(), Fraction(0))
+    required = greens.get(lane_id)
+    if required is None:
+        return lower
+    extra = required - _fixed_in(case, span) - sum(lower.values(), Fraction(0))
     if extra < 0:
         return Problem(
             "path_green_too_short",
             lane_id,
-            f"su verde de Webster ({float(greens[lane_id]):.1f} s) no alcanza para los mínimos de "
+            f"su verde de Webster ({float(required):.1f} s) no alcanza para los mínimos de "
             "sus tramos y los carriles que atiende con ellos",
         )
     served = {
