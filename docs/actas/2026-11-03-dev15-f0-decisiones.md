@@ -4,6 +4,8 @@ Escrito para: el Product Owner (qué se decidió y qué cambió) y el equipo té
 
 > **Enmienda del 2026-11-04 (auditoría A05).** Las direcciones de Frutales estaban invertidas en este documento. En el caso, la entrada del sur (`frutales_sur`, de sur a norte) solo tiene verde en t5, y la del norte (`frutales_norte`, de norte a sur) lo tiene en t5, t6 y t7. Se corrigió el texto. Las cifras no cambian: el cálculo usa los identificadores de carril.
 
+> **Enmienda del 2026-11-05 (cierre de DEV15, F6).** Tres puntos de este acta cambiaron después y reemplazan lo que dice arriba: **D4** (L = 24 s) lo reemplazó F2-2 por **L = 19 s**, la pérdida de los tramos fijos que ningún recorrido crítico usa en verde; **los parámetros** `parametros-v1.json` pasaron a `parametros-v2.json` (F2-5); y la sensibilidad de **D2** se hizo con 1 500, 1 800 y 1 900, sin el 1 200 que mencionaba el plan. Detalle en `2026-11-03-dev15-f2-nucleo-webster.md` y en `2026-11-05-dev15-cierre.md`.
+
 - **Fecha:** 2026-11-03
 - **Plan:** `docs/actas/2026-11-03-plan-dev15.md`
 - **Delegación:** el Product Owner pidió que las decisiones D1 a D8 las tome el equipo técnico, y respondió dos preguntas (abajo).
