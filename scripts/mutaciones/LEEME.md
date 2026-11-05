@@ -38,6 +38,7 @@ Los demás traen su propio ejecutor:
 | `a03.py` (`mutar.py`) | `dominio/scenario.py`, `run_metrics.py`, `comparators.py`, `evidence.py` | origen de la evidencia | enmienda A03 |
 | `dev15_f1.py`, `dev15_f2.py`, `dev15_f3.py` | `referencias/baselines.py` | `test_baselines.py` | DEV15 F1 a F3 |
 | `dev15_f4.py` | `comparators.py`, `search.py` | `test_comparators.py`, `test_search_candidates.py` | DEV15 F4 |
+| `dev15_f5.py` (`mutar.py`) | `comparators.py`, `baselines.py` | `test_comparators.py`, `security/test_dev15.py` | DEV15 F5 |
 
 Los resultados de cada ensayo están en el acta de la fase. **Esta carpeta no guarda resultados**: cada corrida imprime cuántos daños se aplicaron, cuáles se detectaron y cuáles sobrevivieron.
 
