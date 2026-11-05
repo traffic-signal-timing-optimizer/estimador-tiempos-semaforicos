@@ -12,13 +12,12 @@
 uno conserva su huella y que la etiqueta coincide con su manifiesto.
 """
 
-import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal, Self
+from typing import Literal, Self, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -27,7 +26,12 @@ from semaforo.dominio.base_model import FrozenModel
 from semaforo.dominio.errors import ErrorCode
 from semaforo.dominio.timing import reconstruct
 from semaforo.referencias.errors import ReferenciasError
-from semaforo.referencias.evaluation import SearchOutcome, SearchSetup, search_identity
+from semaforo.referencias.evaluation import (
+    SearchOutcome,
+    SearchSetup,
+    identity_digest,
+    search_identity,
+)
 from semaforo.referencias.selection import CandidateScore, Selection
 from semaforo.trazabilidad.fs import publish_files, read_at_most
 from semaforo.trazabilidad.hashing import sha256_bytes
@@ -51,7 +55,6 @@ COVERAGE_FILE = "cobertura.json"
 MANIFEST_FILE = "manifiesto.json"
 SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
 SHORT_HASH_CHARS = 8
-IDENTITY_CHARS = 16
 MAX_LABEL_BYTES = 1024 * 1024
 _CONFIG = ConfigDict(extra="forbid", strict=True, frozen=True, allow_inf_nan=False)
 
@@ -120,6 +123,8 @@ class LabelManifest(FrozenModel):
     evidence_status: Literal["fixture_only", "evaluated"]
     network_sha256: str | None
     files: dict[str, str]
+    # Las etiquetas publicadas antes de A01 (identidad 1.0.0) no traen este campo.
+    identity_version: str = "1.0.0"
 
 
 @dataclass(frozen=True)
@@ -134,9 +139,13 @@ def _json_bytes(data: object) -> bytes:
     return (json.dumps(data, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8")
 
 
-def _search_digest(identity: Mapping[str, object]) -> str:
-    text = json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:IDENTITY_CHARS]
+def _sumo_of(outcome: SearchOutcome) -> str:
+    """La versión de SUMO con que se hizo la búsqueda, tal como la anotó su identidad."""
+    inputs = outcome.identity.get("inputs")
+    if not isinstance(inputs, dict):
+        return ""
+    version = cast("dict[str, object]", inputs).get("sumo_version")
+    return version if isinstance(version, str) else ""
 
 
 def _finished(setup: SearchSetup, outcome: SearchOutcome) -> Selection:
@@ -144,7 +153,7 @@ def _finished(setup: SearchSetup, outcome: SearchOutcome) -> Selection:
         raise ReferenciasError(
             ErrorCode.INPUT_SCHEMA, "la búsqueda no terminó: no hay etiqueta que publicar", "search"
         )
-    if dict(outcome.identity) != search_identity(setup, outcome.candidates):
+    if dict(outcome.identity) != search_identity(setup, outcome.candidates, _sumo_of(outcome)):
         raise ReferenciasError(
             ErrorCode.INPUT_SCHEMA,
             "la búsqueda no es la de este escenario y protocolo",
@@ -242,7 +251,7 @@ def publish_label(
             "guion para usarse como nombre de carpeta",
             "case_id",
         )
-    digest = _search_digest(outcome.identity)
+    digest = identity_digest(outcome.identity)
     label = _label(setup, outcome, selection, digest)
     label_bytes = (label.model_dump_json(indent=2) + "\n").encode("utf-8")
     trace_bytes = _json_bytes(outcome.to_json())
@@ -259,6 +268,7 @@ def publish_label(
         status=label.status,
         evidence_status=label.evidence_status,
         network_sha256=None if setup.case.network is None else setup.case.network.sha256,
+        identity_version=str(outcome.identity.get("journal_version", "")),
         files={
             LABEL_FILE: sha256_bytes(label_bytes),
             TRACE_FILE: sha256_bytes(trace_bytes),

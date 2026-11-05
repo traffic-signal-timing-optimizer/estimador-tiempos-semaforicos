@@ -13,8 +13,11 @@ Reglas de ejecución (acta de DEV14 F0, decisiones F0-2 y F0-3):
 - **Bitácora:** cada programa publicado y cada resultado por semilla se agregan, una línea JSON por
   registro, a ``journal_path`` en cuanto terminan. Si la búsqueda se corta, otra llamada con la
   misma bitácora sigue donde quedó: no repite lo que ya está anotado. La primera línea dice qué
-  búsqueda es (caso, escenario, protocolo, semillas, candidatos); una bitácora de otra búsqueda se
-  rechaza. Una última línea cortada (el proceso murió al escribirla) se ignora.
+  búsqueda es: caso, escenario, protocolo, semillas, candidatos y, desde la versión 2.0.0, la
+  huella del contenido de cada insumo (caso, red, escenario con su demanda, rutas, tipos de
+  vehículo, protocolo completo y versión de SUMO). Una bitácora de otra búsqueda, o de una versión
+  anterior, se rechaza. Al seguir, cada carpeta de entradas y cada corrida anotadas se comprueban
+  contra esos insumos (A01). Una última línea cortada (el proceso murió al escribirla) se ignora.
 - **En paralelo:** ``workers`` corridas a la vez. Antes de lanzar cada una se consulta
   ``can_start`` (por ejemplo, si queda memoria libre) y se espera mientras diga que no.
 - **Cancelar:** con ``cancel`` activado no se lanzan corridas nuevas y las que estaban en marcha se
@@ -37,7 +40,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from semaforo.caso.network_map import NetworkMap
-from semaforo.dominio.case import Case
+from semaforo.dominio.case import Case, canonical_sha256
 from semaforo.dominio.errors import DomainError, ErrorCode
 from semaforo.dominio.protocol import Protocol
 from semaforo.dominio.scenario import Scenario
@@ -58,11 +61,25 @@ from semaforo.referencias.selection import (
     seed_outcome,
     select,
 )
-from semaforo.simulacion.compiler import compile_program, publish_program, read_program
+from semaforo.simulacion.compiler import (
+    PROGRAM_FILE,
+    compile_program,
+    publish_program,
+    read_program,
+)
 from semaforo.simulacion.demand_inputs import RouteTable, VehicleTypes
-from semaforo.simulacion.prepare import PreparationRequest, publish_inputs
-from semaforo.simulacion.run_inputs import run_inputs
-from semaforo.simulacion.runner import RunLimits
+from semaforo.simulacion.prepare import (
+    INPUTS_SCHEMA_VERSION,
+    PreparationRequest,
+    canonical_json_sha256,
+    publish_inputs,
+)
+from semaforo.simulacion.run_inputs import run_inputs, verify_inputs
+from semaforo.simulacion.runner import RunLimits, find_sumo, sumo_version
+from semaforo.trazabilidad.fs import read_at_most
+from semaforo.trazabilidad.hashing import sha256_file
+from semaforo.trazabilidad.manifest import RunManifest
+from semaforo.trazabilidad.store import MANIFEST
 
 __all__ = [
     "JOURNAL_VERSION",
@@ -70,12 +87,16 @@ __all__ = [
     "SearchOutcome",
     "SearchSetup",
     "free_memory_gate",
+    "identity_digest",
+    "input_fingerprints",
     "run_search",
     "search_identity",
 ]
 
-JOURNAL_VERSION = "1.0.0"
+JOURNAL_VERSION = "2.0.0"
 MAX_JOURNAL_BYTES = 64 * 1024 * 1024
+MAX_RUN_MANIFEST_BYTES = 16 * 1024 * 1024
+RUN_INPUTS_ARTIFACT = "inputs/manifiesto.json"
 _WAIT_S = 5.0
 _NEWLINE = bytes([10])
 
@@ -142,7 +163,37 @@ def _canonical(data: object) -> str:
     return json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
-def search_identity(setup: SearchSetup, candidates: CandidateSet) -> dict[str, object]:
+def _input_hashes(setup: SearchSetup) -> dict[str, str | None]:
+    """Las huellas que el manifiesto de entradas de cada corrida también guarda."""
+    network = setup.case.network
+    return {
+        "case_sha256": canonical_sha256(setup.case),
+        "network_sha256": None if network is None else network.sha256,
+        "scenario_sha256": canonical_json_sha256(setup.scenario.model_dump(mode="json")),
+        "routes_sha256": canonical_json_sha256(setup.routes.model_dump(mode="json")),
+        "vehicle_types_sha256": canonical_json_sha256(setup.vehicle_types.model_dump(mode="json")),
+    }
+
+
+def input_fingerprints(setup: SearchSetup, sumo_version: str) -> dict[str, object]:
+    """Huella del contenido de cada insumo que puede cambiar el resultado de una búsqueda.
+
+    Las del caso, la red, el escenario (con su demanda, su semilla de llegadas y sus horizontes),
+    las rutas y los tipos de vehículo se calculan igual que en los manifiestos de entradas de las
+    corridas; así una búsqueda ya hecha se puede reexpresar a partir de ellos. El protocolo va
+    completo (zona, umbrales, cohorte), junto con la versión de SUMO y la de las entradas.
+    """
+    return {
+        **_input_hashes(setup),
+        "protocol_sha256": canonical_json_sha256(setup.protocol.model_dump(mode="json")),
+        "inputs_schema_version": INPUTS_SCHEMA_VERSION,
+        "sumo_version": sumo_version,
+    }
+
+
+def search_identity(
+    setup: SearchSetup, candidates: CandidateSet, sumo_version: str
+) -> dict[str, object]:
     """Qué búsqueda es: lo que debe coincidir para seguir una bitácora."""
     protocol = setup.protocol
     return {
@@ -162,10 +213,18 @@ def search_identity(setup: SearchSetup, candidates: CandidateSet) -> dict[str, o
         "seeds_search": list(protocol.seeds.search),
         "seeds_finalists": list(protocol.seeds.finalists),
         "sumo_options": dict(sorted(setup.sumo_options.items())),
+        "inputs": input_fingerprints(setup, sumo_version),
         "candidates_sha256": hashlib.sha256(
             _canonical(candidates.trace()).encode("utf-8")
         ).hexdigest(),
     }
+
+
+def identity_digest(identity: Mapping[str, object]) -> str:
+    """Los 16 primeros caracteres de la huella de una identidad; de ahí salen los identificadores
+    de la búsqueda y de su etiqueta.
+    """
+    return hashlib.sha256(_canonical(dict(identity)).encode("utf-8")).hexdigest()[:16]
 
 
 def _check_consistent(setup: SearchSetup, candidates: CandidateSet) -> None:
@@ -287,16 +346,107 @@ def _load(path: Path, identity: Mapping[str, object], setup: SearchSetup) -> _St
     records = _parse_lines(raw)
     if not records or records[0].type != "header":
         raise _bad_journal("no empieza con la identidad de la búsqueda")
-    if records[0].identity != json.loads(_canonical(dict(identity))):
-        raise _bad_journal("es de otra búsqueda (cambió el caso, el protocolo o los candidatos)")
+    header = records[0].identity or {}
+    if header.get("journal_version") != JOURNAL_VERSION:
+        raise _bad_journal(
+            f"es de una versión anterior ({header.get('journal_version')}) y no se puede "
+            "reanudar: no guarda la huella de sus insumos"
+        )
+    if header != json.loads(_canonical(dict(identity))):
+        raise _bad_journal(
+            "es de otra búsqueda (cambió el caso, la demanda, las rutas, los tipos de vehículo, "
+            "el protocolo, SUMO o los candidatos)"
+        )
     for record in records[1:]:
         _apply(record, state, setup)
+    _check_links(state, setup)
     complete = raw.rfind(_NEWLINE) + 1
     if complete < len(raw):
         # Se quita la línea cortada para que el próximo registro empiece en una línea nueva.
         with path.open("r+b") as handle:
             handle.truncate(complete)
     return state
+
+
+def _check_inputs_folder(
+    folder: Path, setup: SearchSetup, seed: int, hashes: Mapping[str, str | None]
+) -> tuple[str, str]:
+    """Comprueba una carpeta de entradas anotada contra los insumos de esta búsqueda y devuelve la
+    huella de su manifiesto (a la que se ata cada corrida) y la de su programa.
+    """
+    try:
+        manifest = verify_inputs(folder)
+    except DomainError as error:
+        raise _bad_journal(
+            f"la carpeta de entradas {folder.name} no se puede verificar: {error.message}"
+        ) from error
+    found: dict[str, object] = {
+        "case_sha256": manifest.case_sha256,
+        "network_sha256": manifest.network.sha256,
+        "scenario_sha256": manifest.scenario_sha256,
+        "routes_sha256": manifest.routes_sha256,
+        "vehicle_types_sha256": manifest.vehicle_types_sha256,
+        "scenario_id": manifest.scenario_id,
+        "sumo_seed": manifest.seeds.sumo_seed,
+        "sumo_options": manifest.sumo_options,
+        "inputs_schema_version": manifest.schema_version,
+    }
+    wanted: dict[str, object] = {
+        **hashes,
+        "scenario_id": setup.scenario.scenario_id,
+        "sumo_seed": seed,
+        "sumo_options": dict(setup.sumo_options),
+        "inputs_schema_version": INPUTS_SCHEMA_VERSION,
+    }
+    different = sorted(name for name, value in wanted.items() if found[name] != value)
+    if different:
+        raise _bad_journal(
+            f"la carpeta de entradas {folder.name} no corresponde a esta búsqueda "
+            f"({', '.join(different)})"
+        )
+    return sha256_file(folder / "manifiesto.json"), manifest.program.sha256
+
+
+def _check_run_link(setup: SearchSetup, run_id: str, inputs_sha256: str) -> None:
+    """La corrida anotada existe y salió de la carpeta de entradas anotada.
+
+    El manifiesto de la corrida guarda la huella del manifiesto de sus entradas, que a su vez dice
+    el escenario, el caso, el programa y la semilla: con esa huella basta para atarlas.
+    """
+    path = _inside(setup.runs_root, run_id, "una corrida") / MANIFEST
+    try:
+        with path.open("rb") as stream:
+            data = read_at_most(stream, MAX_RUN_MANIFEST_BYTES + 1)
+    except OSError as error:
+        raise _bad_journal(f"la corrida {run_id} no se puede leer") from error
+    if len(data) > MAX_RUN_MANIFEST_BYTES:
+        raise _bad_journal(f"el manifiesto de la corrida {run_id} es demasiado grande")
+    try:
+        manifest = RunManifest.model_validate_json(data)
+    except ValidationError as error:
+        raise _bad_journal(f"el manifiesto de la corrida {run_id} no es válido") from error
+    artifacts = {artifact.artifact_id: artifact.sha256 for artifact in manifest.inputs}
+    if artifacts.get(RUN_INPUTS_ARTIFACT) != inputs_sha256:
+        raise _bad_journal(f"la corrida {run_id} no salió de las entradas anotadas")
+
+
+def _check_links(state: _State, setup: SearchSetup) -> None:
+    """Cada carpeta de entradas y cada corrida anotadas son de los insumos de esta búsqueda."""
+    hashes = _input_hashes(setup)
+    inputs_sha: dict[tuple[Stage, str, int], str] = {}
+    for key, folder in state.inputs.items():
+        inputs_sha[key], program_sha = _check_inputs_folder(folder, setup, key[2], hashes)
+        program = state.programs.get(key[1])
+        if program is not None:
+            recorded = read_program(program).files.get(PROGRAM_FILE)
+            if recorded != program_sha:
+                raise _bad_journal(f"las entradas {folder.name} no usan el programa anotado")
+    for key, outcome in state.outcomes.items():
+        if outcome.run_id is None:
+            continue
+        if key not in inputs_sha:
+            raise _bad_journal("un resultado no tiene su carpeta de entradas anotada")
+        _check_run_link(setup, outcome.run_id, inputs_sha[key])
 
 
 def _inside(root: Path, text: str, what: str) -> Path:
@@ -552,7 +702,8 @@ def run_search(  # noqa: PLR0913  (los opcionales son de solo palabra clave)
     """
     workers = _positive(workers, "workers")
     _check_consistent(setup, candidates)
-    identity = search_identity(setup, candidates)
+    binary = setup.sumo if setup.sumo is not None else find_sumo()
+    identity = search_identity(setup, candidates, sumo_version(binary))
     state = _load(journal_path, identity, setup)
     stop = threading.Event() if cancel is None else cancel
     protocol = setup.protocol

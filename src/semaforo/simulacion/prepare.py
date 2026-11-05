@@ -69,6 +69,7 @@ from semaforo.trazabilidad.store import utc_now
 __all__ = [
     "ALLOWED_BOUNDARY_POLICIES",
     "CONFIG_FILE",
+    "INPUTS_SCHEMA_VERSION",
     "MAX_DEMAND_BYTES",
     "REQUIRED_OUTPUTS",
     "SUMO_OPTIONS",
@@ -77,6 +78,7 @@ __all__ = [
     "PreparationRequest",
     "PreparedInputs",
     "build_inputs",
+    "canonical_json_sha256",
     "publish_inputs",
 ]
 
@@ -319,7 +321,7 @@ def build_inputs(request: PreparationRequest, created_at: datetime) -> PreparedI
     manifest = InputsManifest(
         created_at=moment.isoformat(),
         scenario_id=scenario.scenario_id,
-        scenario_sha256=_canonical_sha256(scenario.model_dump(mode="json")),
+        scenario_sha256=canonical_json_sha256(scenario.model_dump(mode="json")),
         case_id=case.case_id,
         case_version=case.case_version,
         case_sha256=canonical_sha256(case),
@@ -327,8 +329,8 @@ def build_inputs(request: PreparationRequest, created_at: datetime) -> PreparedI
         entry_config=CONFIG_FILE,
         network=FileRecord(file=network_name, sha256=hashes[network_name]),
         program=program,
-        routes_sha256=_canonical_sha256(request.routes.model_dump(mode="json")),
-        vehicle_types_sha256=_canonical_sha256(request.vehicle_types.model_dump(mode="json")),
+        routes_sha256=canonical_json_sha256(request.routes.model_dump(mode="json")),
+        vehicle_types_sha256=canonical_json_sha256(request.vehicle_types.model_dump(mode="json")),
         route_sha256={
             movement: sha256_bytes(" ".join(request.routes.routes[movement]).encode("utf-8"))
             for movement in sorted(classes)
@@ -674,7 +676,12 @@ def _config_xml(
     return (XML_HEADER + tostring(root, encoding="unicode") + "\n").encode("utf-8")
 
 
-def _canonical_sha256(data: object) -> str:
+def canonical_json_sha256(data: object) -> str:
+    """Huella SHA-256 de un dato en JSON canónico (claves ordenadas, sin espacios).
+
+    Es la que usan los manifiestos de entradas para el escenario, las rutas y los tipos de vehículo,
+    y la que usa la identidad de una búsqueda (DEV14, A01): las dos tienen que coincidir.
+    """
     text = json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return sha256_bytes(text.encode("utf-8"))
 
@@ -710,7 +717,7 @@ def _cohort_csv(
                 _number(vehicle.depart_s),
                 assigned[vehicle.vehicle_id],
                 "sí" if vehicle.in_cohort else "no",
-                _canonical_sha256(attributes),
+                canonical_json_sha256(attributes),
             ]
         )
     buffer = io.StringIO()

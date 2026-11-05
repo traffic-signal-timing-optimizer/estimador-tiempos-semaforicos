@@ -32,6 +32,7 @@ from semaforo.referencias.selection import (
     select,
 )
 
+SUMO_VERSION = "1.27.1"  # la de la identidad de las búsquedas armadas sin SUMO
 SEARCH_SEEDS = [101, 102]
 FINALIST_SEEDS = [201, 202]
 FINAL_SEEDS = [301, 302]
@@ -169,7 +170,7 @@ def outcome_for(
         [search_score], list(finalist_scores), rules.finalist_count, rules.tie_epsilon_s
     )
     return SearchOutcome(
-        identity=search_identity(search.setup, search.candidates),
+        identity=search_identity(search.setup, search.candidates, SUMO_VERSION),
         candidates=search.candidates,
         search_scores=(search_score,),
         finalist_scores=finalist_scores,

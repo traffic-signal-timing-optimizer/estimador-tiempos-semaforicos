@@ -18,6 +18,7 @@ from prepared_inputs import FIXTURES
 from search_tools import (
     FINALIST_SEEDS,
     SEARCH_SEEDS,
+    SUMO_VERSION,
     Search,
     new_search,
     outcome_for,
@@ -28,7 +29,7 @@ from semaforo.app.integrity import verify_workspace
 from semaforo.dominio.errors import ErrorCode
 from semaforo.dominio.feasibility import prepare
 from semaforo.referencias.errors import ReferenciasError
-from semaforo.referencias.evaluation import SearchOutcome, search_identity
+from semaforo.referencias.evaluation import JOURNAL_VERSION, SearchOutcome, search_identity
 from semaforo.referencias.label import (
     COVERAGE_FILE,
     LABEL_FILE,
@@ -210,7 +211,7 @@ def test_a_search_without_a_selection_is_not_published(tmp_path: Path) -> None:
 def test_an_unfinished_search_is_not_published(tmp_path: Path) -> None:
     search = new_search(tmp_path)
     unfinished = SearchOutcome(
-        identity=search_identity(search.setup, search.candidates),
+        identity=search_identity(search.setup, search.candidates, SUMO_VERSION),
         candidates=search.candidates,
         search_scores=(),
         finalist_scores=(),
@@ -448,3 +449,19 @@ def test_the_workspace_check_reports_labels(tmp_path: Path) -> None:
     (folder / LABEL_FILE).chmod(stat.S_IWRITE)
     (folder / LABEL_FILE).write_text("{}", encoding="utf-8")
     assert label_statuses(workspace) == ["altered"]
+
+
+def test_a_new_label_carries_the_version_of_its_identity(tmp_path: Path) -> None:
+    folder = published(tmp_path)
+    assert read_label(folder).manifest.identity_version == JOURNAL_VERSION
+
+
+def test_a_label_published_before_the_identity_had_a_version_is_read_as_the_first_one(
+    tmp_path: Path,
+) -> None:
+    folder = published(tmp_path)
+    manifest_path = folder / MANIFEST_FILE
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    del manifest["identity_version"]
+    tamper(manifest_path, manifest)
+    assert read_label(folder).manifest.identity_version == "1.0.0"

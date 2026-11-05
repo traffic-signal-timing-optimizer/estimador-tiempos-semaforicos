@@ -3,22 +3,42 @@ correr SUMO. Datos sintéticos: red de demostración (``search_tools``).
 """
 
 import json
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
-from search_tools import Search, search_in
+from search_tools import SUMO_VERSION, Search, search_in
 from semaforo.dominio.errors import DomainError, ErrorCode
 from semaforo.referencias import evaluation
 from semaforo.referencias.errors import ReferenciasError
 from semaforo.referencias.evaluation import (
+    JOURNAL_VERSION,
+    SearchSetup,
     free_memory_gate,
+    identity_digest,
     run_search,
     search_identity,
 )
 from semaforo.referencias.selection import SeedOutcome
+from semaforo.simulacion.demand_inputs import VehicleTypes
+
+
+def fake_binary() -> Path:
+    return Path("sumo")
+
+
+def fake_version(_binary: Path) -> str:
+    return SUMO_VERSION
+
+
+@pytest.fixture(autouse=True)
+def without_sumo(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Estas pruebas no corren SUMO: la versión se fija a mano."""
+    monkeypatch.setattr(evaluation, "find_sumo", fake_binary)
+    monkeypatch.setattr(evaluation, "sumo_version", fake_version)
 
 
 @pytest.fixture
@@ -27,7 +47,8 @@ def search(tmp_path: Path) -> Search:
 
 
 def header(search: Search) -> dict[str, Any]:
-    return {"type": "header", "identity": search_identity(search.setup, search.candidates)}
+    identity = search_identity(search.setup, search.candidates, SUMO_VERSION)
+    return {"type": "header", "identity": identity}
 
 
 def write(search: Search, *records: dict[str, Any], tail: bytes = b"") -> None:
@@ -65,7 +86,7 @@ def rejected(search: Search) -> ReferenciasError:
 
 
 def test_a_new_search_writes_its_identity_first(search: Search) -> None:
-    identity = search_identity(search.setup, search.candidates)
+    identity = search_identity(search.setup, search.candidates, SUMO_VERSION)
     assert identity["scenario_id"] == search.setup.scenario.scenario_id
     assert identity["seeds_search"] == [101, 102]
     assert identity["seeds_finalists"] == [201, 202]
@@ -74,13 +95,13 @@ def test_a_new_search_writes_its_identity_first(search: Search) -> None:
 
 
 def test_the_identity_changes_with_the_candidates_or_the_protocol(search: Search) -> None:
-    base = search_identity(search.setup, search.candidates)
+    base = search_identity(search.setup, search.candidates, SUMO_VERSION)
     fewer = replace(search.candidates, candidates=search.candidates.candidates[:-1])
-    assert search_identity(search.setup, fewer) != base
+    assert search_identity(search.setup, fewer, SUMO_VERSION) != base
     other = replace(
         search.setup, protocol=search.setup.protocol.model_copy(update={"tie_epsilon_s": 1.0})
     )
-    assert search_identity(other, search.candidates) != base
+    assert search_identity(other, search.candidates, SUMO_VERSION) != base
 
 
 def test_a_journal_without_identity_is_rejected(search: Search) -> None:
@@ -235,3 +256,149 @@ def test_the_memory_gate_waits_below_the_minimum() -> None:
     assert not gate()
     assert free_memory_gate(1_500, lambda: 1_500)()
     assert free_memory_gate(1_500, lambda: None)()
+
+
+# --- la identidad cubre el contenido de los insumos (auditoría A01) ----------------------------
+
+
+def inputs_of(identity: dict[str, object]) -> dict[str, object]:
+    inputs = identity["inputs"]
+    assert isinstance(inputs, dict)
+    return cast("dict[str, object]", inputs)
+
+
+def with_flow(setup: SearchSetup) -> SearchSetup:
+    request = setup.scenario.request
+    first = request.demand[0].model_copy(update={"flow_vph": request.demand[0].flow_vph + 100})
+    changed = request.model_copy(update={"demand": [first, *request.demand[1:]]})
+    return replace(setup, scenario=setup.scenario.model_copy(update={"request": changed}))
+
+
+def with_scenario(**changes: Any) -> Callable[[SearchSetup], SearchSetup]:  # noqa: ANN401
+    def change(setup: SearchSetup) -> SearchSetup:
+        values = {name: getattr(setup.scenario, name) + delta for name, delta in changes.items()}
+        return replace(setup, scenario=setup.scenario.model_copy(update=values))
+
+    return change
+
+
+def with_routes(setup: SearchSetup) -> SearchSetup:
+    routes = {**setup.routes.routes, "N_S": [*setup.routes.routes["N_S"], "extra"]}
+    return replace(setup, routes=setup.routes.model_copy(update={"routes": routes}))
+
+
+def with_vehicle_types(setup: SearchSetup) -> SearchSetup:
+    data = setup.vehicle_types.model_dump(mode="json")
+    data["types"]["car"]["attributes"]["length"] = 6.5
+    return replace(setup, vehicle_types=VehicleTypes.model_validate(data))
+
+
+def with_case(setup: SearchSetup) -> SearchSetup:
+    return replace(setup, case=setup.case.model_copy(update={"description": "otra descripción"}))
+
+
+def with_network(setup: SearchSetup) -> SearchSetup:
+    assert setup.case.network is not None
+    network = setup.case.network.model_copy(update={"sha256": "0" * 64})
+    return replace(setup, case=setup.case.model_copy(update={"network": network}))
+
+
+def with_queue_threshold(setup: SearchSetup) -> SearchSetup:
+    protocol = setup.protocol.model_copy(update={"queue_speed_threshold_mps": 0.2})
+    return replace(setup, protocol=protocol)
+
+
+def with_zone(setup: SearchSetup) -> SearchSetup:
+    protocol = setup.protocol.model_copy(update={"zone_lane_ids": ["demo_N_0"]})
+    return replace(setup, protocol=protocol)
+
+
+CHANGES: list[tuple[str, Callable[[SearchSetup], SearchSetup], set[str]]] = [
+    ("flujo-de-un-movimiento", with_flow, {"scenario_sha256"}),
+    ("semilla-de-llegadas", with_scenario(demand_seed=1), {"scenario_sha256"}),
+    ("calentamiento", with_scenario(warmup_s=10.0), {"scenario_sha256"}),
+    ("medicion", with_scenario(measure_s=10.0), {"scenario_sha256"}),
+    ("vaciado", with_scenario(drain_max_s=10.0), {"scenario_sha256"}),
+    ("rutas", with_routes, {"routes_sha256"}),
+    ("tipos-de-vehiculo", with_vehicle_types, {"vehicle_types_sha256"}),
+    ("caso", with_case, {"case_sha256"}),
+    ("red", with_network, {"case_sha256", "network_sha256"}),
+    ("umbral-de-cola", with_queue_threshold, {"protocol_sha256"}),
+    ("zona-de-medicion", with_zone, {"protocol_sha256"}),
+]
+
+
+@pytest.mark.parametrize(
+    ("change", "keys"), [(c, k) for _, c, k in CHANGES], ids=[name for name, _, _ in CHANGES]
+)
+def test_changing_an_input_changes_the_identity_in_its_own_fingerprint(
+    search: Search, change: Callable[[SearchSetup], SearchSetup], keys: set[str]
+) -> None:
+    base = search_identity(search.setup, search.candidates, SUMO_VERSION)
+    changed = search_identity(change(search.setup), search.candidates, SUMO_VERSION)
+    assert changed != base
+    assert identity_digest(changed) != identity_digest(base)
+    before, after = inputs_of(base), inputs_of(changed)
+    assert {name for name in before if before[name] != after[name]} == keys
+
+
+def test_another_version_of_sumo_changes_the_identity(search: Search) -> None:
+    base = search_identity(search.setup, search.candidates, "1.27.1")
+    other = search_identity(search.setup, search.candidates, "1.28.0")
+    assert other != base
+    assert other["inputs"] != base["inputs"]
+
+
+def test_the_same_inputs_give_the_same_identity_and_full_fingerprints(search: Search) -> None:
+    first = search_identity(search.setup, search.candidates, SUMO_VERSION)
+    second = search_identity(search.setup, search.candidates, SUMO_VERSION)
+    assert first == second
+    assert identity_digest(first) == identity_digest(second)
+    inputs = inputs_of(first)
+    for name in (
+        "case_sha256",
+        "network_sha256",
+        "scenario_sha256",
+        "routes_sha256",
+        "vehicle_types_sha256",
+        "protocol_sha256",
+    ):
+        assert len(str(inputs[name])) == 64
+    assert inputs["sumo_version"] == SUMO_VERSION
+    assert first["journal_version"] == JOURNAL_VERSION
+
+
+def test_a_journal_cannot_be_reused_after_the_demand_changes(search: Search) -> None:
+    # La auditoría cambió un flujo conservando el identificador del escenario: se aceptaba.
+    write(search, header(search))
+    changed = with_flow(search.setup)
+    with pytest.raises(ReferenciasError) as caught:
+        run_search(changed, search.candidates, search.journal)
+    assert caught.value.field == "journal"
+    assert "otra búsqueda" in caught.value.message
+    assert not search.setup.runs_root.exists()
+
+
+def test_a_journal_cannot_be_reused_after_the_measurement_changes(search: Search) -> None:
+    write(search, header(search))
+    changed = with_queue_threshold(search.setup)
+    with pytest.raises(ReferenciasError) as caught:
+        run_search(changed, search.candidates, search.journal)
+    assert "otra búsqueda" in caught.value.message
+    assert not search.setup.runs_root.exists()
+
+
+def test_a_journal_of_an_older_version_is_rejected_with_a_clear_message(search: Search) -> None:
+    old = {key: value for key, value in header(search)["identity"].items() if key != "inputs"} | {
+        "journal_version": "1.0.0"
+    }
+    write(search, {"type": "header", "identity": old})
+    message = rejected(search).message
+    assert "versión anterior (1.0.0)" in message
+    assert "huella de sus insumos" in message
+
+
+def test_a_journal_without_a_version_is_rejected_as_an_older_one(search: Search) -> None:
+    old = {k: v for k, v in header(search)["identity"].items() if k != "journal_version"}
+    write(search, {"type": "header", "identity": old})
+    assert "versión anterior" in rejected(search).message
