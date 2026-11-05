@@ -48,10 +48,12 @@ __all__ = [
     "ComparatorsFile",
     "ComparatorsManifest",
     "ComparatorsResult",
+    "SensitivityRow",
     "StoredComparators",
     "compute_comparators",
     "publish_comparators",
     "read_comparators",
+    "saturation_sensitivity",
 ]
 
 COMPARATORS = "derivados/comparadores"
@@ -228,6 +230,47 @@ def compute_comparators(
     return ComparatorsResult(
         case, scenario.scenario_id, current, webster, parameters, scenario.request.origin
     )
+
+
+@dataclass(frozen=True)
+class SensitivityRow:
+    """Webster de un escenario con una saturación de la lista de sensibilidad (DEV15 F5)."""
+
+    saturation_veh_h_lane: float
+    webster: WebsterPlan
+
+
+def saturation_sensitivity(
+    prepared: PreparedCase, scenario: Scenario, parameters: WebsterParameters
+) -> tuple[SensitivityRow, ...]:
+    """Webster de ``scenario`` con cada saturación de ``saturation_flow_sensitivity_veh_h_lane``.
+
+    Solo cambia la saturación; el resto de los parámetros es el mismo. Sirve para ver cuánto
+    depende la aplicabilidad de un valor que sigue provisional (DEC08). Una saturación repetida en
+    la lista se calcula una sola vez.
+
+    Raises:
+        ReferenciasError: INPUT_SCHEMA si el escenario o los parámetros son de otro caso.
+    """
+    case = prepared.case
+    if (scenario.case_id, scenario.case_version) != (case.case_id, case.case_version):
+        raise ReferenciasError(
+            ErrorCode.INPUT_SCHEMA, "el escenario es de otro caso o de otra versión", "scenario"
+        )
+    if (parameters.case_id, parameters.case_version) != (case.case_id, case.case_version):
+        raise ReferenciasError(
+            ErrorCode.INPUT_SCHEMA,
+            "los parámetros de Webster son de otro caso o de otra versión del caso",
+            "parameters",
+        )
+    structure = crossing_structure(case)
+    rows: list[SensitivityRow] = []
+    for saturation in sorted(set(parameters.saturation_flow_sensitivity_veh_h_lane)):
+        varied = parameters.model_copy(update={"saturation_flow_veh_h_lane": saturation})
+        rows.append(
+            SensitivityRow(saturation, webster_plan(structure, prepared, scenario.request, varied))
+        )
+    return tuple(rows)
 
 
 def _plan_row(durations: Mapping[str, float], cycle_s: float) -> PlanRow:

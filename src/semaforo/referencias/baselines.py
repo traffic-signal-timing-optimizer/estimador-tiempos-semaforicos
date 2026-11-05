@@ -44,6 +44,7 @@ from semaforo.simulacion.compiler import SLOTS_FILE, read_program
 
 __all__ = [
     "ADAPTATION",
+    "MAX_SENSITIVITY",
     "CriticalPath",
     "CrossingStructure",
     "LaneService",
@@ -69,6 +70,8 @@ CYCLE_TOLERANCE_S = 1e-6
 # Fórmula de Webster: C0 = (1,5 L + 5) / (1 - Y).
 LOST_TIME_FACTOR = Fraction(3, 2)
 LOST_TIME_EXTRA_S = Fraction(5)
+# Saturaciones de la tabla de sensibilidad: cada una es un cálculo de Webster por escenario.
+MAX_SENSITIVITY = 20
 
 Positive = Annotated[float, Field(gt=0)]
 NonNegative = Annotated[float, Field(ge=0)]
@@ -135,7 +138,7 @@ class WebsterParameters(FrozenModel):
     case_version: str
     adaptation: Literal["webster-solapes-v1"]
     saturation_flow_veh_h_lane: Positive
-    saturation_flow_sensitivity_veh_h_lane: list[Positive]
+    saturation_flow_sensitivity_veh_h_lane: list[Positive] = Field(max_length=MAX_SENSITIVITY)
     vehicle_equivalence: dict[str, NonNegative]
     lost_time_rule: Literal["intergreens_outside_critical_path"]
     lost_time_note: str = Field(min_length=1)

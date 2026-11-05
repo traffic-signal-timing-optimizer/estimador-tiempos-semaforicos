@@ -34,6 +34,7 @@ from semaforo.referencias.comparators import (
     compute_comparators,
     publish_comparators,
     read_comparators,
+    saturation_sensitivity,
 )
 from semaforo.referencias.errors import ReferenciasError
 from semaforo.referencias.search import generate_candidates
@@ -164,6 +165,96 @@ def test_the_comparators_say_where_the_case_and_the_demand_come_from(
     stored = read_comparators(publish_comparators(tmp_path / "datos", result, MOMENT))
     for found in (stored.comparators, stored.manifest):
         assert (found.case_origin, found.demand_origin, found.evidence_origin) == origins
+
+
+# --- sensibilidad a la saturación (F5) ----------------------------------------------------------
+
+
+def sensitivity_in(tmp_path: Path, saturations: list[float], north: float = 720) -> Any:  # noqa: ANN401
+    request = request_for(
+        new_dir(tmp_path),
+        scenario_change=lambda data: data["request"].update(demand=demand(north, 540)),
+    )
+    found = saturation_sensitivity(
+        prepare(request.case),
+        request.scenario,
+        parameters(
+            saturation_flow_veh_h_lane=1800, saturation_flow_sensitivity_veh_h_lane=saturations
+        ),
+    )
+    return found, request
+
+
+def test_the_sensitivity_repeats_webster_with_each_saturation(tmp_path: Path) -> None:
+    rows, request = sensitivity_in(tmp_path, [1500, 1800, 1900])
+    assert [row.saturation_veh_h_lane for row in rows] == [1500, 1800, 1900]
+    base = compute_comparators(
+        prepare(request.case), request.scenario, parameters(), request.program_dir
+    ).webster
+    assert rows[1].webster == base  # la saturación de los parámetros da el mismo Webster
+    ys = [row.webster.critical_path.y for row in rows]
+    assert ys[0] == pytest.approx(ys[1] * 1800 / 1500)  # Y es flujo / saturación
+    assert ys[2] == pytest.approx(ys[1] * 1800 / 1900)
+    cycles = [row.webster.webster_cycle_s for row in rows]
+    assert cycles[0] > cycles[1] > cycles[2]  # menos saturación, más ciclo
+
+
+def test_a_saturation_that_makes_the_crossing_oversaturated_is_not_applicable(
+    tmp_path: Path,
+) -> None:
+    rows, _ = sensitivity_in(tmp_path, [1000, 1800], north=900)
+    low, base = rows
+    assert low.webster.status == "not_applicable"
+    assert [p.code for p in low.webster.problems] == ["oversaturated"]
+    assert low.webster.durations_s is None  # no se inventa un plan
+    assert base.saturation_veh_h_lane == 1800
+
+
+def test_a_repeated_saturation_is_computed_once_and_in_order(tmp_path: Path) -> None:
+    rows, _ = sensitivity_in(tmp_path, [1900, 1500, 1900])
+    assert [row.saturation_veh_h_lane for row in rows] == [1500, 1900]
+
+
+def test_an_empty_sensitivity_list_gives_no_rows(tmp_path: Path) -> None:
+    rows, _ = sensitivity_in(tmp_path, [])
+    assert rows == ()
+
+
+@pytest.mark.parametrize("saturations", [[1800.0], []], ids=["con-lista", "lista-vacia"])
+def test_the_sensitivity_refuses_a_scenario_of_another_case(
+    tmp_path: Path, saturations: list[float]
+) -> None:
+    """Aun sin saturaciones que calcular, un escenario ajeno no pasa en silencio."""
+    request = request_for(new_dir(tmp_path))
+    scenario = request.scenario.model_copy(update={"case_version": "9.9.9"})
+    chosen = parameters(saturation_flow_sensitivity_veh_h_lane=saturations)
+    with pytest.raises(ReferenciasError, match="escenario") as error:
+        saturation_sensitivity(prepare(request.case), scenario, chosen)
+    assert error.value.code == ErrorCode.INPUT_SCHEMA
+
+
+@pytest.mark.parametrize("saturations", [[1800.0], []], ids=["con-lista", "lista-vacia"])
+def test_the_sensitivity_refuses_parameters_of_another_case(
+    tmp_path: Path, saturations: list[float]
+) -> None:
+    request = request_for(new_dir(tmp_path))
+    chosen = parameters(case_id="OTRO", saturation_flow_sensitivity_veh_h_lane=saturations)
+    with pytest.raises(ReferenciasError, match="parámetros") as error:
+        saturation_sensitivity(prepare(request.case), request.scenario, chosen)
+    assert error.value.code == ErrorCode.INPUT_SCHEMA
+
+
+def test_a_sensitivity_list_longer_than_the_limit_is_refused() -> None:
+    with pytest.raises(ValidationError):
+        parameters(saturation_flow_sensitivity_veh_h_lane=[1000.0 + i for i in range(21)])
+    assert (
+        len(
+            parameters(
+                saturation_flow_sensitivity_veh_h_lane=[1000.0 + i for i in range(20)]
+            ).saturation_flow_sensitivity_veh_h_lane
+        )
+        == 20
+    )
 
 
 def test_a_scenario_of_another_case_is_refused(tmp_path: Path) -> None:
