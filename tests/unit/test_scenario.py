@@ -13,6 +13,7 @@ from semaforo.dominio.scenario import (
     Scenario,
     ScenarioInvalidError,
     accept_scenario,
+    evidence_origin,
     parse_scenario,
     scenario_issues,
 )
@@ -622,3 +623,19 @@ def test_many_problems_are_capped_with_a_final_count() -> None:
     issues = raised.value.issues
     assert len(issues) == MAX_ISSUES + 1
     assert "sin mostrar" in issues[-1].message
+
+
+@pytest.mark.parametrize(
+    ("case_origin", "demand_origin", "expected"),
+    [
+        ("synthetic", "synthetic", "synthetic"),
+        ("field", "synthetic", "synthetic"),
+        ("synthetic", "field", "synthetic"),
+        ("field", "field", "field"),
+    ],
+)
+def test_only_a_real_case_with_a_real_demand_is_field_evidence(
+    case_origin: str, demand_origin: str, expected: str
+) -> None:
+    """Auditoría A03: una demanda supuesta sobre un caso real sigue siendo sintética."""
+    assert evidence_origin(case_origin, demand_origin) == expected

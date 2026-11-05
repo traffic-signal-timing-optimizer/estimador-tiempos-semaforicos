@@ -123,6 +123,49 @@ def test_a_webster_that_breaks_a_case_rule_is_kept_as_a_proposal_and_not_given_t
     assert result.search_webster_plan is None
 
 
+def real_case(data: dict[str, Any]) -> None:
+    data["origin"] = "field"
+    data["representation_status"] = "unverified"
+
+
+def field_demand(data: dict[str, Any]) -> None:
+    data["origin"] = "field_derived"
+    data["request"]["origin"] = "field"
+
+
+@pytest.mark.parametrize(
+    ("case_change", "scenario_change", "origins"),
+    [
+        (None, None, ("synthetic", "synthetic", "synthetic")),
+        (real_case, None, ("field", "synthetic", "synthetic")),
+        (None, field_demand, ("synthetic", "field", "synthetic")),
+        (real_case, field_demand, ("field", "field", "field")),
+    ],
+    ids=[
+        "todo-sintetico",
+        "caso-real-demanda-supuesta",
+        "caso-sintetico-demanda-real",
+        "todo-real",
+    ],
+)
+def test_the_comparators_say_where_the_case_and_the_demand_come_from(
+    tmp_path: Path,
+    case_change: Any,  # noqa: ANN401
+    scenario_change: Any,  # noqa: ANN401
+    origins: tuple[str, str, str],
+) -> None:
+    """Un caso real con la demanda supuesta nunca queda como evidencia de campo (A03)."""
+    request = request_for(
+        new_dir(tmp_path), case_change=case_change, scenario_change=scenario_change
+    )
+    result = compute_comparators(
+        prepare(request.case), request.scenario, parameters(), request.program_dir
+    )
+    stored = read_comparators(publish_comparators(tmp_path / "datos", result, MOMENT))
+    for found in (stored.comparators, stored.manifest):
+        assert (found.case_origin, found.demand_origin, found.evidence_origin) == origins
+
+
 def test_a_scenario_of_another_case_is_refused(tmp_path: Path) -> None:
     request = request_for(new_dir(tmp_path))
     scenario = request.scenario.model_copy(update={"case_id": "OTRO"})
@@ -156,6 +199,17 @@ def test_the_comparators_are_published_and_read_back(tmp_path: Path) -> None:
     assert stored.manifest.current_plan_feasible
     assert stored.manifest.provisional
     assert stored.parameters == parameters()
+    assert stored.manifest.schema_version == content.schema_version == "2.0.0"
+    assert (content.case_origin, content.demand_origin, content.evidence_origin) == (
+        "synthetic",
+        "synthetic",
+        "synthetic",
+    )
+    assert (
+        stored.manifest.case_origin,
+        stored.manifest.demand_origin,
+        stored.manifest.evidence_origin,
+    ) == ("synthetic", "synthetic", "synthetic")
 
 
 def test_the_folder_holds_the_comparators_the_parameters_and_the_manifest(tmp_path: Path) -> None:
@@ -265,6 +319,9 @@ def test_a_manifest_that_lists_only_the_comparators_is_refused(tmp_path: Path) -
         ("provisional", False),
         ("adaptation", "otra"),
         ("current_plan_feasible", False),
+        ("case_origin", "field"),
+        ("demand_origin", "field"),
+        ("evidence_origin", "field"),
     ],
 )
 def test_a_manifest_that_contradicts_the_files_is_refused(
@@ -299,8 +356,10 @@ def forge_content(folder: Path, change: dict[str, Any]) -> None:
         {"case_id": "OTRO"},
         {"case_version": "9.9.9"},
         {"scenario_id": "OTRO"},
+        {"evidence_origin": "field"},
+        {"demand_origin": "field"},
     ],
-    ids=["caso", "version", "escenario"],
+    ids=["caso", "version", "escenario", "evidencia-de-campo", "demanda-de-campo"],
 )
 def test_a_forged_content_with_its_new_hash_is_still_refused_when_it_contradicts(
     tmp_path: Path, change: dict[str, Any]
@@ -310,6 +369,21 @@ def test_a_forged_content_with_its_new_hash_is_still_refused_when_it_contradicts
     with pytest.raises(TrazabilidadError) as error:
         read_comparators(folder)
     assert error.value.code == ErrorCode.INPUT_SCHEMA
+    assert error.value.field == COMPARATORS_FILE
+
+
+def test_a_forged_field_evidence_agreeing_with_its_manifest_is_still_refused(
+    tmp_path: Path,
+) -> None:
+    """Contenido y manifiesto falsificados a la par: una demanda supuesta no pasa por de campo."""
+    folder = published(tmp_path)
+    forge_content(folder, {"evidence_origin": "field"})
+    manifest_path = folder / MANIFEST_FILE
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["evidence_origin"] = "field"
+    rewrite(manifest_path, manifest)
+    with pytest.raises(TrazabilidadError, match="no son válidos") as error:
+        read_comparators(folder)
     assert error.value.field == COMPARATORS_FILE
 
 

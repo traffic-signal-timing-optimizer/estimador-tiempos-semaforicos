@@ -5,8 +5,8 @@ comparación (DEV20). Para una corrida ``succeeded`` hecha con una carpeta de en
 
 1. Concilia la cohorte con la corrida (``reconcile_run``): comprueba que la corrida terminó bien,
    que no fue alterada y que se hizo con esas mismas entradas.
-2. Comprueba que el caso es el de las entradas (por su huella) y que el protocolo pide una
-   población y una censura que se saben medir.
+2. Comprueba que el caso y el escenario son los de las entradas (por su huella) y que el protocolo
+   pide una población y una censura que se saben medir.
 3. Calcula la demora de la cohorte con su censura (F2) y, si la corrida tiene la FCD de la zona
    (ADR11), la cola y las detenciones (F3). Una corrida sin FCD (carpeta 1.0.0) no tiene cola ni
    detenciones: se dice por qué; no se inventan.
@@ -19,18 +19,20 @@ evaluación es de DEV20.
 """
 
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import ValidationError
+from pydantic import ValidationError, model_validator
 
 from semaforo.dominio.base_model import FrozenModel
 from semaforo.dominio.case import Case, canonical_sha256
 from semaforo.dominio.errors import DomainError, ErrorCode
 from semaforo.dominio.protocol import Protocol
+from semaforo.dominio.scenario import Scenario, evidence_origin
 from semaforo.dominio.timing import shown
 from semaforo.evaluacion.cohort import CohortDelay, cohort_delay, require_supported
 from semaforo.evaluacion.errors import EvaluacionError
 from semaforo.evaluacion.metrics import MAX_FCD_BYTES, ZoneMetrics, zone_metrics
+from semaforo.simulacion.prepare import canonical_json_sha256
 from semaforo.simulacion.reconcile import MAX_TRIPINFO_BYTES, reconcile_run
 from semaforo.simulacion.run_inputs import verify_inputs
 from semaforo.simulacion.runner import FCD, SUMMARY, TRIPINFO
@@ -50,16 +52,21 @@ class RunMetrics(FrozenModel):
     """Métricas de una corrida, con unidades y denominadores (DEV19).
 
     ``zone`` es None si la corrida no tiene la FCD de la zona; ``zone_unavailable`` dice por qué.
-    ``origin`` es el del caso: una cifra sintética nunca se presenta como de campo.
+    Tres campos dicen de dónde sale lo medido (auditoría A03): ``case_origin`` es el del caso (la
+    red y sus reglas), ``demand_origin`` el de la demanda del escenario y ``evidence_origin`` el que
+    debe mostrar cualquier tabla: ``field`` solo si ambos lo son. Un caso real con demanda supuesta
+    es ``synthetic``: una cifra sintética nunca se presenta como de campo.
     ``simulation_findings``, ``teleports_total`` y ``collisions`` vienen del resumen de la corrida:
     con teletransportes, la demora de esos vehículos está subestimada.
     """
 
-    schema_version: Literal["1.0.0"] = "1.0.0"
+    schema_version: Literal["2.0.0"] = "2.0.0"
     run_id: str
     case_id: str
     case_version: str
-    origin: Literal["synthetic", "field"]
+    case_origin: Literal["synthetic", "field"]
+    demand_origin: Literal["synthetic", "field"]
+    evidence_origin: Literal["synthetic", "field"]
     scenario_id: str
     sumo_seed: int
     protocol_id: str
@@ -71,6 +78,14 @@ class RunMetrics(FrozenModel):
     teleports_total: int
     collisions: int
     simulation_findings: list[SimulationFinding]
+
+    @model_validator(mode="after")
+    def _origins_agree(self) -> Self:
+        if self.evidence_origin != evidence_origin(self.case_origin, self.demand_origin):
+            raise ValueError(
+                "el origen de la evidencia no sale del origen del caso y de la demanda"
+            )
+        return self
 
 
 def _zone_lanes_recorded(protocol: Protocol, edges: list[str]) -> None:
@@ -102,21 +117,33 @@ def _run_summary(outputs: Path) -> SimulationSummary:
         ) from error
 
 
-def evaluate_run(
-    inputs_dir: Path, runs_root: Path, run_id: str, case: Case, protocol: Protocol
+def evaluate_run(  # noqa: PLR0913  (el escenario es de solo palabra clave)
+    inputs_dir: Path,
+    runs_root: Path,
+    run_id: str,
+    case: Case,
+    protocol: Protocol,
+    *,
+    scenario: Scenario,
 ) -> RunMetrics:
     """Métricas de la corrida ``run_id`` de ``runs_root``, hecha con la carpeta ``inputs_dir``.
 
     Raises:
         DomainError: lo que lanzan ``verify_inputs`` y ``reconcile_run`` (corrida inexistente,
-            alterada, no exitosa o de otras entradas); HASH_MISMATCH si el caso no es el de las
-            entradas; INPUT_SCHEMA si el protocolo pide algo que no se sabe medir o una zona que
-            la corrida no registró; OUTPUT_INVALID si las salidas no son coherentes.
+            alterada, no exitosa o de otras entradas); HASH_MISMATCH si el caso o el escenario
+            no son los de las entradas; INPUT_SCHEMA si el protocolo pide algo que no se sabe medir
+            o una zona que la corrida no registró; OUTPUT_INVALID si las salidas no son coherentes.
     """
     manifest = verify_inputs(inputs_dir)
     if canonical_sha256(case) != manifest.case_sha256:
         raise EvaluacionError(
             ErrorCode.HASH_MISMATCH, "el caso no es el de las entradas de la corrida", "case"
+        )
+    if canonical_json_sha256(scenario.model_dump(mode="json")) != manifest.scenario_sha256:
+        raise EvaluacionError(
+            ErrorCode.HASH_MISMATCH,
+            "el escenario no es el de las entradas de la corrida",
+            "scenario",
         )
     require_supported(protocol)
     reconciliation = reconcile_run(inputs_dir, runs_root, run_id)
@@ -148,11 +175,14 @@ def evaluate_run(
             "la carpeta de entradas no declara zona de medición (manifiesto "
             f"{manifest.schema_version}): la corrida no tiene FCD"
         )
+    demand_origin = scenario.request.origin
     return RunMetrics(
         run_id=run_id,
         case_id=case.case_id,
         case_version=case.case_version,
-        origin=case.origin,
+        case_origin=case.origin,
+        demand_origin=demand_origin,
+        evidence_origin=evidence_origin(case.origin, demand_origin),
         scenario_id=manifest.scenario_id,
         sumo_seed=manifest.seeds.sumo_seed,
         protocol_id=protocol.protocol_id,

@@ -37,6 +37,8 @@ select = ["E", "W", "F", "I", "B", "UP", "S", "ANN", "RUF", "PL"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "PLR2004"]
+# Los guiones de mutaciones guardan líneas de código como texto y lanzan pytest con el Python del proyecto.
+"scripts/mutaciones/**" = ["E501", "S603", "S607"]
 
 [tool.pyright]
 include = ["src", "tests"]

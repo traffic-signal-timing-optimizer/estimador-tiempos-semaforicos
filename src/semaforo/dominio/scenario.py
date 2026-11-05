@@ -57,11 +57,20 @@ __all__ = [
     "Scenario",
     "ScenarioInvalidError",
     "accept_scenario",
+    "evidence_origin",
     "parse_scenario",
     "scenario_issues",
 ]
 
 ORIGINS_OF_REQUEST = {"synthetic": "synthetic", "field_derived": "field"}
+
+
+def evidence_origin(case_origin: str, demand_origin: str) -> Literal["synthetic", "field"]:
+    """Origen que debe mostrar un resultado: ``field`` solo si el caso y la demanda lo son.
+
+    Un caso de campo con una demanda supuesta da un resultado ``synthetic`` (auditoría A03).
+    """
+    return "field" if (case_origin, demand_origin) == ("field", "field") else "synthetic"
 
 
 class DemandRow(FrozenModel):

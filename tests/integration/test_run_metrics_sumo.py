@@ -7,15 +7,17 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from prepared_inputs import MOMENT, request_for
 from semaforo.dominio.case import Case
 from semaforo.dominio.errors import DomainError, ErrorCode
 from semaforo.dominio.protocol import Protocol, parse_protocol
+from semaforo.dominio.scenario import Scenario
 from semaforo.evaluacion import run_metrics
 from semaforo.evaluacion.cohort import compare_cohorts
 from semaforo.evaluacion.errors import EvaluacionError
-from semaforo.evaluacion.run_metrics import evaluate_run
+from semaforo.evaluacion.run_metrics import RunMetrics, evaluate_run
 from semaforo.simulacion.prepare import MANIFEST_FILE, ZONE_FILE, publish_inputs
 from semaforo.simulacion.reconcile import reconcile_run
 from semaforo.simulacion.run_inputs import run_inputs
@@ -52,17 +54,21 @@ def saturate_with_drain(scenario: dict[str, Any]) -> None:
     scenario["drain_max_s"] = 60
 
 
-def prepared(tmp_path: Path, name: str, **options: Any) -> tuple[Path, Case]:  # noqa: ANN401
+def prepared(
+    tmp_path: Path,
+    name: str,
+    **options: Any,  # noqa: ANN401
+) -> tuple[Path, Case, Scenario]:
     request = request_for(tmp_path, **options)
-    return publish_inputs(tmp_path / name, request, MOMENT), request.case
+    return publish_inputs(tmp_path / name, request, MOMENT), request.case, request.scenario
 
 
 def test_a_full_run_gives_a_complete_cohort_and_the_zone_metrics(
     tmp_path: Path, runs: Path, sumo_binary: Path
 ) -> None:
-    folder, case = prepared(tmp_path, "entradas")
+    folder, case, scenario = prepared(tmp_path, "entradas")
     run = run_inputs(folder, runs, sumo=sumo_binary)
-    metrics = evaluate_run(folder, runs, run.manifest.run_id, case, protocol())
+    metrics = evaluate_run(folder, runs, run.manifest.run_id, case, protocol(), scenario=scenario)
     manifest = json.loads((folder / MANIFEST_FILE).read_text(encoding="utf-8"))
     cohort = metrics.cohort
     assert cohort.total.requested == manifest["vehicles"]["cohort"] == 150
@@ -79,7 +85,8 @@ def test_a_full_run_gives_a_complete_cohort_and_the_zone_metrics(
     assert queue.max_vehicles > 0  # hay rojo: alguien se detiene
     assert metrics.zone.stops.total_stops > 0
     assert metrics.zone_unavailable is None
-    assert (metrics.origin, metrics.protocol_status) == ("synthetic", "draft")
+    assert (metrics.case_origin, metrics.demand_origin) == ("synthetic", "synthetic")
+    assert (metrics.evidence_origin, metrics.protocol_status) == ("synthetic", "draft")
     assert run.summary is not None
     assert (metrics.teleports_total, metrics.collisions) == (
         run.summary.teleports_total,
@@ -91,9 +98,9 @@ def test_a_full_run_gives_a_complete_cohort_and_the_zone_metrics(
 def test_qa25_a_saturated_run_keeps_every_requested_vehicle_and_is_censored(
     tmp_path: Path, runs: Path, sumo_binary: Path
 ) -> None:
-    folder, case = prepared(tmp_path, "entradas", scenario_change=saturate)
+    folder, case, scenario = prepared(tmp_path, "entradas", scenario_change=saturate)
     run = run_inputs(folder, runs, sumo=sumo_binary)
-    metrics = evaluate_run(folder, runs, run.manifest.run_id, case, protocol())
+    metrics = evaluate_run(folder, runs, run.manifest.run_id, case, protocol(), scenario=scenario)
     total = metrics.cohort.total
     manifest = json.loads((folder / MANIFEST_FILE).read_text(encoding="utf-8"))
     assert total.requested == manifest["vehicles"]["cohort"]
@@ -116,11 +123,15 @@ def test_two_censored_real_runs_are_undetermined_even_when_identical(
 ) -> None:
     """Dos corridas censuradas no tienen medias completas: no se declara ganadora a ninguna,
     aunque sean la misma (QA26). Comparar planes distintos con la misma demanda es de DEV20."""
-    folder, case = prepared(tmp_path, "entradas", scenario_change=saturate)
+    folder, case, scenario = prepared(tmp_path, "entradas", scenario_change=saturate)
     first = run_inputs(folder, runs, sumo=sumo_binary)
     second = run_inputs(folder, runs, sumo=sumo_binary)
-    a = evaluate_run(folder, runs, first.manifest.run_id, case, protocol()).cohort
-    b = evaluate_run(folder, runs, second.manifest.run_id, case, protocol()).cohort
+    a = evaluate_run(
+        folder, runs, first.manifest.run_id, case, protocol(), scenario=scenario
+    ).cohort
+    b = evaluate_run(
+        folder, runs, second.manifest.run_id, case, protocol(), scenario=scenario
+    ).cohort
     result = compare_cohorts(a, b, protocol().numeric_abs_tolerance)
     assert result.same_cohort is True
     assert result.total.verdict == "undetermined"  # dos censuradas: no hay medias completas
@@ -147,10 +158,10 @@ def as_old_folder(tmp_path: Path, published: Path) -> Path:
 def test_an_old_folder_has_no_zone_metrics_and_says_why(
     tmp_path: Path, runs: Path, sumo_binary: Path
 ) -> None:
-    published, case = prepared(tmp_path, "entradas")
+    published, case, scenario = prepared(tmp_path, "entradas")
     folder = as_old_folder(tmp_path, published)
     run = run_inputs(folder, runs, sumo=sumo_binary)
-    metrics = evaluate_run(folder, runs, run.manifest.run_id, case, protocol())
+    metrics = evaluate_run(folder, runs, run.manifest.run_id, case, protocol(), scenario=scenario)
     assert metrics.zone is None
     assert metrics.zone_unavailable is not None
     assert "1.0.0" in metrics.zone_unavailable
@@ -160,10 +171,10 @@ def test_an_old_folder_has_no_zone_metrics_and_says_why(
 def test_in_an_old_saturated_folder_the_wait_comes_from_the_end_of_the_simulation(
     tmp_path: Path, runs: Path, sumo_binary: Path
 ) -> None:
-    published, case = prepared(tmp_path, "entradas", scenario_change=saturate_with_drain)
+    published, case, scenario = prepared(tmp_path, "entradas", scenario_change=saturate_with_drain)
     folder = as_old_folder(tmp_path, published)
     run = run_inputs(folder, runs, sumo=sumo_binary)
-    metrics = evaluate_run(folder, runs, run.manifest.run_id, case, protocol())
+    metrics = evaluate_run(folder, runs, run.manifest.run_id, case, protocol(), scenario=scenario)
     times = json.loads((folder / MANIFEST_FILE).read_text(encoding="utf-8"))["times"]
     end_s = times["end_s"]
     assert end_s > times["cohort_end_s"]
@@ -183,7 +194,7 @@ def test_teleports_and_collisions_of_the_run_reach_the_metrics(
     tmp_path: Path, runs: Path, sumo_binary: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """La demo no tiene atascos: se pone un resumen con teletransportes para ver que se copian."""
-    folder, case = prepared(tmp_path, "entradas")
+    folder, case, scenario = prepared(tmp_path, "entradas")
     run = run_inputs(folder, runs, sumo=sumo_binary)
     assert run.summary is not None
     stuck = run.summary.model_copy(update={"teleports_total": 3, "collisions": 1})
@@ -192,14 +203,14 @@ def test_teleports_and_collisions_of_the_run_reach_the_metrics(
         return stuck
 
     monkeypatch.setattr(run_metrics, "_run_summary", summary_of)
-    metrics = evaluate_run(folder, runs, run.manifest.run_id, case, protocol())
+    metrics = evaluate_run(folder, runs, run.manifest.run_id, case, protocol(), scenario=scenario)
     assert (metrics.teleports_total, metrics.collisions) == (3, 1)
 
 
 def test_the_access_of_each_zone_street_is_passed_to_the_measurement(
     tmp_path: Path, runs: Path, sumo_binary: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    folder, case = prepared(tmp_path, "entradas")
+    folder, case, scenario = prepared(tmp_path, "entradas")
     run = run_inputs(folder, runs, sumo=sumo_binary)
     seen: dict[str, object] = {}
     measure = run_metrics.zone_metrics
@@ -209,54 +220,97 @@ def test_the_access_of_each_zone_street_is_passed_to_the_measurement(
         return measure(*args, **kwargs)
 
     monkeypatch.setattr(run_metrics, "zone_metrics", spy)
-    evaluate_run(folder, runs, run.manifest.run_id, case, protocol())
+    evaluate_run(folder, runs, run.manifest.run_id, case, protocol(), scenario=scenario)
     assert seen["edge_access"] == {"demo_N": "N", "demo_E": "E"}
 
 
 def test_the_case_must_be_the_one_of_the_inputs(
     tmp_path: Path, runs: Path, sumo_binary: Path
 ) -> None:
-    folder, case = prepared(tmp_path, "entradas")
+    folder, case, scenario = prepared(tmp_path, "entradas")
     run = run_inputs(folder, runs, sumo=sumo_binary)
     other = case.model_copy(update={"case_version": "1.0.1"})
     with pytest.raises(EvaluacionError, match="el caso no es") as raised:
-        evaluate_run(folder, runs, run.manifest.run_id, other, protocol())
+        evaluate_run(folder, runs, run.manifest.run_id, other, protocol(), scenario=scenario)
+    assert raised.value.code is ErrorCode.HASH_MISMATCH
+
+
+def real_case(data: dict[str, Any]) -> None:
+    data["origin"] = "field"
+    data["representation_status"] = "unverified"
+
+
+def test_a_real_case_with_a_supposed_demand_is_not_field_evidence(
+    tmp_path: Path, runs: Path, sumo_binary: Path
+) -> None:
+    """Auditoría A03: el origen del caso ya no se hace pasar por el de la demanda."""
+    folder, case, scenario = prepared(tmp_path, "entradas", case_change=real_case)
+    assert (case.origin, scenario.origin) == ("field", "synthetic")
+    run = run_inputs(folder, runs, sumo=sumo_binary)
+    metrics = evaluate_run(folder, runs, run.manifest.run_id, case, protocol(), scenario=scenario)
+    assert metrics.schema_version == "2.0.0"
+    assert (metrics.case_origin, metrics.demand_origin) == ("field", "synthetic")
+    assert metrics.evidence_origin == "synthetic"
+    assert "origin" not in metrics.model_dump()
+    forged = {**metrics.model_dump(mode="json"), "evidence_origin": "field"}
+    with pytest.raises(ValidationError, match="origen de la evidencia"):
+        RunMetrics.model_validate(forged)
+
+
+def test_the_scenario_must_be_the_one_of_the_inputs(
+    tmp_path: Path, runs: Path, sumo_binary: Path
+) -> None:
+    """Otra demanda con el mismo nombre no puede explicar estas corridas (auditoría A03)."""
+    folder, case, scenario = prepared(tmp_path, "entradas")
+    run = run_inputs(folder, runs, sumo=sumo_binary)
+    other = scenario.model_copy(update={"demand_seed": scenario.demand_seed + 1})
+    with pytest.raises(EvaluacionError, match="el escenario no es") as raised:
+        evaluate_run(folder, runs, run.manifest.run_id, case, protocol(), scenario=other)
     assert raised.value.code is ErrorCode.HASH_MISMATCH
 
 
 def test_a_run_made_with_other_inputs_is_refused(
     tmp_path: Path, runs: Path, sumo_binary: Path
 ) -> None:
-    folder, case = prepared(tmp_path, "entradas")
-    other, _ = prepared(tmp_path, "otras", scenario_change=saturate)
+    folder, case, scenario = prepared(tmp_path, "entradas")
+    other, _, _ = prepared(tmp_path, "otras", scenario_change=saturate)
     run = run_inputs(other, runs, sumo=sumo_binary)
     with pytest.raises(DomainError) as raised:
-        evaluate_run(folder, runs, run.manifest.run_id, case, protocol())
+        evaluate_run(folder, runs, run.manifest.run_id, case, protocol(), scenario=scenario)
     assert raised.value.code is ErrorCode.HASH_MISMATCH
 
 
 def test_a_failed_run_has_no_metrics(tmp_path: Path, runs: Path, sumo_binary: Path) -> None:
-    folder, case = prepared(tmp_path, "entradas")
+    folder, case, scenario = prepared(tmp_path, "entradas")
     run = run_inputs(folder, runs, sumo=sumo_binary, limits=RunLimits(wall_timeout_s=0.01))
     assert run.manifest.status == "failed"
     with pytest.raises(DomainError) as raised:
-        evaluate_run(folder, runs, run.manifest.run_id, case, protocol())
+        evaluate_run(folder, runs, run.manifest.run_id, case, protocol(), scenario=scenario)
     assert raised.value.code is ErrorCode.OUTPUT_INVALID
 
 
 def test_a_zone_the_run_did_not_record_is_refused(
     tmp_path: Path, runs: Path, sumo_binary: Path
 ) -> None:
-    folder, case = prepared(tmp_path, "entradas")
+    folder, case, scenario = prepared(tmp_path, "entradas")
     run = run_inputs(folder, runs, sumo=sumo_binary)
     with pytest.raises(EvaluacionError, match="no están en la FCD") as raised:
-        evaluate_run(folder, runs, run.manifest.run_id, case, protocol(zone_lane_ids=["demo_S_0"]))
+        evaluate_run(
+            folder,
+            runs,
+            run.manifest.run_id,
+            case,
+            protocol(zone_lane_ids=["demo_S_0"]),
+            scenario=scenario,
+        )
     assert raised.value.code is ErrorCode.INPUT_SCHEMA
 
 
 def test_an_unsupported_protocol_is_refused_before_reading_the_run(
     tmp_path: Path, runs: Path
 ) -> None:
-    folder, case = prepared(tmp_path, "entradas")
+    folder, case, scenario = prepared(tmp_path, "entradas")
     with pytest.raises(EvaluacionError, match="población"):
-        evaluate_run(folder, runs, "no-existe", case, protocol(cohort_policy="todos"))
+        evaluate_run(
+            folder, runs, "no-existe", case, protocol(cohort_policy="todos"), scenario=scenario
+        )

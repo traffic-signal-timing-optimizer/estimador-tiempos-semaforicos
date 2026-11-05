@@ -565,7 +565,14 @@ def _evaluate_seed(
         message = f"la corrida terminó con estado {manifest.status}"
         return failed_seed(seed, manifest.run_id, manifest.status, "run_failed", message)
     try:
-        metrics = evaluate_run(inputs, setup.runs_root, manifest.run_id, setup.case, setup.protocol)
+        metrics = evaluate_run(
+            inputs,
+            setup.runs_root,
+            manifest.run_id,
+            setup.case,
+            setup.protocol,
+            scenario=setup.scenario,
+        )
     except DomainError as error:
         return failed_seed(
             seed, manifest.run_id, manifest.status, "evaluation_failed", error.message

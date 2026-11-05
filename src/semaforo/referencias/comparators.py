@@ -27,7 +27,7 @@ from semaforo.dominio.base_model import FrozenModel
 from semaforo.dominio.case import Case
 from semaforo.dominio.errors import ErrorCode
 from semaforo.dominio.feasibility import PreparedCase
-from semaforo.dominio.scenario import Scenario
+from semaforo.dominio.scenario import Scenario, evidence_origin
 from semaforo.referencias.baselines import (
     CriticalPath,
     ObservedPlan,
@@ -129,25 +129,46 @@ class WebsterSection(FrozenModel):
         return self
 
 
-class ComparatorsFile(FrozenModel):
-    """Contenido de ``comparadores.json``."""
+Origin = Literal["synthetic", "field"]
 
-    schema_version: Literal["1.0.0"] = "1.0.0"
+
+class ComparatorsFile(FrozenModel):
+    """Contenido de ``comparadores.json``.
+
+    ``case_origin`` es el del caso, ``demand_origin`` el de la demanda del escenario con que se
+    calculó Webster y ``evidence_origin`` el que debe mostrar cualquier tabla (auditoría A03).
+    """
+
+    schema_version: Literal["2.0.0"] = "2.0.0"
     case_id: str
     case_version: str
     scenario_id: str
+    case_origin: Origin
+    demand_origin: Origin
+    evidence_origin: Origin
     current_plan: CurrentSection
     webster: WebsterSection
+
+    @model_validator(mode="after")
+    def _origins_agree(self) -> Self:
+        if self.evidence_origin != evidence_origin(self.case_origin, self.demand_origin):
+            raise ValueError(
+                "el origen de la evidencia no sale del origen del caso y de la demanda"
+            )
+        return self
 
 
 class ComparatorsManifest(FrozenModel):
     """Manifiesto de los comparadores publicados."""
 
-    schema_version: Literal["1.0.0"] = "1.0.0"
+    schema_version: Literal["2.0.0"] = "2.0.0"
     created_at: datetime
     case_id: str
     case_version: str
     scenario_id: str
+    case_origin: Origin
+    demand_origin: Origin
+    evidence_origin: Origin
     parameter_set: str
     provisional: bool
     adaptation: str
@@ -169,6 +190,7 @@ class ComparatorsResult:
     current: ObservedPlan
     webster: WebsterPlan
     parameters: WebsterParameters
+    demand_origin: Origin
 
     @property
     def search_current_plan(self) -> Mapping[str, float]:
@@ -203,7 +225,9 @@ def compute_comparators(
         )
     current = read_current_plan(program_folder, prepared, parameters)
     webster = webster_plan(crossing_structure(case), prepared, scenario.request, parameters)
-    return ComparatorsResult(case, scenario.scenario_id, current, webster, parameters)
+    return ComparatorsResult(
+        case, scenario.scenario_id, current, webster, parameters, scenario.request.origin
+    )
 
 
 def _plan_row(durations: Mapping[str, float], cycle_s: float) -> PlanRow:
@@ -228,6 +252,9 @@ def _file_of(result: ComparatorsResult) -> ComparatorsFile:
         case_id=result.case.case_id,
         case_version=result.case.case_version,
         scenario_id=result.scenario_id,
+        case_origin=result.case.origin,
+        demand_origin=result.demand_origin,
+        evidence_origin=evidence_origin(result.case.origin, result.demand_origin),
         current_plan=CurrentSection(
             plan=_plan_row(current.durations_s, current.cycle_s),
             source=current.source,
@@ -285,6 +312,9 @@ def publish_comparators(
         case_id=case.case_id,
         case_version=case.case_version,
         scenario_id=result.scenario_id,
+        case_origin=content.case_origin,
+        demand_origin=content.demand_origin,
+        evidence_origin=content.evidence_origin,
         parameter_set=result.parameters.parameter_set,
         provisional=result.parameters.provisional,
         adaptation=content.webster.adaptation,
@@ -375,6 +405,8 @@ def read_comparators(folder: Path) -> StoredComparators:
         content.case_id == manifest.case_id
         and content.case_version == manifest.case_version
         and content.scenario_id == manifest.scenario_id
+        and (content.case_origin, content.demand_origin, content.evidence_origin)
+        == (manifest.case_origin, manifest.demand_origin, manifest.evidence_origin)
         and webster.status == manifest.webster_status
         and webster.adaptation == manifest.adaptation
         and webster.parameter_set == manifest.parameter_set == parameters.parameter_set

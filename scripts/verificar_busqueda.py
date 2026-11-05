@@ -11,6 +11,7 @@ Uso, desde la carpeta raíz del proyecto, con el piloto de DEV14 como ejemplo:
         --bitacora datos\\evidencia\\piloto-dev14-v1\\bitacora.jsonl ^
         --caso datos\\casos\\caso-001\\case.json ^
         --protocolo datos\\derivados\\protocolos\\caso-001\\borrador-dev14-piloto.json ^
+        --escenario datos\\escenarios\\caso-001\\ESC-SINT-001.json ^
         --recalcular
 
 Sale con 0 si todo cuadra y con 1 si hay problemas. No usa SUMO ni modifica ningún archivo.
@@ -28,6 +29,7 @@ from semaforo.caso.case_validation import read_case  # noqa: E402
 from semaforo.caso.json_input import read_json  # noqa: E402
 from semaforo.dominio.protocol import parse_protocol  # noqa: E402
 from semaforo.referencias.evidence import verify_search_evidence  # noqa: E402
+from semaforo.simulacion.demand_inputs import read_scenario  # noqa: E402
 
 
 def main() -> int:
@@ -36,18 +38,21 @@ def main() -> int:
     parser.add_argument("--bitacora", type=Path, required=True, help="bitácora de la búsqueda")
     parser.add_argument("--caso", type=Path, required=True, help="case.json del caso")
     parser.add_argument("--protocolo", type=Path, required=True, help="protocolo de la búsqueda")
+    parser.add_argument("--escenario", type=Path, required=True, help="escenario de la búsqueda")
     parser.add_argument("--datos", type=Path, default=ROOT / "datos", help="carpeta de trabajo")
     parser.add_argument("--recalcular", action="store_true", help="volver a medir cada corrida")
     parser.add_argument("--json", action="store_true", help="escribir el informe como JSON")
     arguments = parser.parse_args()
 
+    case = read_case(arguments.caso)
     report = verify_search_evidence(
         arguments.etiqueta,
         journal=arguments.bitacora,
         inputs_root=arguments.datos / "derivados" / "entradas",
         runs_root=arguments.datos / "ejecuciones",
-        case=read_case(arguments.caso),
+        case=case,
         protocol=parse_protocol(read_json(arguments.protocolo, "protocolo")),
+        scenario=read_scenario(arguments.escenario, case),
         recompute=arguments.recalcular,
     )
     if arguments.json:

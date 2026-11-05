@@ -165,7 +165,12 @@ def test_a_hostile_run_id_cannot_leave_the_runs_folder(tmp_path: Path, run_id: s
     (tmp_path / "runs").mkdir()
     with pytest.raises(DomainError) as raised:
         evaluate_run(
-            folder, tmp_path / "runs", run_id, request.case, parse_protocol(protocol_data())
+            folder,
+            tmp_path / "runs",
+            run_id,
+            request.case,
+            parse_protocol(protocol_data()),
+            scenario=request.scenario,
         )
     assert raised.value.code in {ErrorCode.PATH_NOT_ALLOWED, ErrorCode.INPUT_SCHEMA}
     assert not (tmp_path / "fuera").exists()

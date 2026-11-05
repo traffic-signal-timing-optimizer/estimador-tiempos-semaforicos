@@ -29,6 +29,7 @@ from pydantic import ValidationError
 from semaforo.dominio.case import Case, canonical_sha256
 from semaforo.dominio.errors import DomainError, ErrorCode
 from semaforo.dominio.protocol import Protocol
+from semaforo.dominio.scenario import Scenario
 from semaforo.evaluacion.run_metrics import evaluate_run
 from semaforo.referencias.errors import ReferenciasError
 from semaforo.referencias.evaluation import (
@@ -207,12 +208,14 @@ def verify_search_evidence(  # noqa: PLR0913, PLR0912, PLR0915  (una comprobaci�
     runs_root: Path,
     case: Case,
     protocol: Protocol,
+    scenario: Scenario,
     recompute: bool = False,
 ) -> EvidenceReport:
     """Comprueba una búsqueda publicada contra sus bitácora, entradas y corridas. No escribe nada.
 
-    ``case`` y ``protocol`` son los archivos con que se quiere explicar la búsqueda: si no son los
-    que se usaron, aparece como problema. Con ``recompute`` se vuelve a medir cada corrida.
+    ``case``, ``protocol`` y ``scenario`` son los archivos con que se quiere explicar la búsqueda:
+    si no son los que se usaron, aparece como problema. Con ``recompute`` se vuelve a medir cada
+    corrida.
 
     Raises:
         TrazabilidadError: si la carpeta de la etiqueta no está íntegra.
@@ -271,7 +274,9 @@ def verify_search_evidence(  # noqa: PLR0913, PLR0912, PLR0915  (una comprobaci�
         sumo_versions.add(run_manifest.environment.get("sumo", ""))
         if recompute and outcome.get("run_status") == "succeeded":
             try:
-                metrics = evaluate_run(folder, runs_root, str(run_id), case, protocol)
+                metrics = evaluate_run(
+                    folder, runs_root, str(run_id), case, protocol, scenario=scenario
+                )
             except DomainError as error:
                 problems.append(f"no se pudo volver a medir {run_id}: {error.message}")
                 continue
@@ -306,6 +311,8 @@ def verify_search_evidence(  # noqa: PLR0913, PLR0912, PLR0915  (una comprobaci�
         }
         if canonical_sha256(case) != base.case_sha256:
             problems.append("el caso dado no es el de las corridas")
+        if canonical_json_sha256(scenario.model_dump(mode="json")) != base.scenario_sha256:
+            problems.append("el escenario dado no es el de las corridas")
     if protocol.protocol_id != stored.label.protocol_id:
         problems.append("el protocolo dado no es el de la etiqueta")
 

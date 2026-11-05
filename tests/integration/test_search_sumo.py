@@ -429,6 +429,7 @@ def evidence(
         "runs_root": search.setup.runs_root,
         "case": search.setup.case,
         "protocol": search.setup.protocol,
+        "scenario": search.setup.scenario,
     }
     arguments.update(changes)
     return verify_search_evidence(label, **arguments)
@@ -490,6 +491,18 @@ def test_the_evidence_notices_a_case_that_is_not_the_one_used(
     other = search.setup.case.model_copy(update={"description": "otra descripción"})
     report = evidence(search, outcome, tmp_path, case=other)
     assert any("el caso dado no es el de las corridas" in problem for problem in report.problems)
+
+
+def test_the_evidence_notices_a_scenario_that_is_not_the_one_used(
+    finished: tuple[Search, SearchOutcome], tmp_path: Path
+) -> None:
+    """El mismo nombre con otra demanda no explica las corridas (auditoría A03)."""
+    search, outcome = finished
+    scenario = search.setup.scenario
+    other = scenario.model_copy(update={"demand_seed": scenario.demand_seed + 1})
+    report = evidence(search, outcome, tmp_path, scenario=other, recompute=True)
+    assert any("el escenario dado no es el de las corridas" in p for p in report.problems)
+    assert any("el escenario no es el de las entradas" in p for p in report.problems)
 
 
 def test_the_evidence_notices_a_journal_of_another_search(
@@ -824,5 +837,6 @@ def test_the_evidence_notices_a_trace_whose_identity_does_not_give_the_label_ids
         runs_root=search.setup.runs_root,
         case=search.setup.case,
         protocol=search.setup.protocol,
+        scenario=search.setup.scenario,
     )
     assert any("no salen de su identidad" in problem for problem in report.problems)
