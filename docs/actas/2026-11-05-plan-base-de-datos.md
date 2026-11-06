@@ -204,6 +204,8 @@ Unas 35 tablas en ocho áreas. Los nombres y las columnas finales se fijan en F1
 
 ## 9. Fases
 
+> **Histórica.** Esta tabla es la propuesta inicial de seis fases. Las fases vigentes (F0 a F8, con la planificación y diseño al inicio) están en la sección 12.
+
 | Fase | Contenido | Resultado | Complejidad | Riesgo | Modelo |
 |---|---|---|---|---|---|
 | **F0** | Acta del cambio de alcance con su impacto; DEC09 (aceptar ADR01 a ADR08 con las precisiones ya analizadas) y ADR12; copia de la v1.0; cambios de la sección 7; validador actualizado | Documentación 1.1 coherente y contratos 43/43 | Media | Medio: contradicciones entre documentos | Opus |
@@ -223,6 +225,8 @@ Antes de cargar datos grandes, cada fase mide memoria y disco, como en el resto 
 
 ## 11. Decisiones que se piden al PO
 
+> **Histórica.** Las decisiones del PO ya tomadas están en la sección 12.
+
 1. ¿Se aprueba el cambio de alcance como requisito nuevo (HU15 y DEV31)? La alternativa es colgarlo de HU14 (exportar y reproducir), pero quedaría menos visible en la tesis.
 2. ¿PostgreSQL 17 desde el inicio, con las condiciones de la sección 2?
 3. ¿Se confirma que los archivos siguen siendo el original y la base, la copia completa para consultar?
@@ -231,3 +235,37 @@ Antes de cargar datos grandes, cada fase mide memoria y disco, como en el resto 
 6. Lo que quedó pendiente de DEC09: comprimir el FCD, anclar en git las huellas de lo publicado y aceptar ADR01 a ADR08 con sus precisiones.
 7. ¿Se avisa al asesor? Cambia el diseño técnico, aunque no la tesis.
 8. ¿Se ejecuta F0?
+
+## 12. Decisiones del PO y fases vigentes (2026-11-05, reemplazan las secciones 9 y 11)
+
+**Decisiones tomadas (nada se ejecutó):**
+
+1. DEV31 se hace antes de DEV16. El PO revisa las fases antes de ejecutar la primera.
+2. PostgreSQL 17 desde el inicio.
+3. Los archivos con huella son el respaldo físico; la base es el consolidado.
+4. La cola de vehículos segundo a segundo **se guarda**. El formato (arreglo por acceso o una fila por segundo) se decide en el diseño, con medición.
+5. Las herramientas para regenerar los Word y los diagramas son temporales (versiones portátiles fuera del proyecto) y se borran al terminar. Para la tesis `261-2097-11-RV-PI1-TPq v.2.5.docx` se entrega un `.md` con todos los cambios al detalle (texto antes y después); el v2.5 queda intacto y los cambios van en una copia (v2.6 borrador), salvo que el PO pida editar el original.
+6. El FCD se comprime en las corridas nuevas. Las 133 existentes no se tocan. Se aceptan ADR01 a ADR08 con las precisiones del análisis de DEC09, y se guardan en git las huellas de lo publicado.
+7. El asesor se entera en la próxima reunión del PO.
+8. La red del PO es cerrada; aun así PostgreSQL se limita a la laptop.
+9. **Antes de modificar la documentación debe existir una fase de planificación y diseño** (la nueva F0).
+
+**Pesos medidos y estimados** (detalle en `CONTEXTO.md`, bitácora del 2026-11-05): 22,8 MB por simulación sin comprimir y ~2,5 MB con el FCD comprimido. DEV16 (4 692 simulaciones): ~107 GB contra ~12 GB de archivos, y ~2 GB de base. Proyecto completo con un corpus principal hipotético de 100 escenarios: ~42 GB de archivos y ~6 GB de base.
+
+**Fases vigentes de DEV31:**
+
+Las ocho fases que el PO revisó y aprobó se mantienen **sin cambios** y solo se renumeran (F0 a F7 pasan a F1 a F8). Lo único nuevo es la **F0 de planificación y diseño**, al inicio.
+
+| Fase | Qué se hace | Qué queda al terminar | Complejidad | Riesgo | Modelo |
+|---|---|---|---|---|---|
+| **F0** (nueva) | **Planificar y diseñar la base de datos y los cambios de arquitectura**, sin tocar `documentacion/` ni código. Se define qué cambia en la arquitectura, cómo será la base (tablas principales, relaciones, cegado de la prueba final, formato de la cola, carga) y qué cambiaría en cada documento | Documento de planificación y diseño para aprobación del PO | Media-alta | Medio | Opus |
+| **F1** (antes F0) | Acta del cambio de alcance. Copia de la versión 1.0 de `documentacion/`. Se cambian los tres documentos de diseño, las matrices y el validador (HU15, DEV31, QA32 a QA37). DEC09: aceptar ADR01 a ADR08 con las precisiones y ADR12 nuevo. Los Word aún no | Documentación 1.1 en Markdown, coherente; contratos 43/43 | Media | Medio | Opus |
+| **F2** (antes F1) | Regenerar los tres Word y los diagramas con las herramientas temporales. Copia v2.6 borrador de la tesis y su `.md` de cambios | Word 1.1, tesis v2.6 borrador, `.md` de cambios y herramientas borradas | Media | Bajo | Sonnet |
+| **F3** (antes F2) | Esquema detallado: cada tabla y columna, unidades, reglas, permisos, la zona cegada de la prueba final y el diccionario de datos | Esquema para tu revisión, antes de programar | Media-alta | Medio | Opus |
+| **F4** (antes F3) | Comprimir el FCD en las corridas nuevas y registrar el commit del código en los manifiestos. Lector de FCD que acepte los dos formatos | Corridas nuevas con ~10 veces menos peso | Media | Medio: toca DEV19 | Sonnet |
+| **F5** (antes F4) | Preparar PostgreSQL: base en D:, usuarios, conexiones solo desde la laptop (con pasos para el PO). Cargador con huellas verificadas, de todo o nada y sin duplicar. QA32, QA34 y QA36 | Cargador probado | Media-alta | Medio | Opus |
+| **F6** (antes F5) | Cargar lo que ya existe (133 corridas, piloto y comparadores) y comparar la base con los archivos (QA33). Cegado de la prueba (QA35) | Base con datos actuales y conciliación al 100 % | Media | Bajo | Sonnet |
+| **F7** (antes F6) | Panel HTML estático: Inicio, Caso, Escenarios, Simulaciones, Búsqueda, Entrenamiento, Consultas y Evaluación final (bloqueada). Revisión manual (QA37) | Panel que se abre con doble clic | Media | Bajo | Sonnet |
+| **F8** (antes F7) | Ensayos de daño a propósito, inspección contra la documentación y acta de cierre | Cierre de DEV31 | Media | Bajo | Haiku |
+
+La nueva F0 y la F3 (antes F2) se parecen: F0 decide el diseño general y la F3 lo baja al detalle de cada columna. Se dejó la F3 como estaba aprobada. Cada fase espera el OK del PO.
