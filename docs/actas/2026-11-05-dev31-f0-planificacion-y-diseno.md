@@ -4,7 +4,7 @@ Escrito para: el Product Owner (aprobación del diseño), el asesor (qué eviden
 
 - **Fecha:** 2026-11-05
 - **Tarea:** DEV31 (historia propuesta HU15). Plan vigente: sección 12 de `docs/actas/2026-11-05-plan-base-de-datos.md`.
-- **Estado:** **propuesto, para aprobación del PO.** Esta fase no cambia `documentacion/`, el código ni `datos/`. Solo se leyeron la tesis v2.5, los documentos 01 a 03, los contratos (`schemas/`), el código y los artefactos publicados.
+- **Estado:** **aprobado por el PO el 2026-11-05.** El PO pidió que la documentación se escriba al final; el orden de las fases siguientes está en la sección 13 de `docs/actas/2026-11-05-plan-base-de-datos.md`. Esta fase no cambia `documentacion/`, el código ni `datos/`. Solo se leyeron la tesis v2.5, los documentos 01 a 03, los contratos (`schemas/`), el código y los artefactos publicados.
 - **Modelo:** Opus. Complejidad media-alta, riesgo medio.
 - **Qué entrega:** (1) qué evidencia tendrá que mostrar la tesis al jurado; (2) los cambios de arquitectura; (3) el diseño de la base; (4) el panel; (5) la lista exacta de cambios por documento para F1 y F2; (6) los hallazgos y las decisiones que se piden al PO.
 
@@ -13,7 +13,7 @@ Escrito para: el Product Owner (aprobación del diseño), el asesor (qué eviden
 1. El jurado no solo pregunta **qué números salieron**. También pregunta **cómo se sabe que el procedimiento fue honesto**: que la prueba final no se miró antes de tiempo, que todas las alternativas se compararon en las mismas condiciones, que no se borraron los casos malos y que nada se cambió después. Por eso la base guarda tres tipos de datos: **entradas**, **resultados** y **evidencia del procedimiento**.
 2. Los archivos con huella siguen siendo el respaldo físico; la base es el consolidado. **Ningún proceso de cálculo lee la base**: búsqueda, entrenamiento y evaluación siguen trabajando con archivos, así que no cambia nada de lo ya probado.
 3. **PostgreSQL 17**, una base `semaforo` guardada en D:, cuatro usuarios con permisos distintos y una regla que la propia base aplica: **las filas de prueba quedan ocultas hasta que se registre su apertura**.
-4. **Unas 40 tablas** en seis zonas: control, caso, experimento, simulación, aprendizaje y evaluación final.
+4. **54 tablas** en siete esquemas (control, caso, experimento, simulación, aprendizaje, evaluación final y vistas), con 80 relaciones de clave foránea. Las vistas no son tablas. El catálogo de la sección 5.4 ya nombra las 54; la cifra de «unas 40» de una versión anterior de esta acta era un error.
 5. **Las métricas se calculan una sola vez, con el código oficial del proyecto (DEV19)**, y se publican como archivo con huella. La base las copia; nunca las recalcula a su manera.
 6. **Cada tabla y figura de resultados de la tesis sale de una consulta guardada en el repositorio.** Así se puede seguir cualquier número hasta el archivo original.
 7. **El panel** es HTML estático, generado desde la base con el usuario de solo lectura.

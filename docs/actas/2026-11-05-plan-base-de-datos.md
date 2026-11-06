@@ -269,3 +269,24 @@ Las ocho fases que el PO revisó y aprobó se mantienen **sin cambios** y solo s
 | **F8** (antes F7) | Ensayos de daño a propósito, inspección contra la documentación y acta de cierre | Cierre de DEV31 | Media | Bajo | Haiku |
 
 La nueva F0 y la F3 (antes F2) se parecen: F0 decide el diseño general y la F3 lo baja al detalle de cada columna. Se dejó la F3 como estaba aprobada. Cada fase espera el OK del PO.
+
+## 13. Aprobación de F0 y orden final (2026-11-05)
+
+**Reemplaza el orden de la sección 12.** El PO aprobó el diseño de F0 y pidió que la documentación se escriba al final, cuando todo esté definido. Orden vigente:
+
+| Fase | Contenido | Modelo |
+|---|---|---|
+| **F1** (antes F3) | Esquema detallado: todas las columnas de las 54 tablas, con tipo, reglas, permisos, cegado de la prueba y diccionario completo | Opus |
+| **F2** (antes F4) | Compresión del FCD en las corridas nuevas y commit del código en los manifiestos | Sonnet |
+| **F3** (antes F5) | PostgreSQL (base en D:, usuarios, solo la laptop) y cargador verificado | Opus |
+| **F4** (antes F6) | Carga de lo existente y conciliación con los archivos; cegado de la prueba | Sonnet |
+| **F5** (antes F7) | Panel HTML estático | Sonnet |
+| **F6** (antes F8) | Ensayos de daño, inspección y acta de cierre técnico de DEV31 | Haiku |
+| **F7** (antes F1) | Documentación final en Markdown: acta de alcance, ADR12, documentos 01 a 03, matrices, validador, arquitectura técnica específica y de solución con sus gráficos (todas las columnas de todas las tablas) y DEC09 si se decide en esta fase | Opus |
+| **F8** (antes F2) | Word, diagramas y tesis v2.6 borrador, con su `.md` de cambios | Sonnet |
+
+**Consecuencias registradas:**
+- Hasta F7, la documentación del repositorio dice todavía que no hay base de datos (`CONTEXTO.md`, línea 71; documento 01; ADR02 y ADR03). Es una decisión del PO; se corrige en F7. Mientras tanto, el cambio de alcance queda registrado en `CONTEXTO.md` y en estas actas.
+- F1 necesita el diseño de F0 aprobado, que queda con este registro.
+- **La decisión de que exista una base de datos ya está tomada por el PO.** Lo que se difiere a F7 es solo regularizar la documentación, incluida la aceptación formal de ADR01 a ADR08 (DEC09). No hace falta resolver DEC09 antes de F3.
+- Ninguna fase se ejecuta sin el OK del PO.
