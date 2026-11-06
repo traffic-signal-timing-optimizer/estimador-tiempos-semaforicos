@@ -1,6 +1,8 @@
 ﻿# Verificaciones locales: lint, formato, tipos, pruebas y coherencia de la versión de ruff.
 # Uso: powershell -ExecutionPolicy Bypass -File scripts/check.ps1
-# Requiere el entorno creado con `uv sync` (carpeta .venv).
+# Requiere el entorno creado con `uv sync` (carpeta .venv) y, desde DEV31 F3, PostgreSQL encendido
+# y preparado con `python -m semaforo bd iniciar`: sin él, las pruebas de la base fallan (no se
+# saltan).
 $ErrorActionPreference = "Stop"
 Set-Location (Join-Path $PSScriptRoot "..")
 $bin = Join-Path (Get-Location) ".venv\Scripts"
@@ -17,6 +19,7 @@ function Invoke-Step([string]$Name, [scriptblock]$Command) {
 Invoke-Step "ruff check" { & "$bin\ruff.exe" check . }
 Invoke-Step "ruff format --check" { & "$bin\ruff.exe" format --check . }
 Invoke-Step "pyright" { & "$bin\pyright.exe" }
+Invoke-Step "esquema de la base: diccionario y SQL al día" { & "$bin\python.exe" -B scripts\bd_esquema.py --comprobar }
 Invoke-Step "pytest" { & "$bin\pytest.exe" -q }
 Invoke-Step "contratos de referencia" { & "$bin\python.exe" -B tools\contracts\validar_paquete.py | Select-String '"status"|"checks"|"omitted_checks"' }
 

@@ -5,6 +5,8 @@ description = "Prototipo local de estimación de tiempos semafóricos con SUMO (
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "defusedxml>=0.7.1",
+    # Conector de PostgreSQL (DEV31 F3). Versión exacta: viene de PyPI oficial con sus huellas en uv.lock.
+    "psycopg[binary]==3.3.8",
     "pydantic>=2,<3",
 ]
 
@@ -53,4 +55,5 @@ testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 markers = [
     "sumo: requiere el binario de SUMO instalado (SUMO_HOME)",
+    "bd: requiere PostgreSQL preparado con «bd iniciar»; sin él la prueba falla (no se salta)",
 ]

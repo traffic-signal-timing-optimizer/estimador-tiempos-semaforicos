@@ -2,7 +2,8 @@
 
 Dirección permitida: interfaz (cli) → servicios de aplicación (app) → reglas de dominio.
 Ningún módulo de negocio importa la capa de interfaz ni de aplicación, y la consulta
-(estimacion) no depende de simulación, búsqueda ni evaluación.
+(estimacion) no depende de simulación, búsqueda ni evaluación. La base de datos (bd, DEV31)
+depende del proyecto y nunca al revés: ningún módulo de cálculo la importa (F0, sección 4.2).
 """
 
 import ast
@@ -21,20 +22,22 @@ MODULES = {
     "estimacion",
     "evaluacion",
     "trazabilidad",
+    "bd",
 }
 
 # módulo de origen -> módulos que no puede importar
 FORBIDDEN: dict[str, frozenset[str]] = {
     "dominio": frozenset(MODULES - {"dominio"}),
-    "estimacion": frozenset({"simulacion", "referencias", "evaluacion", "app", "cli"}),
+    "estimacion": frozenset({"simulacion", "referencias", "evaluacion", "app", "cli", "bd"}),
     "cli": frozenset(MODULES - {"cli", "app"}),
-    "datos": frozenset({"app", "cli"}),
-    "caso": frozenset({"app", "cli"}),
-    "simulacion": frozenset({"app", "cli"}),
-    "referencias": frozenset({"app", "cli"}),
-    "aprendizaje": frozenset({"app", "cli"}),
-    "evaluacion": frozenset({"app", "cli"}),
-    "trazabilidad": frozenset({"app", "cli"}),
+    "datos": frozenset({"app", "cli", "bd"}),
+    "caso": frozenset({"app", "cli", "bd"}),
+    "simulacion": frozenset({"app", "cli", "bd"}),
+    "referencias": frozenset({"app", "cli", "bd"}),
+    "aprendizaje": frozenset({"app", "cli", "bd"}),
+    "evaluacion": frozenset({"app", "cli", "bd"}),
+    "trazabilidad": frozenset({"app", "cli", "bd"}),
+    "bd": frozenset({"app", "cli"}),
 }
 
 
@@ -98,6 +101,14 @@ def test_detector_flags_relative_import_into_cli(tmp_path: Path) -> None:
     (tmp_path / "dominio").mkdir()
     (tmp_path / "dominio" / "reglas.py").write_text("from .. import cli\n", encoding="utf-8")
     assert violations(tmp_path) == ["dominio/reglas.py -> cli"]
+
+
+def test_detector_flags_a_calculation_module_that_imports_the_database(tmp_path: Path) -> None:
+    (tmp_path / "evaluacion").mkdir()
+    (tmp_path / "evaluacion" / "metricas.py").write_text(
+        "from semaforo.bd import conexion\n", encoding="utf-8"
+    )
+    assert violations(tmp_path) == ["evaluacion/metricas.py -> bd"]
 
 
 def test_detector_allows_own_package_and_app_to_dominio(tmp_path: Path) -> None:

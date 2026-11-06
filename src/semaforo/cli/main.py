@@ -32,6 +32,10 @@ Comandos:
   publicada (DEV12). Códigos de salida: 0 correcto; 2 argumentos, conjunto, política o partición
   inválidos (se listan todos los problemas); 5 enlace, algo alterado o el conjunto ya tiene su
   partición.
+- `bd iniciar`, `bd cargar`, `bd verificar`, `bd hito` y `bd respaldar`: la base de datos de
+  consulta en PostgreSQL (DEV31). Códigos de salida: 0 correcto; 3 sin conexión con PostgreSQL;
+  5 conflictos de carga, archivos que cambiaron o una base regenerada con otra huella. Una carga
+  con unidades pendientes o no cargables termina en 0: hay que leer `counts` del JSON.
 """
 
 import argparse
@@ -40,6 +44,16 @@ import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+from semaforo.app.bd_commands import (
+    LoadReport,
+    backup_database,
+    initialize,
+    load,
+    load_exit_code,
+    register_milestone,
+    verify,
+    verify_exit_code,
+)
 from semaforo.app.comparison import compare_receptions
 from semaforo.app.exit_codes import INTERNAL_ERROR_EXIT, exit_code_for
 from semaforo.app.integrity import (
@@ -141,6 +155,81 @@ def _add_experiment_commands(
     return [generate, create, check]
 
 
+MILESTONE_KINDS = ("protocol_frozen", "split_frozen", "model_frozen", "test_opened")
+
+
+def _add_database_commands(
+    add_group: Callable[..., argparse.ArgumentParser],
+) -> list[argparse.ArgumentParser]:
+    """El grupo ``bd`` (DEV31 F3); devuelve sus comandos."""
+    database = add_group("bd", help="base de datos de consulta en PostgreSQL (DEV31)")
+    actions = database.add_subparsers(dest="action", required=True)
+    start = actions.add_parser(
+        "iniciar", help="crea el espacio de tablas, los usuarios, la base y su esquema (una vez)"
+    )
+    start.add_argument(
+        "--carpeta-datos",
+        type=Path,
+        required=True,
+        help="carpeta vacía donde PostgreSQL guarda la base (por ejemplo D:\\pgdata\\semaforo)",
+    )
+    start.add_argument(
+        "--superusuario",
+        default="postgres",
+        help="administrador del servicio (por defecto postgres)",
+    )
+    load = actions.add_parser("cargar", help="carga los archivos publicados de datos/ en la base")
+    load.add_argument(
+        "--preliminar",
+        action="store_true",
+        help="carga escenarios sin partición congelada, marcados como preliminares",
+    )
+    load.add_argument(
+        "--sueltas",
+        action="store_true",
+        help="carga como diagnóstico las corridas que ninguna búsqueda publicada usa",
+    )
+    load.add_argument(
+        "--sin-metricas",
+        action="store_true",
+        help="carga las corridas exitosas sin métricas publicadas (sus métricas quedan vacías)",
+    )
+    check = actions.add_parser(
+        "verificar", help="huella de contenido, archivos raíz y, si se pide, regeneración"
+    )
+    check.add_argument("--huellas", type=Path, default=None, help="escribe el archivo de huellas")
+    check.add_argument(
+        "--regenerar",
+        action="store_true",
+        help="regenera la base en una temporal y compara su huella (QA36)",
+    )
+    milestone = actions.add_parser("hito", help="registra un hito del procedimiento con su acta")
+    milestone.add_argument("--tipo", choices=MILESTONE_KINDS, required=True, help="tipo de hito")
+    milestone.add_argument(
+        "--objeto", required=True, help="protocolo, partición, modelo o experimento del hito"
+    )
+    milestone.add_argument("--particion", default=None, help="partición (al abrir la prueba)")
+    milestone.add_argument(
+        "--acta", required=True, help="acta en el repositorio (ruta relativa, confirmada en git)"
+    )
+    milestone.add_argument("--responsable", required=True, help="quién registra el hito")
+    milestone.add_argument("--notas", default=None, help="aclaraciones del acta")
+    backup = actions.add_parser("respaldar", help="respaldo de la base con pg_dump")
+    backup.add_argument("--carpeta", type=Path, required=True, help="carpeta de los respaldos")
+    for command in (load, check, milestone, backup):
+        command.add_argument(
+            "--base", default=None, help="base de datos (por defecto, la del servicio: semaforo)"
+        )
+    for command in (load, check, milestone):
+        command.add_argument(
+            "--repositorio",
+            type=Path,
+            default=Path(),
+            help="carpeta del repositorio, para las actas de los hitos (por defecto, la actual)",
+        )
+    return [start, load, check, milestone, backup]
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Analizador de argumentos de ``python -m semaforo``."""
     parser = argparse.ArgumentParser(prog="python -m semaforo")
@@ -235,6 +324,7 @@ def build_parser() -> argparse.ArgumentParser:
         case_report,
         data_report,
         *_add_experiment_commands(groups.add_parser),
+        *_add_database_commands(groups.add_parser),
     ):
         command.add_argument(
             "--workspace",
@@ -411,11 +501,103 @@ def _case(arguments: argparse.Namespace, workspace: Path) -> int:
     return 0
 
 
+VERIFY_WORDS = {"intact": "íntegra", "changed": "con cambios"}
+STATUS_WORDS = {
+    "loaded": "cargadas",
+    "already": "ya estaban",
+    "pending": "pendientes",
+    "rejected": "rechazadas",
+    "not_loadable": "no cargables",
+}
+
+
+def _load_summary(report: LoadReport) -> str:
+    counts = ", ".join(f"{report.counts[k]} {word}" for k, word in STATUS_WORDS.items())
+    lines = [f"Carga {report.carga_id}: {report.status}. Unidades: {counts}."]
+    if report.content_sha256:
+        lines.append(f"Huella de contenido: {report.content_sha256}")
+    reasons: dict[str, int] = {}
+    for unit in report.units:
+        if unit.status in ("pending", "rejected", "not_loadable"):
+            reason = f"{STATUS_WORDS[unit.status]}: {unit.detail}"
+            reasons[reason] = reasons.get(reason, 0) + 1
+    lines += [f"- {count} {reason}" for reason, count in sorted(reasons.items())]
+    lines += [f"Nota: {note}" for note in report.notes]
+    return "\n".join(lines)
+
+
+def _database(arguments: argparse.Namespace, workspace: Path) -> int:
+    action = arguments.action
+    if action == "iniciar":
+        installed = initialize(Path(arguments.carpeta_datos), str(arguments.superusuario))
+        _emit(_with_exit(installed.model_dump(mode="json"), 0))
+        _say(
+            f"PostgreSQL {installed.server_version} listo: base {installed.database}, "
+            f"esquema {installed.schema_version_installed}"
+        )
+        return 0
+    if action == "cargar":
+        report = load(
+            workspace,
+            preliminary=bool(arguments.preliminar),
+            loose_runs=bool(arguments.sueltas),
+            without_metrics=bool(arguments.sin_metricas),
+            repository=Path(arguments.repositorio),
+            database=arguments.base,
+        )
+        code = load_exit_code(report)
+        _emit(_with_exit(report.model_dump(mode="json"), code))
+        _say(_load_summary(report))
+        return code
+    if action == "verificar":
+        verified = verify(
+            workspace,
+            Path(arguments.repositorio),
+            fingerprints=None if arguments.huellas is None else Path(arguments.huellas),
+            regenerate=bool(arguments.regenerar),
+            database=arguments.base,
+        )
+        code = verify_exit_code(verified)
+        _emit(_with_exit(verified.model_dump(mode="json"), code))
+        _say(
+            f"Base {VERIFY_WORDS[verified.status]}: huella {verified.content_sha256}; "
+            f"{verified.roots_checked} archivos raíz revisados, "
+            f"{len(verified.roots_changed)} cambiaron"
+            + (
+                ""
+                if verified.regenerated_equal is None
+                else f"; regenerada {'igual' if verified.regenerated_equal else 'DISTINTA'}"
+            )
+        )
+        return code
+    if action == "hito":
+        hito_id, report = register_milestone(
+            workspace,
+            Path(arguments.repositorio),
+            kind=arguments.tipo,
+            target=str(arguments.objeto),
+            acta=str(arguments.acta),
+            responsible=str(arguments.responsable),
+            partition=None if arguments.particion is None else str(arguments.particion),
+            notes=None if arguments.notas is None else str(arguments.notas),
+            database=arguments.base,
+        )
+        code = load_exit_code(report)
+        _emit(_with_exit({"hito_id": hito_id, "carga": report.model_dump(mode="json")}, code))
+        _say(f"Hito {hito_id} registrado.\n{_load_summary(report)}")
+        return code
+    saved = backup_database(Path(arguments.carpeta), database=arguments.base)
+    _emit(_with_exit(saved.model_dump(mode="json"), 0))
+    _say(f"Respaldo {saved.file} ({saved.size_bytes} bytes), huella {saved.sha256}")
+    return 0
+
+
 COMMAND_GROUPS = {
     "report": _report,
     "scenarios": _scenarios,
     "splits": _splits,
     "runs": _runs,
+    "bd": _database,
 }
 
 
