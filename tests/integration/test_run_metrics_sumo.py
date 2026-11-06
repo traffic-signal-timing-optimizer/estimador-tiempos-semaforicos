@@ -1,5 +1,6 @@
 """Métricas de corridas reales con SUMO (DEV19 F4; QA25, QA26 y QA27 de integración)."""
 
+import gzip
 import json
 import shutil
 from collections.abc import Iterator
@@ -17,6 +18,7 @@ from semaforo.dominio.scenario import Scenario
 from semaforo.evaluacion import run_metrics
 from semaforo.evaluacion.cohort import compare_cohorts
 from semaforo.evaluacion.errors import EvaluacionError
+from semaforo.evaluacion.published_metrics import publish_run_metrics, read_run_metrics
 from semaforo.evaluacion.run_metrics import RunMetrics, evaluate_run
 from semaforo.simulacion.prepare import MANIFEST_FILE, ZONE_FILE, publish_inputs
 from semaforo.simulacion.reconcile import reconcile_run
@@ -24,6 +26,7 @@ from semaforo.simulacion.run_inputs import run_inputs
 from semaforo.simulacion.runner import RunLimits
 from semaforo.simulacion.summary import SimulationSummary
 from semaforo.trazabilidad.fs import remove_tree
+from semaforo.trazabilidad.hashing import sha256_file
 
 pytestmark = pytest.mark.sumo
 
@@ -248,11 +251,11 @@ def test_a_real_case_with_a_supposed_demand_is_not_field_evidence(
     assert (case.origin, scenario.origin) == ("field", "synthetic")
     run = run_inputs(folder, runs, sumo=sumo_binary)
     metrics = evaluate_run(folder, runs, run.manifest.run_id, case, protocol(), scenario=scenario)
-    assert metrics.schema_version == "2.0.0"
+    assert metrics.schema_version == "2.1.0"
     assert (metrics.case_origin, metrics.demand_origin) == ("field", "synthetic")
     assert metrics.evidence_origin == "synthetic"
     assert "origin" not in metrics.model_dump()
-    forged = {**metrics.model_dump(mode="json"), "evidence_origin": "field"}
+    forged: dict[str, Any] = {**metrics.model_dump(mode="json"), "evidence_origin": "field"}
     with pytest.raises(ValidationError, match="origen de la evidencia"):
         RunMetrics.model_validate(forged)
 
@@ -304,6 +307,44 @@ def test_a_zone_the_run_did_not_record_is_refused(
             scenario=scenario,
         )
     assert raised.value.code is ErrorCode.INPUT_SCHEMA
+
+
+def test_a_new_run_has_a_compressed_fcd_its_environment_and_published_metrics(
+    tmp_path: Path, sumo_binary: Path
+) -> None:
+    """DEV31 F2: la FCD se publica comprimida, el manifiesto anota el código y el equipo, y las
+    métricas (con la cola paso a paso) se publican una vez y se leen de vuelta verificadas."""
+    workspace = tmp_path / "datos"
+    runs = workspace / "ejecuciones"
+    try:
+        folder, case, scenario = prepared(tmp_path, "entradas")
+        run = run_inputs(folder, runs, sumo=sumo_binary)
+        outputs = runs / run.manifest.run_id / "outputs"
+        assert (outputs / "fcd.xml.gz").is_file()
+        assert not (outputs / "fcd.xml").exists()
+        with gzip.open(outputs / "fcd.xml.gz", "rb") as stream:
+            plain_bytes = len(stream.read())
+        assert (outputs / "fcd.xml.gz").stat().st_size < plain_bytes / 5
+        environment = run.manifest.environment
+        assert int(environment["cpu_cores"]) > 0
+        assert float(environment["memory_gb"]) > 0
+        assert environment["location"] in {"local", "cloud"}
+        assert {"sumo", "python", "os"} <= environment.keys()
+        metrics = evaluate_run(
+            folder, runs, run.manifest.run_id, case, protocol(), scenario=scenario
+        )
+        assert metrics.zone is not None
+        series = metrics.zone.queue_series
+        assert series is not None
+        assert sum(series.in_window) == metrics.zone.queue.ticks_observed
+        assert len(series.times_s) == metrics.zone.fcd_steps
+        stored = read_run_metrics(publish_run_metrics(workspace, metrics))
+        assert stored.metrics == metrics
+        assert stored.manifest.run_manifest_sha256 == sha256_file(
+            runs / run.manifest.run_id / "manifest.json"
+        )
+    finally:
+        remove_tree(workspace)
 
 
 def test_an_unsupported_protocol_is_refused_before_reading_the_run(

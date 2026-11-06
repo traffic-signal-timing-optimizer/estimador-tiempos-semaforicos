@@ -23,9 +23,9 @@ zona que no es de ningún movimiento usa el nombre de su calle.
 import math
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from semaforo.dominio.base_model import FrozenModel
 from semaforo.dominio.case import Case
@@ -37,6 +37,7 @@ from semaforo.evaluacion.fcd import FcdRecord, read_fcd
 
 __all__ = [
     "MAX_FCD_BYTES",
+    "QueueSeries",
     "QueueStatus",
     "QueueSummary",
     "StopsSummary",
@@ -69,6 +70,30 @@ class QueueSummary(FrozenModel):
     max_vehicles: int | None
 
 
+class QueueSeries(FrozenModel):
+    """La cola de cada acceso en cada paso de la FCD (DEV31 F2): de donde salen las medias.
+
+    El paso ``k`` es ``times_s[k]``. ``in_window[k]`` dice si cuenta para la cola del resumen
+    (dentro del intervalo de medición y en un tick de muestreo); los demás pasos, por ejemplo los
+    del calentamiento, se guardan igual para poder verlos. ``vehicles_by_access[acceso][k]`` son los
+    vehículos de ese acceso con velocidad ≤ el umbral de cola. Un paso que la FCD no trae no
+    aparece: no se rellena con cero.
+    """
+
+    times_s: list[float]
+    in_window: list[bool]
+    vehicles_by_access: dict[str, list[int]]
+
+    @model_validator(mode="after")
+    def _same_length(self) -> Self:
+        steps = len(self.times_s)
+        if len(self.in_window) != steps or any(
+            len(counts) != steps for counts in self.vehicles_by_access.values()
+        ):
+            raise ValueError("la serie de la cola tiene columnas de distinto largo")
+        return self
+
+
 class StopsSummary(FrozenModel):
     """Detenciones de un grupo de la cohorte. ``requested`` es el denominador: todos los pedidos.
 
@@ -96,7 +121,10 @@ class ZoneSettings(FrozenModel):
 
 
 class ZoneMetrics(FrozenModel):
-    """Cola y detenciones de una corrida, total y por acceso, y detenciones por vehículo."""
+    """Cola y detenciones de una corrida, total y por acceso, y detenciones por vehículo.
+
+    ``queue_series`` es la cola paso a paso; solo falta en un modelo armado a mano.
+    """
 
     settings: ZoneSettings
     queue: QueueSummary
@@ -105,6 +133,7 @@ class ZoneMetrics(FrozenModel):
     stops_by_access: dict[str, StopsSummary]
     vehicle_stops: dict[str, int]
     fcd_steps: int = Field(ge=0)
+    queue_series: QueueSeries | None = None
 
 
 def lane_access(
@@ -159,6 +188,9 @@ class _Accumulator:
         self.observed: set[int] = set()
         self.stops = dict.fromkeys(sorted(cohort), 0)
         self.last: dict[str, tuple[float, bool]] = {}
+        self.times: list[float] = []
+        self.in_window: list[bool] = []
+        self.series: dict[str, list[int]] = {name: [] for name in names}
 
     def _sample_index(self, time: float) -> int | None:
         settings = self.settings
@@ -172,19 +204,28 @@ class _Accumulator:
     def step(self, time: float, records: list[FcdRecord]) -> None:
         inside = [record for record in records if record.lane in self.access]
         index = self._sample_index(time)
+        counts = self._counts(inside)
+        self.times.append(time)
+        self.in_window.append(index is not None)
+        for name, count in counts.items():
+            self.series[name].append(count)
         if index is not None:
-            self._queue(index, inside)
+            self._queue(index, counts)
         for record in inside:
             if record.vehicle_id in self.cohort:
                 self._stop(time, record)
 
-    def _queue(self, index: int, inside: list[FcdRecord]) -> None:
-        self.observed.add(index)
+    def _counts(self, inside: list[FcdRecord]) -> dict[str, int]:
+        """Vehículos detenidos (velocidad ≤ el umbral de cola) en cada acceso, en este paso."""
         threshold = self.settings.queue_speed_threshold_mps
         counts = dict.fromkeys(self.queue_sum, 0)
         for record in inside:
             if record.speed_mps <= threshold:
                 counts[self.access[record.lane]] += 1
+        return counts
+
+    def _queue(self, index: int, counts: dict[str, int]) -> None:
+        self.observed.add(index)
         for name, count in counts.items():
             self.queue_sum[name] += count
             self.queue_max[name] = max(self.queue_max[name], count)
@@ -250,10 +291,10 @@ def zone_metrics(  # noqa: PLR0913  (los tiempos de la corrida son de solo palab
     max_bytes: int = MAX_FCD_BYTES,
     edge_access: Mapping[str, str] | None = None,
 ) -> ZoneMetrics:
-    """Cola y detenciones de una corrida a partir de su ``fcd.xml``.
+    """Cola y detenciones de una corrida a partir de su FCD, y la cola paso a paso.
 
     Args:
-        fcd: la FCD de la corrida (``outputs/fcd.xml``).
+        fcd: la FCD de la corrida (``outputs/fcd.xml`` o ``outputs/fcd.xml.gz``).
         protocol: da la zona, los umbrales y el muestreo.
         case: el caso de la corrida, para el acceso de cada carril.
         cohort: la demora de la cohorte de la misma corrida (F2): da los vehículos, su acceso y si
@@ -304,4 +345,9 @@ def zone_metrics(  # noqa: PLR0913  (los tiempos de la corrida son de solo palab
         },
         vehicle_stops=dict(accumulator.stops),
         fcd_steps=steps,
+        queue_series=QueueSeries(
+            times_s=accumulator.times,
+            in_window=accumulator.in_window,
+            vehicles_by_access=accumulator.series,
+        ),
     )

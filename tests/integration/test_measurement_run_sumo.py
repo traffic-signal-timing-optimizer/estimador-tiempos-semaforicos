@@ -1,5 +1,6 @@
 """Corridas preparadas con las salidas de medición, con SUMO real (DEV19 F1, ADR11)."""
 
+import gzip
 import json
 import re
 import shutil
@@ -41,7 +42,9 @@ def outputs(runs: Path, result: SimulationResult) -> Path:
 
 
 def fcd_text(runs: Path, result: SimulationResult) -> str:
-    return (outputs(runs, result) / "fcd.xml").read_text(encoding="utf-8")
+    """La FCD de la corrida, descomprimida: se publica como ``fcd.xml.gz`` (DEV31 F2)."""
+    with gzip.open(outputs(runs, result) / "fcd.xml.gz", "rt", encoding="utf-8") as stream:
+        return stream.read()
 
 
 def test_a_prepared_run_writes_the_fcd_of_the_zone_one_step_per_tick(
@@ -50,7 +53,11 @@ def test_a_prepared_run_writes_the_fcd_of_the_zone_one_step_per_tick(
     folder = publish_inputs(tmp_path / "entradas", request_for(tmp_path), MOMENT)
     result = run_inputs(folder, runs, sumo=sumo_binary)
     assert (result.manifest.status, result.manifest.error) == ("succeeded", None)
-    assert "outputs/fcd.xml" in {artifact.path for artifact in result.manifest.outputs}
+    published = {artifact.path for artifact in result.manifest.outputs}
+    assert "outputs/fcd.xml.gz" in published
+    assert "outputs/fcd.xml" not in published
+    assert not (outputs(runs, result) / "fcd.xml").exists()
+    assert not (outputs(runs, result) / "fcd.xml.gz.part").exists()
     text = fcd_text(runs, result)
     steps = [float(value) for value in re.findall(r'<timestep time="([^"]+)"', text)]
     end_s = json.loads((folder / MANIFEST_FILE).read_text(encoding="utf-8"))["times"]["end_s"]
@@ -110,4 +117,5 @@ def test_an_old_folder_without_zone_runs_as_before_without_fcd(
     result = run_inputs(folder, runs, sumo=sumo_binary)
     assert result.manifest.status == "succeeded"
     assert not (outputs(runs, result) / "fcd.xml").exists()
+    assert not (outputs(runs, result) / "fcd.xml.gz").exists()
     assert "--fcd-output" not in result.manifest.command

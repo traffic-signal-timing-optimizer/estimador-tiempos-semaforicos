@@ -14,6 +14,7 @@ SUMO escribe además los viajes que nunca entraron y la FCD de la zona. Una conf
 absolutas no se ejecuta, porque SUMO escribiría fuera de la carpeta de la corrida (QA10).
 """
 
+import gzip
 import os
 import platform
 import re
@@ -29,6 +30,7 @@ from xml.etree.ElementTree import Element
 from semaforo.caso.sumo_config import GUI_ONLY, read_config_references
 from semaforo.caso.xml_input import integer, optional_number, parse_root
 from semaforo.dominio.errors import DomainError, ErrorCode
+from semaforo.simulacion.environment import capture_environment
 from semaforo.simulacion.process import ProcessLimits, ProcessOutcome, run_controlled, tree_bytes
 from semaforo.simulacion.resources import available_memory_bytes, free_disk_bytes
 from semaforo.simulacion.summary import (
@@ -69,8 +71,12 @@ SUMMARY = "summary.json"
 TIMING = "tiempos.json"
 LOG = "sumo.log"
 FCD = "fcd.xml"
+# SUMO escribe ``fcd.xml``; al terminar la corrida se comprime y solo se publica ``fcd.xml.gz``
+# (DEV31 F2: la FCD es el 92 % del peso de una corrida y se comprime a cerca del 3,5 %).
+FCD_GZ = f"{FCD}.gz"
 # Lo que la evaluación necesita de cada vehículo en cada paso (ADR11).
 FCD_ATTRIBUTES = "id,lane,speed"
+COPY_CHUNK_BYTES = 1024 * 1024
 TOLERANCE = 1e-9
 # SUMO 1.27.1 en Windows no abre una ruta de más de 257 caracteres (medido en F6). En otros
 # sistemas no hay un límite práctico.
@@ -80,6 +86,7 @@ PLANNED_OUTPUTS = (
     f"outputs/{STATISTICS}",
     f"outputs/{LOG}",
     f"outputs/{FCD}",
+    f"outputs/{FCD_GZ}",
 )
 
 
@@ -307,6 +314,7 @@ def _plan(  # noqa: PLR0913  (todo lo que define la corrida)
             "sumo": version,
             "python": platform.python_version(),
             "os": f"{platform.system()} {platform.release()}",
+            **capture_environment(),
         },
         end_s=end_s,
         input_bytes=sum((source / relative).stat().st_size for relative in files),
@@ -524,6 +532,11 @@ def run_simulation(  # noqa: PLR0913  (los argumentos opcionales son de solo pal
         if stopped is not None:
             return stopped
         try:
+            compress_fcd(writer.path / "outputs")
+        except OSError as error:
+            message = f"no se pudo comprimir {FCD} ({type(error).__name__})"
+            return run.fail(ErrorCode.OUTPUT_INVALID, message, outcome.returncode, outcome)
+        try:
             summary = summarize_outputs(
                 writer.path / "outputs",
                 declared_vehicles,
@@ -538,6 +551,47 @@ def run_simulation(  # noqa: PLR0913  (los argumentos opcionales son de solo pal
         if problem is not None:
             return run.fail(ErrorCode.OUTPUT_INVALID, problem, outcome.returncode, outcome)
         return run.succeed(summary, extra, outcome)
+
+
+def compress_fcd(outputs: Path) -> None:
+    """Reemplaza ``outputs/fcd.xml`` por ``outputs/fcd.xml.gz``; sin FCD no hace nada.
+
+    La compresión es determinista (sin fecha ni nombre dentro del archivo): la misma FCD da
+    siempre la misma huella, y la réplica de una corrida puede compararse byte a byte.
+
+    Raises:
+        OSError: si no se puede leer la FCD, escribir su versión comprimida o borrar la original;
+            queda todo como estaba: la FCD sin comprimir y ningún archivo a medias.
+    """
+    source = outputs / FCD
+    if not source.is_file():
+        return
+    target = outputs / FCD_GZ
+    partial = outputs / f"{FCD_GZ}.part"
+    try:
+        with (
+            source.open("rb") as reader,
+            partial.open("wb") as raw,
+            gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as compressed,
+        ):
+            shutil.copyfileobj(reader, compressed, COPY_CHUNK_BYTES)
+        partial.replace(target)
+    except OSError:
+        partial.unlink(missing_ok=True)
+        raise
+    try:
+        source.unlink()
+    except OSError:
+        target.unlink(missing_ok=True)  # no se deja la FCD dos veces
+        raise
+
+
+def fcd_file(outputs: Path) -> Path | None:
+    """La FCD de ``outputs``: la comprimida si está, si no la sin comprimir (corridas antiguas)."""
+    for name in (FCD_GZ, FCD):
+        if (outputs / name).is_file():
+            return outputs / name
+    return None
 
 
 def _final_outputs(
@@ -624,7 +678,8 @@ def summarize_outputs(  # noqa: PLR0913  (los opcionales son de solo palabra cla
     Coherencia (acta de F1): hay un ``tripinfo`` por vehículo insertado, los no terminados
     (``arrival`` negativo) son los que siguen en la red y no se insertan más de los cargados.
     Con ``measured`` (ADR11) hay además un registro por vehículo que esperaba entrar
-    (``depart`` -1) y existe ``fcd.xml``; sin él no puede haber ninguno de esos registros.
+    (``depart`` -1) y existe ``fcd.xml`` (o ``fcd.xml.gz``); sin él no puede haber ninguno de
+    esos registros.
 
     Raises:
         SimulacionError: OUTPUT_INVALID si falta un archivo, no es XML válido, le falta un dato
@@ -668,7 +723,7 @@ def summarize_outputs(  # noqa: PLR0913  (los opcionales son de solo palabra cla
             f"hay {undeparted} viajes que no entraron y {waiting} vehículos esperando para entrar",
             TRIPINFO,
         )
-    if measured and not (folder / FCD).is_file():
+    if measured and fcd_file(folder) is None:
         raise _invalid(f"falta {FCD}", FCD)
     if unfinished != running:
         raise _invalid(

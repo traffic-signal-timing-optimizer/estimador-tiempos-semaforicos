@@ -4,6 +4,7 @@ Las corridas se fabrican con ``RunWriter``: salidas con la forma de las de SUMO,
 regla sin depender de una simulación.
 """
 
+import gzip
 import hashlib
 import json
 from collections.abc import Callable, Iterator, Mapping
@@ -87,6 +88,7 @@ def run(  # noqa: PLR0913  (los opcionales son de solo palabra clave)
     case_id: str = "CASO_A",
     inputs: Mapping[str, str] | None = None,
     status: str = "succeeded",
+    binary: Mapping[str, bytes] | None = None,
 ) -> str:
     spec = RunSpec(
         kind="simulation", case_id=case_id, case_version="1.0.0", scenario_id="ESC_1", seed=seed
@@ -98,6 +100,8 @@ def run(  # noqa: PLR0913  (los opcionales son de solo palabra clave)
             writer.add_input(source, name)
         for name, text in files.items():
             writer.output_path(name).write_text(text, encoding="utf-8")
+        for name, data in (binary or {}).items():
+            writer.output_path(name).write_bytes(data)
         failed = status == "failed"
         manifest = writer.publish(
             status="failed" if failed else "succeeded",
@@ -319,6 +323,59 @@ def test_an_output_over_the_size_limit_is_refused(
     monkeypatch.setattr(replica_module, "MAX_XML_BYTES", 10)
     with pytest.raises(DomainError) as raised:
         verdict(workspace, outputs(), outputs())
+    assert raised.value.code is ErrorCode.OUTPUT_INVALID
+
+
+# --- la FCD comprimida (DEV31 F2) se compara como XML, no como bytes ---------------------------
+
+FCD = (
+    '<fcd-export><timestep time="0.00"><vehicle id="a" speed="{speed}" lane="L_0"/></timestep>'
+    "</fcd-export>"
+)
+
+
+def compressed(speed: str) -> dict[str, bytes]:
+    return {"fcd.xml.gz": gzip.compress(FCD.format(speed=speed).encode(), mtime=0)}
+
+
+def compare_fcd(
+    workspace: Path, first: Mapping[str, bytes], second: Mapping[str, bytes]
+) -> ReplicaReport:
+    a = run(workspace, outputs(), binary=first)
+    b = run(workspace, outputs(), binary=second)
+    return compare_runs(workspace / "ejecuciones", a, b, created_at=NOW)
+
+
+def test_a_compressed_fcd_is_compared_as_xml_with_tolerance(workspace: Path) -> None:
+    report = compare_fcd(workspace, compressed("5.50"), compressed("5.500000000001"))
+    (item,) = [item for item in report.files if item.path == "outputs/fcd.xml.gz"]
+    assert (item.rule, item.equal, report.verdict) == ("xml", True, "equivalent")
+
+
+def test_a_compressed_fcd_beyond_the_tolerance_makes_them_different(workspace: Path) -> None:
+    report = compare_fcd(workspace, compressed("5.50"), compressed("5.51"))
+    (item,) = [item for item in report.files if item.path == "outputs/fcd.xml.gz"]
+    assert (item.rule, item.equal, report.verdict) == ("xml", False, "different")
+    assert item.detail is not None and "speed: 5.50 frente a 5.51" in item.detail
+
+
+def test_a_broken_compressed_fcd_makes_them_different(workspace: Path) -> None:
+    report = compare_fcd(workspace, compressed("5.50"), {"fcd.xml.gz": b"esto no es gzip"})
+    (item,) = [item for item in report.files if item.path == "outputs/fcd.xml.gz"]
+    assert item.equal is False
+    assert item.detail is not None and "no se puede leer" in item.detail
+
+
+def test_a_compressed_fcd_that_grows_past_the_limit_is_refused(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Una bomba de compresión: pesa poco comprimida y mucho descomprimida."""
+    monkeypatch.setattr(replica_module, "MAX_XML_BYTES", 2000)
+    rows = "".join(f'<timestep time="{n}.00"/>' for n in range(1, 400))
+    big = gzip.compress(f"<fcd-export>{rows}</fcd-export>".encode(), mtime=0)
+    assert len(big) < 2000 < len(rows)
+    with pytest.raises(DomainError) as raised:
+        compare_fcd(workspace, {"fcd.xml.gz": big}, {"fcd.xml.gz": big})
     assert raised.value.code is ErrorCode.OUTPUT_INVALID
 
 

@@ -246,16 +246,17 @@ columnas = [
   { nombre = "version_sumo", tipo = "text", nulo = true, descripcion = "Versión de SUMO; vacía en procesos sin SUMO.", origen = "manifest.json: environment.sumo" },
   { nombre = "version_python", tipo = "text", descripcion = "Versión de Python.", origen = "manifest.json: environment.python" },
   { nombre = "sistema_operativo", tipo = "text", descripcion = "Sistema operativo.", origen = "manifest.json: environment.os" },
-  { nombre = "commit_codigo", tipo = "text", nulo = true, descripcion = "Commit del proyecto; vacío en las corridas anteriores a DEV31 F2.", origen = "manifest.json: environment (desde F2)" },
+  { nombre = "commit_codigo", tipo = "text", nulo = true, descripcion = "Commit del proyecto con que corrió el proceso; vacío en las corridas anteriores a DEV31 F2.", origen = "manifest.json: environment.commit (desde F2)" },
+  { nombre = "codigo_modificado", tipo = "boolean", nulo = true, descripcion = "Verdadero si, al correr, los archivos que git sigue tenían cambios sin confirmar (el commit no describe todo el código). Los archivos nuevos sin seguir no cuentan. Vacío si no hay commit.", origen = "manifest.json: environment.code_modified (desde F2)", regla = "codigo_modificado IS NULL OR commit_codigo IS NOT NULL" },
   { nombre = "motivo_sin_commit", tipo = "text", nulo = true, descripcion = "Por qué falta el commit, por ejemplo «no registrado antes de DEV31».", origen = "cargador" },
   { nombre = "librerias", tipo = "jsonb", descripcion = "Versiones de librerías relevantes; objeto vacío si no aplica.", origen = "manifiesto del proceso" },
-  { nombre = "ubicacion", tipo = "text", nulo = true, descripcion = "Dónde corrió el proceso: «local» (la computadora del proyecto) o «nube». Vacío en las corridas anteriores a DEV31 F2 (no registrado).", origen = "manifest.json: environment.equipo (desde F2)", regla = "ubicacion IS NULL OR ubicacion IN ('local','nube')" },
-  { nombre = "proveedor_nube", tipo = "text", nulo = true, descripcion = "Proveedor de la nube cuando ubicacion = nube (por ejemplo AWS, Azure o Google Cloud). Vacío si es local.", origen = "manifest.json: environment.equipo (desde F2)" },
-  { nombre = "tipo_maquina", tipo = "text", nulo = true, descripcion = "Tipo o modelo de la máquina virtual que reporta la nube. Vacío si es local o si la nube no lo informa.", origen = "manifest.json: environment.equipo (desde F2)" },
-  { nombre = "region", tipo = "text", nulo = true, descripcion = "Región o centro de datos de la nube. Vacío si es local.", origen = "manifest.json: environment.equipo (desde F2)" },
-  { nombre = "procesador", tipo = "text", nulo = true, descripcion = "Modelo del procesador tal como lo reporta el sistema operativo (I7).", origen = "manifest.json: environment.equipo (desde F2)" },
-  { nombre = "nucleos", tipo = "integer", nulo = true, descripcion = "Número de núcleos lógicos disponibles para la corrida (I7).", origen = "manifest.json: environment.equipo (desde F2)", regla = "nucleos IS NULL OR nucleos > 0" },
-  { nombre = "memoria_gb", tipo = "double precision", nulo = true, unidad = "GB", descripcion = "Memoria RAM total del equipo o de la máquina virtual (I7).", origen = "manifest.json: environment.equipo (desde F2)", regla = "memoria_gb IS NULL OR memoria_gb > 0" },
+  { nombre = "ubicacion", tipo = "text", nulo = true, descripcion = "Dónde corrió el proceso: «local» (la computadora del proyecto) o «nube» (cualquier proveedor). Se declara con SEMAFORO_UBICACION; sin declaración, local, salvo que el equipo se presente como máquina de una nube conocida. Vacío en las corridas anteriores a DEV31 F2 (no registrado). El manifiesto guarda «local» o «cloud»; la base lo traduce a «local» o «nube».", origen = "manifest.json: environment.location (desde F2)", regla = "ubicacion IS NULL OR ubicacion IN ('local','nube')" },
+  { nombre = "proveedor_nube", tipo = "text", nulo = true, descripcion = "Proveedor de la nube cuando ubicacion = nube (por ejemplo AWS, Azure o Google Cloud), declarado con SEMAFORO_NUBE_PROVEEDOR o tomado del equipo; «no identificado» si no se sabe. Vacío si es local.", origen = "manifest.json: environment.cloud_provider (desde F2)" },
+  { nombre = "tipo_maquina", tipo = "text", nulo = true, descripcion = "Tipo o modelo de la máquina virtual que reporta la nube (SEMAFORO_NUBE_TIPO_MAQUINA o el equipo). Vacío si es local o si no se conoce.", origen = "manifest.json: environment.machine_type (desde F2)" },
+  { nombre = "region", tipo = "text", nulo = true, descripcion = "Región o centro de datos de la nube (SEMAFORO_NUBE_REGION). Vacío si es local o si no se declaró.", origen = "manifest.json: environment.region (desde F2)" },
+  { nombre = "procesador", tipo = "text", nulo = true, descripcion = "Modelo del procesador tal como lo reporta el sistema operativo (I7). Ejemplo: AMD Ryzen 9 4900HS with Radeon Graphics.", origen = "manifest.json: environment.cpu (desde F2)" },
+  { nombre = "nucleos", tipo = "integer", nulo = true, descripcion = "Número de núcleos lógicos del equipo (I7).", origen = "manifest.json: environment.cpu_cores (desde F2)", regla = "nucleos IS NULL OR nucleos > 0" },
+  { nombre = "memoria_gb", tipo = "double precision", nulo = true, unidad = "GB", descripcion = "Memoria RAM total del equipo o de la máquina virtual, con un decimal (I7).", origen = "manifest.json: environment.memory_gb (desde F2)", regla = "memoria_gb IS NULL OR memoria_gb > 0" },
 ]
 reglas = [
   { nombre = "commit_o_motivo", sql = "commit_codigo IS NOT NULL OR motivo_sin_commit IS NOT NULL", descripcion = "Si falta el commit, se dice por qué." },
@@ -1052,7 +1053,7 @@ nombre = "resultados_corrida"
 descripcion = "Resultados de una corrida: lo que reporta SUMO y las métricas de la cohorte y la zona calculadas por el código oficial (DEV19)."
 grano = "Una fila por corrida"
 origen = "outputs/summary.json y métricas publicadas (metricas.json, DEV31 F2)"
-fuente = "existe (summary.json); métricas publicadas pendientes de F2"
+fuente = "existe (summary.json y, desde DEV31 F2, metricas.json en las corridas nuevas; las 133 anteriores se calculan al cargarlas, F4)"
 filas_dev16 = "unas 4 700"
 cegado = "padre:simulacion.corridas(run_id)"
 clave_primaria = ["run_id"]
@@ -1137,7 +1138,7 @@ nombre = "resultados_acceso"
 descripcion = "Demora, cola y detenciones por acceso del cruce (I6 por acceso)."
 grano = "Una fila por corrida y acceso"
 origen = "metricas.json: cohort.by_access, zone.queue_by_access, zone.stops_by_access"
-fuente = "pendiente F2 (métricas publicadas)"
+fuente = "existe desde DEV31 F2 (metricas.json de las corridas nuevas; las 133 anteriores se calculan al cargarlas, F4)"
 filas_dev16 = "unas 33 000"
 cegado = "padre:simulacion.corridas(run_id)"
 clave_primaria = ["run_id", "acceso"]
@@ -1179,7 +1180,7 @@ nombre = "resultados_movimiento"
 descripcion = "Demora por movimiento del cruce."
 grano = "Una fila por corrida y movimiento"
 origen = "metricas.json: cohort.by_movement"
-fuente = "pendiente F2 (métricas publicadas)"
+fuente = "existe desde DEV31 F2 (metricas.json de las corridas nuevas; las 133 anteriores se calculan al cargarlas, F4)"
 filas_dev16 = "unas 108 000"
 cegado = "padre:simulacion.corridas(run_id)"
 clave_primaria = ["run_id", "movimiento_id"]
@@ -1212,7 +1213,7 @@ nombre = "vehiculos"
 descripcion = "Cada vehículo de una corrida: qué pidió, qué le pasó y cuánto tiempo perdió."
 grano = "Una fila por corrida y vehículo (unas 1 780 por corrida)"
 origen = "outputs/cohorte_conciliada.csv, outputs/tripinfo.xml y metricas.json (cohort.vehicles y zone.vehicle_stops)"
-fuente = "existe (cohorte y tripinfo); columnas de métricas pendientes de F2"
+fuente = "existe (cohorte y tripinfo; las columnas de métricas, desde DEV31 F2 en las corridas nuevas)"
 filas_dev16 = "unos 8,4 millones"
 cegado = "padre:simulacion.corridas(run_id)"
 clave_primaria = ["run_id", "vehiculo_id"]
@@ -1284,19 +1285,19 @@ claves_foraneas = [
 [[tablas]]
 esquema = "simulacion"
 nombre = "cola_segundo"
-descripcion = "Vehículos detenidos en cada acceso, en cada muestra (cada segundo con el protocolo actual)."
-grano = "Una fila por corrida, acceso y muestra"
-origen = "metricas.json: serie de cola por acceso (se agrega en DEV31 F2, con la misma regla de DEV19)"
-fuente = "pendiente F2"
+descripcion = "Vehículos detenidos en cada acceso, en cada paso de la FCD (un paso por segundo con la simulación actual), con la marca de los que cuentan para la cola del resumen."
+grano = "Una fila por corrida, acceso y paso"
+origen = "metricas.json: zone.queue_series (times_s, in_window y vehicles_by_access), con la misma regla de DEV19"
+fuente = "existe desde DEV31 F2 (metricas.json de las corridas nuevas; las 133 anteriores se calculan al cargarlas, F4)"
 filas_dev16 = "unos 69 millones"
 cegado = "padre:simulacion.corridas(run_id)"
 clave_primaria = ["run_id", "acceso", "tiempo_s"]
 columnas = [
   { nombre = "run_id", tipo = "text", descripcion = "Corrida.", origen = "metricas.json: run_id" },
-  { nombre = "acceso", tipo = "text", descripcion = "Acceso.", origen = "metricas.json (serie por acceso)" },
-  { nombre = "tiempo_s", tipo = "double precision", unidad = "s", descripcion = "Momento de la muestra.", origen = "metricas.json (serie)", regla = "tiempo_s >= 0" },
-  { nombre = "vehiculos_en_cola", tipo = "integer", unidad = "veh", descripcion = "Vehículos a velocidad menor o igual que el umbral de cola, en los carriles de aproximación.", origen = "metricas.json (serie)", regla = "vehiculos_en_cola >= 0" },
-  { nombre = "en_ventana", tipo = "boolean", descripcion = "Si la muestra está dentro del intervalo de medición.", origen = "metricas.json (serie)" },
+  { nombre = "acceso", tipo = "text", descripcion = "Acceso: una clave de zone.queue_series.vehicles_by_access.", origen = "metricas.json: zone.queue_series.vehicles_by_access (clave)" },
+  { nombre = "tiempo_s", tipo = "double precision", unidad = "s", descripcion = "Momento del paso de la FCD. Un paso que la FCD no trae no tiene fila: no se rellena con cero.", origen = "metricas.json: zone.queue_series.times_s", regla = "tiempo_s >= 0" },
+  { nombre = "vehiculos_en_cola", tipo = "integer", unidad = "veh", descripcion = "Vehículos del acceso con velocidad menor o igual que el umbral de cola, en los carriles de la zona.", origen = "metricas.json: zone.queue_series.vehicles_by_access[acceso]", regla = "vehiculos_en_cola >= 0" },
+  { nombre = "en_ventana", tipo = "boolean", descripcion = "Si el paso cuenta para la cola del resumen: está dentro del intervalo de medición y en un momento de muestreo. Los demás pasos (calentamiento, vaciado) se guardan para verlos, pero no entran en las medias.", origen = "metricas.json: zone.queue_series.in_window" },
 ]
 claves_foraneas = [
   { columnas = ["run_id"], referencia = "simulacion.corridas", referidas = ["run_id"] },

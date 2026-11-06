@@ -10,7 +10,13 @@ import shutil
 import sys
 from pathlib import Path
 
-__all__ = ["MemoryProbe", "available_memory_bytes", "free_disk_bytes", "kib_field"]
+__all__ = [
+    "MemoryProbe",
+    "available_memory_bytes",
+    "free_disk_bytes",
+    "kib_field",
+    "total_memory_bytes",
+]
 
 # PROCESS_QUERY_INFORMATION | PROCESS_VM_READ
 _WINDOWS_ACCESS = 0x0400 | 0x0010
@@ -82,19 +88,29 @@ if sys.platform == "win32":
     _psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
 
 
-def available_memory_bytes() -> int | None:
-    """Memoria física disponible en el equipo; ``None`` si este sistema no permite medirla."""
+def _physical_memory(windows_field: str, linux_field: str) -> int | None:
+    """Un dato de la memoria física del equipo; ``None`` si este sistema no permite medirlo."""
     if sys.platform == "win32":
         status = _MemoryStatus()
         status.dwLength = ctypes.sizeof(_MemoryStatus)
         if not _kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
             return None
-        return int(status.ullAvailPhys)
+        return int(getattr(status, windows_field))
     try:
         text = Path("/proc/meminfo").read_text(encoding="ascii")
     except OSError:
         return None
-    return kib_field(text, "MemAvailable")
+    return kib_field(text, linux_field)
+
+
+def available_memory_bytes() -> int | None:
+    """Memoria física disponible en el equipo; ``None`` si este sistema no permite medirla."""
+    return _physical_memory("ullAvailPhys", "MemAvailable")
+
+
+def total_memory_bytes() -> int | None:
+    """Memoria física total del equipo; ``None`` si este sistema no permite medirla."""
+    return _physical_memory("ullTotalPhys", "MemTotal")
 
 
 class MemoryProbe:

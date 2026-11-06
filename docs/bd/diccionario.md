@@ -6,13 +6,13 @@ Versión 1.0.0-borrador del 2026-11-05. Motor: PostgreSQL 17.9. Estado: propuest
 
 **Archivo generado** por `scripts/bd_esquema.py` desde `docs/bd/esquema.toml`. No se edita a mano: se cambia el esquema y se vuelve a generar.
 
-**56 tablas aprobadas en F0** y **0 propuestas** de F1, con **870 columnas** en total y **112 relaciones** entre tablas. Cada tabla lleva además `carga_id` y `artefacto_id`, que la unen con la carga que la escribió y con su archivo original.
+**56 tablas aprobadas en F0** y **0 propuestas** de F1, con **871 columnas** en total y **112 relaciones** entre tablas. Cada tabla lleva además `carga_id` y `artefacto_id`, que la unen con la carga que la escribió y con su archivo original.
 
 ## Resumen por esquema
 
 | Esquema | Qué guarda | Tablas aprobadas | Propuestas | Columnas |
 |---|---|---|---|---|
-| `control` | Quién cargó qué, con qué huella, los hitos del procedimiento y las incidencias de integridad. | 6 | 0 | 82 |
+| `control` | Quién cargó qué, con qué huella, los hitos del procedimiento y las incidencias de integridad. | 6 | 0 | 83 |
 | `caso` | El cruce: movimientos, clases de vehículo, tramos, grupos de verde, plan vigente, aforos y calibración. | 13 | 0 | 160 |
 | `experimento` | Familias y escenarios de demanda, su reparto en particiones y los protocolos de medición. | 7 | 0 | 85 |
 | `simulacion` | Lo que produce SUMO: planes, corridas, resultados, vehículos, eventos, colas, búsquedas, etiquetas y comparadores. | 14 | 0 | 341 |
@@ -464,6 +464,7 @@ erDiagram
     text version_python
     text sistema_operativo
     text commit_codigo
+    boolean codigo_modificado
     text motivo_sin_commit
     jsonb librerias
     text ubicacion
@@ -609,18 +610,19 @@ erDiagram
 | 2 | `version_sumo` | text | sí |  |  | Versión de SUMO; vacía en procesos sin SUMO. | manifest.json: environment.sumo |  |
 | 3 | `version_python` | text | no |  |  | Versión de Python. | manifest.json: environment.python |  |
 | 4 | `sistema_operativo` | text | no |  |  | Sistema operativo. | manifest.json: environment.os |  |
-| 5 | `commit_codigo` | text | sí |  |  | Commit del proyecto; vacío en las corridas anteriores a DEV31 F2. | manifest.json: environment (desde F2) |  |
-| 6 | `motivo_sin_commit` | text | sí |  |  | Por qué falta el commit, por ejemplo «no registrado antes de DEV31». | cargador |  |
-| 7 | `librerias` | jsonb | no |  |  | Versiones de librerías relevantes; objeto vacío si no aplica. | manifiesto del proceso |  |
-| 8 | `ubicacion` | text | sí |  |  | Dónde corrió el proceso: «local» (la computadora del proyecto) o «nube». Vacío en las corridas anteriores a DEV31 F2 (no registrado). | manifest.json: environment.equipo (desde F2) | `ubicacion IS NULL OR ubicacion IN ('local','nube')` |
-| 9 | `proveedor_nube` | text | sí |  |  | Proveedor de la nube cuando ubicacion = nube (por ejemplo AWS, Azure o Google Cloud). Vacío si es local. | manifest.json: environment.equipo (desde F2) |  |
-| 10 | `tipo_maquina` | text | sí |  |  | Tipo o modelo de la máquina virtual que reporta la nube. Vacío si es local o si la nube no lo informa. | manifest.json: environment.equipo (desde F2) |  |
-| 11 | `region` | text | sí |  |  | Región o centro de datos de la nube. Vacío si es local. | manifest.json: environment.equipo (desde F2) |  |
-| 12 | `procesador` | text | sí |  |  | Modelo del procesador tal como lo reporta el sistema operativo (I7). | manifest.json: environment.equipo (desde F2) |  |
-| 13 | `nucleos` | integer | sí |  |  | Número de núcleos lógicos disponibles para la corrida (I7). | manifest.json: environment.equipo (desde F2) | `nucleos IS NULL OR nucleos > 0` |
-| 14 | `memoria_gb` | double precision | sí | GB |  | Memoria RAM total del equipo o de la máquina virtual (I7). | manifest.json: environment.equipo (desde F2) | `memoria_gb IS NULL OR memoria_gb > 0` |
-| 15 | `carga_id` | text | no |  | FK → `control.cargas` | Carga que escribió la fila. (columna común) | cargador |  |
-| 16 | `artefacto_id` | text | no |  | FK → `control.artefactos` | Archivo de datos/ (o acta del repositorio) del que sale la fila. (columna común) | cargador |  |
+| 5 | `commit_codigo` | text | sí |  |  | Commit del proyecto con que corrió el proceso; vacío en las corridas anteriores a DEV31 F2. | manifest.json: environment.commit (desde F2) |  |
+| 6 | `codigo_modificado` | boolean | sí |  |  | Verdadero si, al correr, los archivos que git sigue tenían cambios sin confirmar (el commit no describe todo el código). Los archivos nuevos sin seguir no cuentan. Vacío si no hay commit. | manifest.json: environment.code_modified (desde F2) | `codigo_modificado IS NULL OR commit_codigo IS NOT NULL` |
+| 7 | `motivo_sin_commit` | text | sí |  |  | Por qué falta el commit, por ejemplo «no registrado antes de DEV31». | cargador |  |
+| 8 | `librerias` | jsonb | no |  |  | Versiones de librerías relevantes; objeto vacío si no aplica. | manifiesto del proceso |  |
+| 9 | `ubicacion` | text | sí |  |  | Dónde corrió el proceso: «local» (la computadora del proyecto) o «nube» (cualquier proveedor). Se declara con SEMAFORO_UBICACION; sin declaración, local, salvo que el equipo se presente como máquina de una nube conocida. Vacío en las corridas anteriores a DEV31 F2 (no registrado). El manifiesto guarda «local» o «cloud»; la base lo traduce a «local» o «nube». | manifest.json: environment.location (desde F2) | `ubicacion IS NULL OR ubicacion IN ('local','nube')` |
+| 10 | `proveedor_nube` | text | sí |  |  | Proveedor de la nube cuando ubicacion = nube (por ejemplo AWS, Azure o Google Cloud), declarado con SEMAFORO_NUBE_PROVEEDOR o tomado del equipo; «no identificado» si no se sabe. Vacío si es local. | manifest.json: environment.cloud_provider (desde F2) |  |
+| 11 | `tipo_maquina` | text | sí |  |  | Tipo o modelo de la máquina virtual que reporta la nube (SEMAFORO_NUBE_TIPO_MAQUINA o el equipo). Vacío si es local o si no se conoce. | manifest.json: environment.machine_type (desde F2) |  |
+| 12 | `region` | text | sí |  |  | Región o centro de datos de la nube (SEMAFORO_NUBE_REGION). Vacío si es local o si no se declaró. | manifest.json: environment.region (desde F2) |  |
+| 13 | `procesador` | text | sí |  |  | Modelo del procesador tal como lo reporta el sistema operativo (I7). Ejemplo: AMD Ryzen 9 4900HS with Radeon Graphics. | manifest.json: environment.cpu (desde F2) |  |
+| 14 | `nucleos` | integer | sí |  |  | Número de núcleos lógicos del equipo (I7). | manifest.json: environment.cpu_cores (desde F2) | `nucleos IS NULL OR nucleos > 0` |
+| 15 | `memoria_gb` | double precision | sí | GB |  | Memoria RAM total del equipo o de la máquina virtual, con un decimal (I7). | manifest.json: environment.memory_gb (desde F2) | `memoria_gb IS NULL OR memoria_gb > 0` |
+| 16 | `carga_id` | text | no |  | FK → `control.cargas` | Carga que escribió la fila. (columna común) | cargador |  |
+| 17 | `artefacto_id` | text | no |  | FK → `control.artefactos` | Archivo de datos/ (o acta del repositorio) del que sale la fila. (columna común) | cargador |  |
 
 - Clave primaria: `entorno_id`.
 - Regla «commit_o_motivo»: Si falta el commit, se dice por qué. `CHECK (commit_codigo IS NOT NULL OR motivo_sin_commit IS NOT NULL)`
@@ -2148,7 +2150,7 @@ erDiagram
 - **Qué guarda:** Resultados de una corrida: lo que reporta SUMO y las métricas de la cohorte y la zona calculadas por el código oficial (DEV19).
 - **Grano:** Una fila por corrida
 - **Origen:** outputs/summary.json y métricas publicadas (metricas.json, DEV31 F2)
-- **Estado de la fuente:** existe (summary.json); métricas publicadas pendientes de F2
+- **Estado de la fuente:** existe (summary.json y, desde DEV31 F2, metricas.json en las corridas nuevas; las 133 anteriores se calculan al cargarlas, F4)
 - **Filas estimadas en DEV16:** unas 4 700
 - **Cegado de la prueba:** Sí. Hereda la visibilidad de `simulacion.corridas(run_id)`.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
@@ -2230,7 +2232,7 @@ erDiagram
 - **Qué guarda:** Demora, cola y detenciones por acceso del cruce (I6 por acceso).
 - **Grano:** Una fila por corrida y acceso
 - **Origen:** metricas.json: cohort.by_access, zone.queue_by_access, zone.stops_by_access
-- **Estado de la fuente:** pendiente F2 (métricas publicadas)
+- **Estado de la fuente:** existe desde DEV31 F2 (metricas.json de las corridas nuevas; las 133 anteriores se calculan al cargarlas, F4)
 - **Filas estimadas en DEV16:** unas 33 000
 - **Cegado de la prueba:** Sí. Hereda la visibilidad de `simulacion.corridas(run_id)`.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
@@ -2273,7 +2275,7 @@ erDiagram
 - **Qué guarda:** Demora por movimiento del cruce.
 - **Grano:** Una fila por corrida y movimiento
 - **Origen:** metricas.json: cohort.by_movement
-- **Estado de la fuente:** pendiente F2 (métricas publicadas)
+- **Estado de la fuente:** existe desde DEV31 F2 (metricas.json de las corridas nuevas; las 133 anteriores se calculan al cargarlas, F4)
 - **Filas estimadas en DEV16:** unas 108 000
 - **Cegado de la prueba:** Sí. Hereda la visibilidad de `simulacion.corridas(run_id)`.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
@@ -2306,7 +2308,7 @@ erDiagram
 - **Qué guarda:** Cada vehículo de una corrida: qué pidió, qué le pasó y cuánto tiempo perdió.
 - **Grano:** Una fila por corrida y vehículo (unas 1 780 por corrida)
 - **Origen:** outputs/cohorte_conciliada.csv, outputs/tripinfo.xml y metricas.json (cohort.vehicles y zone.vehicle_stops)
-- **Estado de la fuente:** existe (cohorte y tripinfo); columnas de métricas pendientes de F2
+- **Estado de la fuente:** existe (cohorte y tripinfo; las columnas de métricas, desde DEV31 F2 en las corridas nuevas)
 - **Filas estimadas en DEV16:** unos 8,4 millones
 - **Cegado de la prueba:** Sí. Hereda la visibilidad de `simulacion.corridas(run_id)`.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
@@ -2376,10 +2378,10 @@ erDiagram
 
 #### `simulacion.cola_segundo`
 
-- **Qué guarda:** Vehículos detenidos en cada acceso, en cada muestra (cada segundo con el protocolo actual).
-- **Grano:** Una fila por corrida, acceso y muestra
-- **Origen:** metricas.json: serie de cola por acceso (se agrega en DEV31 F2, con la misma regla de DEV19)
-- **Estado de la fuente:** pendiente F2
+- **Qué guarda:** Vehículos detenidos en cada acceso, en cada paso de la FCD (un paso por segundo con la simulación actual), con la marca de los que cuentan para la cola del resumen.
+- **Grano:** Una fila por corrida, acceso y paso
+- **Origen:** metricas.json: zone.queue_series (times_s, in_window y vehicles_by_access), con la misma regla de DEV19
+- **Estado de la fuente:** existe desde DEV31 F2 (metricas.json de las corridas nuevas; las 133 anteriores se calculan al cargarlas, F4)
 - **Filas estimadas en DEV16:** unos 69 millones
 - **Cegado de la prueba:** Sí. Hereda la visibilidad de `simulacion.corridas(run_id)`.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
@@ -2387,10 +2389,10 @@ erDiagram
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
 |---|---|---|---|---|---|---|---|---|
 | 1 | `run_id` | text | no |  | PK; FK → `simulacion.corridas` | Corrida. | metricas.json: run_id |  |
-| 2 | `acceso` | text | no |  | PK | Acceso. | metricas.json (serie por acceso) |  |
-| 3 | `tiempo_s` | double precision | no | s | PK | Momento de la muestra. | metricas.json (serie) | `tiempo_s >= 0` |
-| 4 | `vehiculos_en_cola` | integer | no | veh |  | Vehículos a velocidad menor o igual que el umbral de cola, en los carriles de aproximación. | metricas.json (serie) | `vehiculos_en_cola >= 0` |
-| 5 | `en_ventana` | boolean | no |  |  | Si la muestra está dentro del intervalo de medición. | metricas.json (serie) |  |
+| 2 | `acceso` | text | no |  | PK | Acceso: una clave de zone.queue_series.vehicles_by_access. | metricas.json: zone.queue_series.vehicles_by_access (clave) |  |
+| 3 | `tiempo_s` | double precision | no | s | PK | Momento del paso de la FCD. Un paso que la FCD no trae no tiene fila: no se rellena con cero. | metricas.json: zone.queue_series.times_s | `tiempo_s >= 0` |
+| 4 | `vehiculos_en_cola` | integer | no | veh |  | Vehículos del acceso con velocidad menor o igual que el umbral de cola, en los carriles de la zona. | metricas.json: zone.queue_series.vehicles_by_access[acceso] | `vehiculos_en_cola >= 0` |
+| 5 | `en_ventana` | boolean | no |  |  | Si el paso cuenta para la cola del resumen: está dentro del intervalo de medición y en un momento de muestreo. Los demás pasos (calentamiento, vaciado) se guardan para verlos, pero no entran en las medias. | metricas.json: zone.queue_series.in_window |  |
 | 6 | `carga_id` | text | no |  | FK → `control.cargas` | Carga que escribió la fila. (columna común) | cargador |  |
 | 7 | `artefacto_id` | text | no |  | FK → `control.artefactos` | Archivo de datos/ (o acta del repositorio) del que sale la fila. (columna común) | cargador |  |
 

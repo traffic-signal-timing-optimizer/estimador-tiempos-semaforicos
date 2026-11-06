@@ -5,8 +5,9 @@ normalizados; iguales dentro de tolerancia; timestamps excluidos de la comparaci
 
 Reglas, archivo por archivo de ``outputs/``:
 
-- **XML de SUMO** (``tripinfo.xml``, ``statistics.xml`` y cualquier otro ``.xml``): se comparan
-  elemento por elemento, en orden, con sus atributos. Los comentarios no cuentan: allí escribe
+- **XML de SUMO** (``tripinfo.xml``, ``statistics.xml`` y cualquier otro ``.xml`` o ``.xml.gz``,
+  como la FCD comprimida): se comparan elemento por elemento, en orden, con sus atributos y
+  descomprimidos. Los comentarios no cuentan: allí escribe
   SUMO la hora de generación. En ``statistics.xml`` se omite el bloque ``performance`` (tiempos de
   reloj de la corrida). Un número con decimales es igual si la diferencia relativa o la absoluta
   no supera la tolerancia; lo demás (enteros, textos) debe ser idéntico.
@@ -20,11 +21,13 @@ si todo coincide; si no, ``different`` con los motivos. Un veredicto ``different
 es un resultado.
 """
 
+import gzip
 import math
+import zlib
 from collections.abc import Generator
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import BinaryIO, Literal
 
 from defusedxml.common import DefusedXmlException
 from defusedxml.ElementTree import ParseError, iterparse
@@ -89,10 +92,28 @@ class ReplicaReport(FrozenModel):
     reasons: list[str]
 
 
+class _Capped:
+    """Un flujo que falla si se leen más de ``MAX_XML_BYTES`` (descomprimidos)."""
+
+    def __init__(self, stream: BinaryIO | gzip.GzipFile, name: str) -> None:
+        self._stream = stream
+        self._name = name
+        self._left = MAX_XML_BYTES
+
+    def read(self, size: int = -1, /) -> bytes:
+        chunk = self._stream.read(size)
+        self._left -= len(chunk)
+        if self._left < 0:
+            raise SimulacionError(
+                ErrorCode.OUTPUT_INVALID, "el XML supera el tope para compararlo", self._name
+            )
+        return chunk
+
+
 def _rule(name: str) -> Rule:
     if name in EXCLUDED:
         return "excluded"
-    return "xml" if name.endswith(".xml") else "exact"
+    return "xml" if name.endswith((".xml", ".xml.gz")) else "exact"
 
 
 def _elements(path: Path, skipped: frozenset[str]) -> Generator[tuple[str, dict[str, str], str]]:
@@ -102,8 +123,11 @@ def _elements(path: Path, skipped: frozenset[str]) -> Generator[tuple[str, dict[
             ErrorCode.OUTPUT_INVALID, "el XML supera el tope para compararlo", path.name
         )
     inside = 0
-    with path.open("rb") as stream:
-        for event, element in iterparse(stream, events=("start", "end"), forbid_dtd=True):
+    with path.open("rb") as raw:
+        stream = gzip.GzipFile(fileobj=raw) if path.name.endswith(".gz") else raw
+        for event, element in iterparse(
+            _Capped(stream, path.name), events=("start", "end"), forbid_dtd=True
+        ):
             tag = str(element.tag)
             if event == "start":
                 if tag in skipped or inside:
@@ -150,7 +174,8 @@ def _compare_xml(a: Path, b: Path, name: str, tolerance: Tolerance) -> tuple[boo
             if not _same_value(text_a, text_b, tolerance):
                 differing += 1
                 first = first or f"elemento {index} <{tag_a}>: el texto cambia"
-    except (ParseError, DefusedXmlException) as error:  # antes: DefusedXmlException es ValueError
+    except (ParseError, DefusedXmlException, OSError, EOFError, zlib.error) as error:
+        # antes que ValueError: DefusedXmlException lo es
         return False, differing + 1, f"no se puede leer como XML ({type(error).__name__})"
     except ValueError:  # zip(strict=True): una corrida tiene más elementos que la otra
         return False, differing + 1, first or "una corrida tiene más elementos"

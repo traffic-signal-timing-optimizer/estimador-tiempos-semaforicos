@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from semaforo.caso.errors import CasoError
 from semaforo.dominio.case import Case, parse_case
@@ -14,7 +15,7 @@ from semaforo.dominio.protocol import Protocol, parse_protocol
 from semaforo.evaluacion.cohort import CohortDelay, VehicleDelay, summarize_delays
 from semaforo.evaluacion.errors import EvaluacionError
 from semaforo.evaluacion.fcd import FcdRecord, read_fcd
-from semaforo.evaluacion.metrics import ZoneMetrics, lane_access, zone_metrics
+from semaforo.evaluacion.metrics import QueueSeries, ZoneMetrics, lane_access, zone_metrics
 from semaforo.simulacion.reconcile import Status
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
@@ -444,3 +445,55 @@ def test_a_missing_fcd_makes_the_metrics_fail(tmp_path: Path) -> None:
             end_s=1.0,
         )
     assert raised.value.code is ErrorCode.OUTPUT_INVALID
+
+
+# --- la cola paso a paso (DEV31 F2) -----------------------------------------------------------
+
+
+def series_of(result: ZoneMetrics) -> QueueSeries:
+    assert result.queue_series is not None
+    return result.queue_series
+
+
+def test_the_queue_series_has_one_entry_per_fcd_step(tmp_path: Path) -> None:
+    series = series_of(measure(tmp_path, QA27, qa27_cohort()))
+    assert series.times_s == [0.0, 1.0, 2.0, 3.0]
+    assert series.vehicles_by_access == {"E": [0, 0, 0, 0], "N": [0, 1, 2, 1]}
+    assert series.in_window == [True, True, True, True]
+
+
+def test_the_series_keeps_the_steps_outside_the_window_but_does_not_count_them(
+    tmp_path: Path,
+) -> None:
+    result = measure(tmp_path, QA27, qa27_cohort(), start=1.0, end=3.0)
+    series = series_of(result)
+    assert series.in_window == [False, True, True, False]
+    assert series.vehicles_by_access["N"] == [0, 1, 2, 1]
+    assert (result.queue.ticks_expected, result.queue.vehicle_ticks) == (2, 3)
+
+
+def test_the_summary_is_exactly_what_the_series_says(tmp_path: Path) -> None:
+    result = measure(tmp_path, QA27, qa27_cohort(), start=1.0, end=3.0)
+    series = series_of(result)
+    for name, summary in result.queue_by_access.items():
+        counted = [
+            count
+            for count, inside in zip(series.vehicles_by_access[name], series.in_window, strict=True)
+            if inside
+        ]
+        assert sum(counted) == summary.vehicle_ticks
+        assert max(counted) == summary.max_vehicles
+
+
+def test_a_step_missing_from_the_fcd_is_not_filled_with_a_zero(tmp_path: Path) -> None:
+    steps = {0.0: {"a": (N, 0.0)}, 2.0: {"a": (N, 0.0)}}
+    result = measure(tmp_path, steps, cohort(("a", "N", "finished")), end=3.0)
+    assert series_of(result).times_s == [0.0, 2.0]
+    assert result.queue.status == "incomplete"
+
+
+def test_the_columns_of_a_series_must_have_the_same_length() -> None:
+    with pytest.raises(ValidationError, match="distinto largo"):
+        QueueSeries(times_s=[0.0, 1.0], in_window=[True], vehicles_by_access={})
+    with pytest.raises(ValidationError, match="distinto largo"):
+        QueueSeries(times_s=[0.0], in_window=[True], vehicles_by_access={"N": [1, 2]})

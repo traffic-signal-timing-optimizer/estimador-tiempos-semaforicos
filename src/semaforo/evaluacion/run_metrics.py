@@ -14,8 +14,9 @@ comparación (DEV20). Para una corrida ``succeeded`` hecha con una carpeta de en
 Copia también los avisos de la corrida (teletransportes, choques, avisos de SUMO): un atasco que
 SUMO resuelve teletransportando vehículos esconde demora, y quien use las métricas debe verlo.
 
-No escribe nada: devuelve un modelo con unidades y denominadores. Publicarlo como artefacto de
-evaluación es de DEV20.
+No escribe nada: devuelve un modelo con unidades y denominadores. Publicarlo como ``metricas.json``
+de la corrida es de ``published_metrics`` (DEV31 F2); compararlo con otra corrida, de DEV20. La FCD
+puede estar comprimida (``fcd.xml.gz``, corridas de DEV31 F2 en adelante) o no (las anteriores).
 """
 
 from pathlib import Path
@@ -35,7 +36,7 @@ from semaforo.evaluacion.metrics import MAX_FCD_BYTES, ZoneMetrics, zone_metrics
 from semaforo.simulacion.prepare import canonical_json_sha256
 from semaforo.simulacion.reconcile import MAX_TRIPINFO_BYTES, reconcile_run
 from semaforo.simulacion.run_inputs import verify_inputs
-from semaforo.simulacion.runner import FCD, SUMMARY, TRIPINFO
+from semaforo.simulacion.runner import FCD, SUMMARY, TRIPINFO, fcd_file
 from semaforo.simulacion.summary import SimulationFinding, SimulationSummary
 from semaforo.simulacion.tripinfo import read_trips
 
@@ -60,7 +61,7 @@ class RunMetrics(FrozenModel):
     con teletransportes, la demora de esos vehículos está subestimada.
     """
 
-    schema_version: Literal["2.0.0"] = "2.0.0"
+    schema_version: Literal["2.1.0"] = "2.1.0"
     run_id: str
     case_id: str
     case_version: str
@@ -159,8 +160,11 @@ def evaluate_run(  # noqa: PLR0913  (el escenario es de solo palabra clave)
     unavailable: str | None = None
     if manifest.measurement_edges:
         _zone_lanes_recorded(protocol, manifest.measurement_edges)
+        fcd = fcd_file(outputs)
+        if fcd is None:
+            raise EvaluacionError(ErrorCode.OUTPUT_INVALID, f"falta {FCD}", FCD)
         zone = zone_metrics(
-            outputs / FCD,
+            fcd,
             protocol,
             case,
             cohort,

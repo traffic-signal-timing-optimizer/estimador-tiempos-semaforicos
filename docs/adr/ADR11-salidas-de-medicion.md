@@ -49,6 +49,15 @@ La inspección con el caso real mostró que varias calles de entrada del caso-00
 - **Con el caso-001:** 21 calles y 58 carriles. La FCD ocupa hasta 27 MB por corrida, contra un tope de 512 MiB.
 - **Carpetas anteriores:** las 1.1.0 siguen siendo válidas, con la zona de las calles de entrada.
 
+## Enmienda del 2026-11-06 (DEV31 F2): la FCD se publica comprimida
+
+La FCD es el 92 % del peso de una corrida (21 de 22,8 MB de media; 39 MB la mayor). SUMO sigue escribiendo `outputs/fcd.xml`; al terminar la corrida el corredor la comprime y publica solo `outputs/fcd.xml.gz`, con la misma información.
+
+- **Medido con el caso-001:** la FCD de 39,0 MiB de una corrida existente queda en 0,93 MiB (2,4 %) y se lee con el mismo resultado paso a paso y en el mismo tiempo.
+- **Determinista:** el gzip no lleva fecha ni nombre, así que la misma FCD da siempre la misma huella. La réplica de DEV08 compara los `.xml.gz` descomprimidos y con la misma tolerancia que un `.xml`.
+- **Las corridas existentes no se tocan:** las 133 siguen con `fcd.xml`. El lector (`fcd_file`, `stream_parse`) acepta las dos formas, por contenido y no por nombre.
+- **Sin cambios en los contratos:** el manifiesto de la corrida lista sus salidas por ruta; el contrato `run_manifest` no cambia (43/43).
+
 ## Prueba de aceptación
 
 - Una corrida con SUMO real desde una carpeta 1.1.0 produce `outputs/fcd.xml` solo con las calles de la zona y un paso por tick, y el `tripinfo` incluye los no iniciados.

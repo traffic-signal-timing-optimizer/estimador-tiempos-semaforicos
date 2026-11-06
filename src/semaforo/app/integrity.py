@@ -29,6 +29,7 @@ from semaforo.datos.scenario_set import SCENARIO_SETS, read_scenario_set
 from semaforo.dominio.base_model import FrozenModel
 from semaforo.dominio.case import canonical_sha256
 from semaforo.dominio.errors import DomainError, ErrorCode
+from semaforo.evaluacion.published_metrics import METRICS, read_run_metrics
 from semaforo.referencias.comparators import COMPARATORS, read_comparators
 from semaforo.referencias.label import LABELS, read_label
 from semaforo.simulacion.compiler import read_program
@@ -317,6 +318,7 @@ Family = Literal[
     "splits",
     "labels",
     "comparators",
+    "metrics",
 ]
 ItemStatus = Literal["intact", "altered", "incomplete", "temporary", "unknown"]
 
@@ -412,9 +414,10 @@ def verify_workspace(
     Familias: corridas (``ejecuciones``), recepciones, copias de originales, programas derivados,
     carpetas de entradas, reportes de calidad (``derivados/calidad``), reportes de réplica
     (``derivados/replicas``), conjuntos de escenarios (``derivados/escenarios``) y particiones
-    (``derivados/particiones``), etiquetas (``derivados/referencias``) y comparadores
-    (``derivados/comparadores``). Los casos, los escenarios escritos a mano y demás archivos
-    editables no son carpetas publicadas y no se revisan aquí.
+    (``derivados/particiones``), etiquetas (``derivados/referencias``), comparadores
+    (``derivados/comparadores``) y métricas de las corridas (``derivados/metricas``). Los casos,
+    los escenarios escritos a mano y demás archivos editables no son carpetas publicadas y no se
+    revisan aquí.
     """
     runs_root = workspace / RUNS
 
@@ -444,6 +447,7 @@ def verify_workspace(
         ("splits", workspace / SPLITS, lambda f: _check(read_split, f), True),
         ("labels", workspace / LABELS, lambda f: _check(read_label, f), True),
         ("comparators", workspace / COMPARATORS, lambda f: _check(read_comparators, f), True),
+        ("metrics", workspace / METRICS, lambda f: _check(read_run_metrics, f), True),
     ]
     items = [
         item
