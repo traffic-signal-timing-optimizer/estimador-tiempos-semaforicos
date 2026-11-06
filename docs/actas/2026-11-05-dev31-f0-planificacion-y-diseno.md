@@ -13,7 +13,7 @@ Escrito para: el Product Owner (aprobación del diseño), el asesor (qué eviden
 1. El jurado no solo pregunta **qué números salieron**. También pregunta **cómo se sabe que el procedimiento fue honesto**: que la prueba final no se miró antes de tiempo, que todas las alternativas se compararon en las mismas condiciones, que no se borraron los casos malos y que nada se cambió después. Por eso la base guarda tres tipos de datos: **entradas**, **resultados** y **evidencia del procedimiento**.
 2. Los archivos con huella siguen siendo el respaldo físico; la base es el consolidado. **Ningún proceso de cálculo lee la base**: búsqueda, entrenamiento y evaluación siguen trabajando con archivos, así que no cambia nada de lo ya probado.
 3. **PostgreSQL 17**, una base `semaforo` guardada en D:, cuatro usuarios con permisos distintos y una regla que la propia base aplica: **las filas de prueba quedan ocultas hasta que se registre su apertura**.
-4. **54 tablas** en siete esquemas (control, caso, experimento, simulación, aprendizaje, evaluación final y vistas), con 80 relaciones de clave foránea. Las vistas no son tablas. El catálogo de la sección 5.4 ya nombra las 54; la cifra de «unas 40» de una versión anterior de esta acta era un error.
+4. **54 tablas** en siete esquemas (control, caso, experimento, simulación, aprendizaje, evaluación final y vistas), con 80 relaciones de clave foránea. Al detallar el esquema (DEV31 F1) el PO aprobó dos tablas más, `reportes_calidad` y `plan_tramos`, para un total de **56**. Las vistas no son tablas. El catálogo de la sección 5.4 ya nombra las 54; la cifra de «unas 40» de una versión anterior de esta acta era un error.
 5. **Las métricas se calculan una sola vez, con el código oficial del proyecto (DEV19)**, y se publican como archivo con huella. La base las copia; nunca las recalcula a su manera.
 6. **Cada tabla y figura de resultados de la tesis sale de una consulta guardada en el repositorio.** Así se puede seguir cualquier número hasta el archivo original.
 7. **El panel** es HTML estático, generado desde la base con el usuario de solo lectura.
@@ -231,6 +231,7 @@ Las columnas que se indican son las principales. F3 fija cada columna con su tip
 | `grupos_verde` y `grupo_tramo` | Qué tramos dan verde a cada grupo | `case.json` |
 | `planes_observados` | Plan vigente (82/45/45/10), fuente, fecha, cumple reglas | Comparadores (DEV15) |
 | `aforos`, `aforos_control`, `calidad_aforos` | Conteos por observación, movimiento y clase; control manual; error y cobertura (I1) | DEV04, DEV05, DEV22 |
+| `reportes_calidad` *(agregada en DEV31 F1, aprobada por el PO el 2026-11-06)* | Resumen de cada reporte de calidad: ventana, cobertura por movimiento, huecos, faltantes y exclusiones (I1) | `resumen.json` (DEV22) |
 | `calibracion_intentos`, `calibracion_contraste` | Parámetros probados; observado frente a simulado, separado en ajuste y validación (I2) | DEV23 |
 
 **`experimento`**
@@ -248,6 +249,7 @@ Las columnas que se indican son las principales. F3 fija cada columna con su tip
 | Tabla | Columnas principales | Origen | Filas DEV16 |
 |---|---|---|---|
 | `planes` | huella del vector, caso, duraciones por tramo, ciclo_s, origen (búsqueda, vigente, Webster, modelo, corregido) | Trazas, comparadores, consultas | ~1 000 |
+| `plan_tramos` *(agregada en DEV31 F1, aprobada por el PO el 2026-11-06)* | Duración de cada tramo de un plan, en una fila por tramo | Las mismas fuentes que `planes` | ~9 000 |
 | `corridas` | run_id, escenario, plan, semilla, etapa (búsqueda, finalistas, final), estado, código de salida, duración_s, memoria pico, entorno, protocolo, retry_of | `manifest.json`, `tiempos.json` | 4 692 |
 | `resultados_corrida` | Insertados, terminados, sin terminar, no insertados; teletransportes (atasco, cruce, carril); choques; avisos; demora media (y cota inferior); cola media y máxima; detenciones; **clase según la regla C** (limpia, incidente aislado, colapso) | `summary.json` y métricas publicadas | 4 692 |
 | `resultados_acceso` y `resultados_movimiento` | Lo mismo por acceso (7) y por movimiento (23) | Métricas publicadas | ~140 000 |

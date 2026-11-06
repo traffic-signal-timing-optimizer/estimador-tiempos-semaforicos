@@ -6,16 +6,16 @@ Versión 1.0.0-borrador del 2026-11-05. Motor: PostgreSQL 17.9. Estado: propuest
 
 **Archivo generado** por `scripts/bd_esquema.py` desde `docs/bd/esquema.toml`. No se edita a mano: se cambia el esquema y se vuelve a generar.
 
-**54 tablas aprobadas en F0** y **2 propuestas** de F1, con **864 columnas** en total y **112 relaciones** entre tablas. Cada tabla lleva además `carga_id` y `artefacto_id`, que la unen con la carga que la escribió y con su archivo original.
+**56 tablas aprobadas en F0** y **0 propuestas** de F1, con **870 columnas** en total y **112 relaciones** entre tablas. Cada tabla lleva además `carga_id` y `artefacto_id`, que la unen con la carga que la escribió y con su archivo original.
 
 ## Resumen por esquema
 
 | Esquema | Qué guarda | Tablas aprobadas | Propuestas | Columnas |
 |---|---|---|---|---|
-| `control` | Quién cargó qué, con qué huella, los hitos del procedimiento y las incidencias de integridad. | 6 | 0 | 76 |
-| `caso` | El cruce: movimientos, clases de vehículo, tramos, grupos de verde, plan vigente, aforos y calibración. | 12 | 1 | 160 |
+| `control` | Quién cargó qué, con qué huella, los hitos del procedimiento y las incidencias de integridad. | 6 | 0 | 82 |
+| `caso` | El cruce: movimientos, clases de vehículo, tramos, grupos de verde, plan vigente, aforos y calibración. | 13 | 0 | 160 |
 | `experimento` | Familias y escenarios de demanda, su reparto en particiones y los protocolos de medición. | 7 | 0 | 85 |
-| `simulacion` | Lo que produce SUMO: planes, corridas, resultados, vehículos, eventos, colas, búsquedas, etiquetas y comparadores. | 13 | 1 | 341 |
+| `simulacion` | Lo que produce SUMO: planes, corridas, resultados, vehículos, eventos, colas, búsquedas, etiquetas y comparadores. | 14 | 0 | 341 |
 | `aprendizaje` | Conjuntos de entrenamiento, entrenamientos, métricas, modelos, selección y consultas al modelo. | 11 | 0 | 128 |
 | `evaluacion` | Evaluación final: experimentos, comparaciones, diferencias emparejadas, indicadores y costos. | 5 | 0 | 74 |
 
@@ -466,7 +466,13 @@ erDiagram
     text commit_codigo
     text motivo_sin_commit
     jsonb librerias
-    jsonb equipo
+    text ubicacion
+    text proveedor_nube
+    text tipo_maquina
+    text region
+    text procesador
+    integer nucleos
+    double_precision memoria_gb
     text carga_id
     text artefacto_id
   }
@@ -606,12 +612,19 @@ erDiagram
 | 5 | `commit_codigo` | text | sí |  |  | Commit del proyecto; vacío en las corridas anteriores a DEV31 F2. | manifest.json: environment (desde F2) |  |
 | 6 | `motivo_sin_commit` | text | sí |  |  | Por qué falta el commit, por ejemplo «no registrado antes de DEV31». | cargador |  |
 | 7 | `librerias` | jsonb | no |  |  | Versiones de librerías relevantes; objeto vacío si no aplica. | manifiesto del proceso |  |
-| 8 | `equipo` | jsonb | sí |  |  | Procesador y memoria del equipo (I7); vacío mientras los manifiestos no lo registren. | pendiente (hallazgo F1) |  |
-| 9 | `carga_id` | text | no |  | FK → `control.cargas` | Carga que escribió la fila. (columna común) | cargador |  |
-| 10 | `artefacto_id` | text | no |  | FK → `control.artefactos` | Archivo de datos/ (o acta del repositorio) del que sale la fila. (columna común) | cargador |  |
+| 8 | `ubicacion` | text | sí |  |  | Dónde corrió el proceso: «local» (la computadora del proyecto) o «nube». Vacío en las corridas anteriores a DEV31 F2 (no registrado). | manifest.json: environment.equipo (desde F2) | `ubicacion IS NULL OR ubicacion IN ('local','nube')` |
+| 9 | `proveedor_nube` | text | sí |  |  | Proveedor de la nube cuando ubicacion = nube (por ejemplo AWS, Azure o Google Cloud). Vacío si es local. | manifest.json: environment.equipo (desde F2) |  |
+| 10 | `tipo_maquina` | text | sí |  |  | Tipo o modelo de la máquina virtual que reporta la nube. Vacío si es local o si la nube no lo informa. | manifest.json: environment.equipo (desde F2) |  |
+| 11 | `region` | text | sí |  |  | Región o centro de datos de la nube. Vacío si es local. | manifest.json: environment.equipo (desde F2) |  |
+| 12 | `procesador` | text | sí |  |  | Modelo del procesador tal como lo reporta el sistema operativo (I7). | manifest.json: environment.equipo (desde F2) |  |
+| 13 | `nucleos` | integer | sí |  |  | Número de núcleos lógicos disponibles para la corrida (I7). | manifest.json: environment.equipo (desde F2) | `nucleos IS NULL OR nucleos > 0` |
+| 14 | `memoria_gb` | double precision | sí | GB |  | Memoria RAM total del equipo o de la máquina virtual (I7). | manifest.json: environment.equipo (desde F2) | `memoria_gb IS NULL OR memoria_gb > 0` |
+| 15 | `carga_id` | text | no |  | FK → `control.cargas` | Carga que escribió la fila. (columna común) | cargador |  |
+| 16 | `artefacto_id` | text | no |  | FK → `control.artefactos` | Archivo de datos/ (o acta del repositorio) del que sale la fila. (columna común) | cargador |  |
 
 - Clave primaria: `entorno_id`.
 - Regla «commit_o_motivo»: Si falta el commit, se dice por qué. `CHECK (commit_codigo IS NOT NULL OR motivo_sin_commit IS NOT NULL)`
+- Regla «nube_con_proveedor»: Si el proceso corrió en la nube, se registra el proveedor (aunque sea «no identificado»). `CHECK (ubicacion IS DISTINCT FROM 'nube' OR proveedor_nube IS NOT NULL)`
 
 #### `control.hitos`
 
@@ -1193,7 +1206,7 @@ erDiagram
 - Clave primaria: `reporte_id, fila`.
 - Regla «relativo_o_motivo»: Una fila comparable tiene error relativo o dice por qué no. `CHECK (estado <> 'comparable' OR error_relativo IS NOT NULL OR motivo_error_relativo IS NOT NULL)`
 
-#### `caso.reportes_calidad` (PROPUESTA: requiere aprobación del PO)
+#### `caso.reportes_calidad`
 
 - **Qué guarda:** Resumen de cada reporte de calidad: ventana, cobertura por movimiento, huecos, faltantes y exclusiones (I1).
 - **Grano:** Una fila por reporte de calidad
@@ -2042,7 +2055,7 @@ erDiagram
 
 - Clave primaria: `plan_id`.
 
-#### `simulacion.plan_tramos` (PROPUESTA: requiere aprobación del PO)
+#### `simulacion.plan_tramos`
 
 - **Qué guarda:** Duración de cada tramo de un plan, en filas. Permite consultar «el t5 de todos los planes» y exige que el tramo exista en el caso.
 - **Grano:** Una fila por plan y tramo

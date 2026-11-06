@@ -249,10 +249,17 @@ columnas = [
   { nombre = "commit_codigo", tipo = "text", nulo = true, descripcion = "Commit del proyecto; vacío en las corridas anteriores a DEV31 F2.", origen = "manifest.json: environment (desde F2)" },
   { nombre = "motivo_sin_commit", tipo = "text", nulo = true, descripcion = "Por qué falta el commit, por ejemplo «no registrado antes de DEV31».", origen = "cargador" },
   { nombre = "librerias", tipo = "jsonb", descripcion = "Versiones de librerías relevantes; objeto vacío si no aplica.", origen = "manifiesto del proceso" },
-  { nombre = "equipo", tipo = "jsonb", nulo = true, descripcion = "Procesador y memoria del equipo (I7); vacío mientras los manifiestos no lo registren.", origen = "pendiente (hallazgo F1)" },
+  { nombre = "ubicacion", tipo = "text", nulo = true, descripcion = "Dónde corrió el proceso: «local» (la computadora del proyecto) o «nube». Vacío en las corridas anteriores a DEV31 F2 (no registrado).", origen = "manifest.json: environment.equipo (desde F2)", regla = "ubicacion IS NULL OR ubicacion IN ('local','nube')" },
+  { nombre = "proveedor_nube", tipo = "text", nulo = true, descripcion = "Proveedor de la nube cuando ubicacion = nube (por ejemplo AWS, Azure o Google Cloud). Vacío si es local.", origen = "manifest.json: environment.equipo (desde F2)" },
+  { nombre = "tipo_maquina", tipo = "text", nulo = true, descripcion = "Tipo o modelo de la máquina virtual que reporta la nube. Vacío si es local o si la nube no lo informa.", origen = "manifest.json: environment.equipo (desde F2)" },
+  { nombre = "region", tipo = "text", nulo = true, descripcion = "Región o centro de datos de la nube. Vacío si es local.", origen = "manifest.json: environment.equipo (desde F2)" },
+  { nombre = "procesador", tipo = "text", nulo = true, descripcion = "Modelo del procesador tal como lo reporta el sistema operativo (I7).", origen = "manifest.json: environment.equipo (desde F2)" },
+  { nombre = "nucleos", tipo = "integer", nulo = true, descripcion = "Número de núcleos lógicos disponibles para la corrida (I7).", origen = "manifest.json: environment.equipo (desde F2)", regla = "nucleos IS NULL OR nucleos > 0" },
+  { nombre = "memoria_gb", tipo = "double precision", nulo = true, unidad = "GB", descripcion = "Memoria RAM total del equipo o de la máquina virtual (I7).", origen = "manifest.json: environment.equipo (desde F2)", regla = "memoria_gb IS NULL OR memoria_gb > 0" },
 ]
 reglas = [
   { nombre = "commit_o_motivo", sql = "commit_codigo IS NOT NULL OR motivo_sin_commit IS NOT NULL", descripcion = "Si falta el commit, se dice por qué." },
+  { nombre = "nube_con_proveedor", sql = "ubicacion IS DISTINCT FROM 'nube' OR proveedor_nube IS NOT NULL", descripcion = "Si el proceso corrió en la nube, se registra el proveedor (aunque sea «no identificado»)." },
 ]
 
 [[tablas]]
@@ -638,7 +645,6 @@ reglas = [
 [[tablas]]
 esquema = "caso"
 nombre = "reportes_calidad"
-propuesta = true
 descripcion = "Resumen de cada reporte de calidad: ventana, cobertura por movimiento, huecos, faltantes y exclusiones (I1)."
 grano = "Una fila por reporte de calidad"
 origen = "Reporte de calidad (DEV05 y DEV09): resumen.json"
@@ -951,7 +957,6 @@ claves_foraneas = [
 [[tablas]]
 esquema = "simulacion"
 nombre = "plan_tramos"
-propuesta = true
 descripcion = "Duración de cada tramo de un plan, en filas. Permite consultar «el t5 de todos los planes» y exige que el tramo exista en el caso."
 grano = "Una fila por plan y tramo"
 origen = "Las mismas fuentes que planes."

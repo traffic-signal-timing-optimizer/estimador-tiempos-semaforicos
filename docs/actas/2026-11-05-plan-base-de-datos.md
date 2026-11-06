@@ -277,7 +277,7 @@ La nueva F0 y la F3 (antes F2) se parecen: F0 decide el diseño general y la F3 
 | Fase | Contenido | Modelo |
 |---|---|---|
 | **F1** (antes F3) | Esquema detallado: todas las columnas de las 54 tablas, con tipo, reglas, permisos, cegado de la prueba y diccionario completo | Opus |
-| **F2** (antes F4) | Compresión del FCD en las corridas nuevas y commit del código en los manifiestos | Sonnet |
+| **F2** (antes F4) | Compresión del FCD en las corridas nuevas, commit del código y registro del equipo (procesador, memoria, núcleos y ubicación: local o nube de cualquier proveedor) en los manifiestos | Sonnet |
 | **F3** (antes F5) | PostgreSQL (base en D:, usuarios, solo la laptop) y cargador verificado | Opus |
 | **F4** (antes F6) | Carga de lo existente y conciliación con los archivos; cegado de la prueba | Sonnet |
 | **F5** (antes F7) | Panel HTML estático | Sonnet |
