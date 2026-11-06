@@ -1,0 +1,1996 @@
+# Esquema detallado de la base de datos «semaforo» (DEV31 F1).
+#
+# Fuente única del diseño: de este archivo salen el diccionario de datos (docs/bd/diccionario.md)
+# y, en F3, las migraciones SQL. Se verifica y se regenera con:
+#     .venv\Scripts\python.exe scripts\bd_esquema.py
+#
+# Convenciones:
+# - nombre de tablas y columnas en español, en minúsculas y con guion bajo;
+# - los valores codificados (estados, orígenes, etapas) se guardan tal como vienen en los
+#   artefactos, en inglés; el diccionario los explica y las vistas del panel los traducen;
+# - «nulo = true» marca las columnas que pueden quedar vacías; vacío nunca significa cero;
+# - las unidades van en el nombre (_s, _vph, _veh, _m, _mps, _bytes) y en «unidad»;
+# - «origen» dice de qué archivo y campo sale el dato, o qué proceso lo calcula;
+# - cada tabla recibe además las columnas comunes (sección [comunes]); el generador las agrega.
+
+version = "1.0.0-borrador"
+fecha = "2026-11-05"
+motor = "PostgreSQL 17.9"
+estado = "propuesto para revisión del PO (DEV31 F1)"
+
+[[esquemas]]
+nombre = "control"
+descripcion = "Quién cargó qué, con qué huella, los hitos del procedimiento y las incidencias de integridad."
+
+[[esquemas]]
+nombre = "caso"
+descripcion = "El cruce: movimientos, clases de vehículo, tramos, grupos de verde, plan vigente, aforos y calibración."
+
+[[esquemas]]
+nombre = "experimento"
+descripcion = "Familias y escenarios de demanda, su reparto en particiones y los protocolos de medición."
+
+[[esquemas]]
+nombre = "simulacion"
+descripcion = "Lo que produce SUMO: planes, corridas, resultados, vehículos, eventos, colas, búsquedas, etiquetas y comparadores."
+
+[[esquemas]]
+nombre = "aprendizaje"
+descripcion = "Conjuntos de entrenamiento, entrenamientos, métricas, modelos, selección y consultas al modelo."
+
+[[esquemas]]
+nombre = "evaluacion"
+descripcion = "Evaluación final: experimentos, comparaciones, diferencias emparejadas, indicadores y costos."
+
+[[tipos]]
+nombre = "huella"
+base = "text"
+regla = "VALUE ~ '^[0-9a-f]{64}$'"
+descripcion = "Huella SHA-256 en hexadecimal minúscula (64 caracteres)."
+
+[comunes]
+carga_id = { tipo = "text", descripcion = "Carga que escribió la fila.", origen = "cargador", referencia = "control.cargas" }
+artefacto_id = { tipo = "text", descripcion = "Archivo de datos/ (o acta del repositorio) del que sale la fila.", origen = "cargador", referencia = "control.artefactos" }
+
+[[roles]]
+nombre = "semaforo_admin"
+descripcion = "Dueño de los esquemas. Aplica las migraciones y registra los hitos con «bd hito». Solo lo usa el PO."
+permisos = "Todo sobre los siete esquemas."
+
+[[roles]]
+nombre = "semaforo_carga"
+descripcion = "Lo usa el cargador («bd cargar»)."
+permisos = "USAGE en los esquemas; SELECT e INSERT en todas las tablas; UPDATE solo en las dos excepciones de «solo agregar». Ve todas las filas, también las de prueba."
+
+[[roles]]
+nombre = "semaforo_lectura"
+descripcion = "Lo usan el panel, las consultas guardadas y el PO para consultar."
+permisos = "USAGE y SELECT en todas las tablas y vistas. La seguridad por filas le oculta lo que esté cegado."
+
+[[roles]]
+nombre = "postgres"
+descripcion = "Administrador del servicio PostgreSQL de la laptop."
+permisos = "Solo el PO. El proyecto no lo usa."
+
+[[funciones]]
+nombre = "control.escenarios_cegados"
+clase = "vista"
+descripcion = "Escenarios asignados a «test» en una partición cuya prueba no tiene hito de apertura. Es la base del cegado."
+
+[[funciones]]
+nombre = "control.prueba_abierta(particion_id)"
+clase = "función"
+descripcion = "Verdadero si existe un hito «test_opened» para esa partición."
+
+[[funciones]]
+nombre = "control.bloquear_cambios()"
+clase = "disparador"
+descripcion = "Rechaza UPDATE y DELETE en todas las tablas, salvo las dos excepciones declaradas (cierre de una carga y decisión de un conflicto)."
+
+[[funciones]]
+nombre = "control.validar_hito()"
+clase = "disparador"
+descripcion = "Exige el orden de los hitos: protocolo y partición congelados antes que el modelo; modelo congelado antes de abrir la prueba."
+
+[[funciones]]
+nombre = "experimento.validar_asignacion()"
+clase = "disparador"
+descripcion = "Una familia completa va a una sola partición y asignación; un escenario cargado como preliminar no puede pasar a «test»."
+
+[[funciones]]
+nombre = "simulacion.validar_corrida()"
+clase = "disparador"
+descripcion = "La etapa «final» solo en escenarios asignados a «test»; la semilla debe pertenecer a la etapa del protocolo."
+
+[[funciones]]
+nombre = "aprendizaje.validar_conjunto_etiqueta()"
+clase = "disparador"
+descripcion = "Una etiqueta entra a un conjunto solo si su escenario está asignado a «train» o «validation» en la misma partición; nunca a «test»."
+
+[[vistas]]
+nombre = "vistas.zona_escenario"
+descripcion = "Cada escenario con su partición, su asignación, su zona (desarrollo o prueba) y si su prueba ya se abrió."
+fuentes = ["experimento.escenarios", "experimento.asignaciones", "control.hitos"]
+
+[[vistas]]
+nombre = "vistas.estado_hitos"
+descripcion = "Línea de tiempo de los hitos del procedimiento, con su acta y su commit."
+fuentes = ["control.hitos", "control.artefactos"]
+
+[[vistas]]
+nombre = "vistas.estado_cargas"
+descripcion = "Cargas, artefactos cargados y rechazados, y conflictos pendientes."
+fuentes = ["control.cargas", "control.artefactos", "control.conflictos"]
+
+[[vistas]]
+nombre = "vistas.corridas_resumen"
+descripcion = "Una fila por corrida con su escenario, familia, plan, etapa, estado y resultados principales."
+fuentes = ["simulacion.corridas", "simulacion.resultados_corrida", "experimento.escenarios", "simulacion.planes"]
+
+[[vistas]]
+nombre = "vistas.vehiculos_cohorte"
+descripcion = "Vehículos de la cohorte con su demora (pérdida de tiempo más espera de salida, según la definición del protocolo)."
+fuentes = ["simulacion.vehiculos"]
+
+[[vistas]]
+nombre = "vistas.cola_por_segundo"
+descripcion = "Cola por acceso y segundo. El panel y las consultas leen esta vista, nunca la tabla, para poder cambiar cómo se guarda."
+fuentes = ["simulacion.cola_segundo"]
+
+[[vistas]]
+nombre = "vistas.busquedas_resumen"
+descripcion = "Una fila por búsqueda con su etiqueta, sus candidatos elegibles y sus motivos de descarte."
+fuentes = ["simulacion.busquedas", "simulacion.candidatos", "simulacion.etiquetas"]
+
+[[vistas]]
+nombre = "vistas.etiquetas_entrenamiento"
+descripcion = "Etiquetas con referencia y la asignación de su escenario (solo train y validation)."
+fuentes = ["simulacion.etiquetas", "experimento.asignaciones"]
+
+[[vistas]]
+nombre = "vistas.metricas_modelos"
+descripcion = "Métricas de cada entrenamiento por partición, en columnas, para comparar la mediana con XGBoost."
+fuentes = ["aprendizaje.metricas_modelo", "aprendizaje.entrenamientos"]
+
+[[vistas]]
+nombre = "vistas.consultas_resumen"
+descripcion = "Consultas con su estado, sus tiempos y sus reglas incumplidas."
+fuentes = ["aprendizaje.consultas", "aprendizaje.consulta_reglas"]
+
+[[vistas]]
+nombre = "vistas.indicadores_finales"
+descripcion = "Indicadores I4 a I7 del experimento final con sus intervalos. Vacía hasta la apertura."
+fuentes = ["evaluacion.indicadores", "evaluacion.experimentos"]
+
+# =====================================================================================
+# control
+# =====================================================================================
+
+[[tablas]]
+esquema = "control"
+nombre = "cargas"
+descripcion = "Cada vez que el cargador escribe en la base."
+grano = "Una fila por carga"
+origen = "El propio cargador («bd cargar»)."
+fuente = "existe"
+filas_dev16 = "decenas"
+cegado = "no"
+excepcion_solo_agregar = "Se permite una sola modificación: cerrar la carga (de running a completed, rejected o interrupted) completando fin, conteos y huella."
+comunes = []
+clave_primaria = ["carga_id"]
+columnas = [
+  { nombre = "carga_id", tipo = "text", descripcion = "Identificador de la carga: fecha UTC de inicio y 8 caracteres aleatorios.", origen = "cargador" },
+  { nombre = "inicio", tipo = "timestamptz", descripcion = "Momento en que empieza la carga.", origen = "cargador" },
+  { nombre = "fin", tipo = "timestamptz", nulo = true, descripcion = "Momento en que termina; vacío mientras está en curso o si se interrumpió.", origen = "cargador" },
+  { nombre = "estado", tipo = "text", descripcion = "running (en curso), completed (completa), rejected (rechazada) o interrupted (interrumpida).", origen = "cargador", regla = "estado IN ('running','completed','rejected','interrupted')" },
+  { nombre = "comando", tipo = "jsonb", descripcion = "Argumentos del comando, sin rutas de la máquina.", origen = "cargador" },
+  { nombre = "version_paquete", tipo = "text", descripcion = "Versión del paquete semaforo que cargó.", origen = "cargador" },
+  { nombre = "commit_codigo", tipo = "text", nulo = true, descripcion = "Commit del código que cargó; vacío si no se pudo leer.", origen = "git" },
+  { nombre = "arbol_limpio", tipo = "boolean", nulo = true, descripcion = "Si el código no tenía cambios sin commit; vacío si no se pudo saber.", origen = "git" },
+  { nombre = "version_postgres", tipo = "text", descripcion = "Versión exacta del servidor.", origen = "SHOW server_version" },
+  { nombre = "version_esquema", tipo = "text", descripcion = "Última migración aplicada.", origen = "migraciones" },
+  { nombre = "artefactos_leidos", tipo = "integer", nulo = true, descripcion = "Archivos revisados.", origen = "cargador", regla = "artefactos_leidos >= 0" },
+  { nombre = "artefactos_cargados", tipo = "integer", nulo = true, descripcion = "Archivos que entraron.", origen = "cargador", regla = "artefactos_cargados >= 0" },
+  { nombre = "artefactos_rechazados", tipo = "integer", nulo = true, descripcion = "Archivos que no entraron, con motivo en artefactos o conflictos.", origen = "cargador", regla = "artefactos_rechazados >= 0" },
+  { nombre = "filas_por_tabla", tipo = "jsonb", nulo = true, descripcion = "Filas insertadas por tabla.", origen = "cargador" },
+  { nombre = "huella_contenido", tipo = "huella", nulo = true, descripcion = "Huella del contenido completo de la base al terminar (QA36).", origen = "bd verificar" },
+]
+reglas = [
+  { nombre = "fin_posterior", sql = "fin IS NULL OR fin >= inicio", descripcion = "La carga no termina antes de empezar." },
+  { nombre = "en_curso_sin_fin", sql = "(estado = 'running') = (fin IS NULL)", descripcion = "Solo una carga en curso está sin fin." },
+]
+
+[[tablas]]
+esquema = "control"
+nombre = "artefactos"
+descripcion = "Cada archivo que la base conoce, con su huella. Es el enlace de cada fila con su original."
+grano = "Una fila por archivo"
+origen = "Manifiestos de cada carpeta publicada; las actas de los hitos (raíz repositorio)."
+fuente = "existe"
+filas_dev16 = "unas 60 000"
+cegado = "no"
+comunes = ["carga_id"]
+clave_primaria = ["artefacto_id"]
+columnas = [
+  { nombre = "artefacto_id", tipo = "text", descripcion = "Raíz y ruta, por ejemplo datos:ejecuciones/<run_id>/outputs/tripinfo.xml.", origen = "cargador" },
+  { nombre = "raiz", tipo = "text", descripcion = "datos (carpeta de datos) o repositorio (actas del repositorio de código).", origen = "cargador", regla = "raiz IN ('datos','repositorio')" },
+  { nombre = "ruta_relativa", tipo = "text", descripcion = "Ruta dentro de la raíz, con «/», sin la ruta de la máquina.", origen = "manifiesto: path" },
+  { nombre = "tipo", tipo = "text", descripcion = "Clase de archivo (lista controlada en el cargador): manifest, inputs_manifest, case, scenario, split, protocol, tripinfo, fcd, cohort, reconciliation, summary, timing, sumo_log, metrics, trace, label, coverage, comparators, parameters, replica, quality, model_manifest, model_file, response, evaluation, minutes, other.", origen = "cargador" },
+  { nombre = "tamano_bytes", tipo = "bigint", unidad = "bytes", descripcion = "Tamaño del archivo.", origen = "sistema de archivos", regla = "tamano_bytes >= 0" },
+  { nombre = "sha256", tipo = "huella", descripcion = "Huella del contenido, recalculada al cargar.", origen = "manifiesto: sha256 (verificada)" },
+  { nombre = "manifiesto_id", tipo = "text", nulo = true, descripcion = "Manifiesto que declara este archivo; vacío si es un manifiesto o un acta.", origen = "cargador" },
+  { nombre = "estado", tipo = "text", descripcion = "intact (huella coincide), unknown (sin manifiesto reconocido), not_loadable (no se pudo leer) o rejected (rechazado por conflicto).", origen = "cargador", regla = "estado IN ('intact','unknown','not_loadable','rejected')" },
+  { nombre = "motivo", tipo = "text", nulo = true, descripcion = "Por qué no está intact; vacío si lo está.", origen = "cargador" },
+  { nombre = "registrado_en", tipo = "timestamptz", descripcion = "Cuándo se registró.", origen = "cargador" },
+]
+claves_foraneas = [
+  { columnas = ["manifiesto_id"], referencia = "control.artefactos", referidas = ["artefacto_id"], opcional = true },
+]
+unicas = [["raiz", "ruta_relativa"]]
+reglas = [
+  { nombre = "motivo_si_no_intacto", sql = "estado = 'intact' OR motivo IS NOT NULL", descripcion = "Todo lo que no está intacto lleva motivo." },
+]
+
+[[tablas]]
+esquema = "control"
+nombre = "entornos"
+descripcion = "Versiones y equipo con que se produjo un resultado."
+grano = "Una fila por combinación distinta de versiones"
+origen = "manifest.json: environment (corridas); manifiestos de entrenamiento y evaluación."
+fuente = "existe"
+filas_dev16 = "pocas"
+cegado = "no"
+clave_primaria = ["entorno_id"]
+columnas = [
+  { nombre = "entorno_id", tipo = "huella", descripcion = "Huella de los valores de esta fila.", origen = "cargador" },
+  { nombre = "version_sumo", tipo = "text", nulo = true, descripcion = "Versión de SUMO; vacía en procesos sin SUMO.", origen = "manifest.json: environment.sumo" },
+  { nombre = "version_python", tipo = "text", descripcion = "Versión de Python.", origen = "manifest.json: environment.python" },
+  { nombre = "sistema_operativo", tipo = "text", descripcion = "Sistema operativo.", origen = "manifest.json: environment.os" },
+  { nombre = "commit_codigo", tipo = "text", nulo = true, descripcion = "Commit del proyecto; vacío en las corridas anteriores a DEV31 F2.", origen = "manifest.json: environment (desde F2)" },
+  { nombre = "motivo_sin_commit", tipo = "text", nulo = true, descripcion = "Por qué falta el commit, por ejemplo «no registrado antes de DEV31».", origen = "cargador" },
+  { nombre = "librerias", tipo = "jsonb", descripcion = "Versiones de librerías relevantes; objeto vacío si no aplica.", origen = "manifiesto del proceso" },
+  { nombre = "equipo", tipo = "jsonb", nulo = true, descripcion = "Procesador y memoria del equipo (I7); vacío mientras los manifiestos no lo registren.", origen = "pendiente (hallazgo F1)" },
+]
+reglas = [
+  { nombre = "commit_o_motivo", sql = "commit_codigo IS NOT NULL OR motivo_sin_commit IS NOT NULL", descripcion = "Si falta el commit, se dice por qué." },
+]
+
+[[tablas]]
+esquema = "control"
+nombre = "hitos"
+descripcion = "Pasos fechados del procedimiento que el jurado puede pedir: congelar el protocolo, la partición y el modelo, y abrir la prueba."
+grano = "Una fila por hito"
+origen = "Comando «bd hito» con el acta que lo autoriza (artefacto_id apunta al acta)."
+fuente = "pendiente F3"
+filas_dev16 = "decenas"
+cegado = "no"
+clave_primaria = ["hito_id"]
+columnas = [
+  { nombre = "hito_id", tipo = "text", descripcion = "Identificador del hito.", origen = "bd hito" },
+  { nombre = "tipo", tipo = "text", descripcion = "protocol_frozen, split_frozen, model_frozen o test_opened.", origen = "bd hito", regla = "tipo IN ('protocol_frozen','split_frozen','model_frozen','test_opened')" },
+  { nombre = "registrado_en", tipo = "timestamptz", descripcion = "Cuándo se registró.", origen = "bd hito" },
+  { nombre = "protocolo_id", tipo = "text", nulo = true, descripcion = "Protocolo congelado (tipo protocol_frozen).", origen = "bd hito" },
+  { nombre = "particion_id", tipo = "text", nulo = true, descripcion = "Partición congelada, o cuya prueba se abre.", origen = "bd hito" },
+  { nombre = "modelo_id", tipo = "text", nulo = true, descripcion = "Modelo congelado (tipo model_frozen).", origen = "bd hito" },
+  { nombre = "experimento_id", tipo = "text", nulo = true, descripcion = "Experimento cuya prueba se abre (tipo test_opened).", origen = "bd hito" },
+  { nombre = "huella_objeto", tipo = "huella", descripcion = "Huella del objeto en el momento del hito.", origen = "artefacto del objeto" },
+  { nombre = "commit_codigo", tipo = "text", nulo = true, descripcion = "Commit que contiene el acta y la huella; da la fecha externa al subirse a GitHub.", origen = "git" },
+  { nombre = "responsable", tipo = "text", descripcion = "Quién registró el hito.", origen = "bd hito" },
+  { nombre = "notas", tipo = "text", nulo = true, descripcion = "Aclaraciones del acta.", origen = "bd hito" },
+]
+claves_foraneas = [
+  { columnas = ["protocolo_id"], referencia = "experimento.protocolos", referidas = ["protocolo_id"], opcional = true },
+  { columnas = ["particion_id"], referencia = "experimento.particiones", referidas = ["particion_id"], opcional = true },
+  { columnas = ["modelo_id"], referencia = "aprendizaje.modelos", referidas = ["modelo_id"], opcional = true },
+  { columnas = ["experimento_id"], referencia = "evaluacion.experimentos", referidas = ["experimento_id"], opcional = true },
+]
+reglas = [
+  { nombre = "objeto_segun_tipo", sql = "(tipo = 'protocol_frozen' AND protocolo_id IS NOT NULL) OR (tipo = 'split_frozen' AND particion_id IS NOT NULL) OR (tipo = 'model_frozen' AND modelo_id IS NOT NULL) OR (tipo = 'test_opened' AND experimento_id IS NOT NULL AND particion_id IS NOT NULL)", descripcion = "Cada tipo de hito dice sobre qué objeto es." },
+  { nombre = "orden_de_hitos", sql = "", descripcion = "Disparador control.validar_hito(): no hay apertura sin modelo, protocolo y partición congelados antes." },
+  { nombre = "un_hito_por_objeto", sql = "", descripcion = "Índices únicos parciales: un solo protocol_frozen por protocolo, un split_frozen por partición, un model_frozen por modelo y un test_opened por experimento." },
+]
+
+[[tablas]]
+esquema = "control"
+nombre = "conflictos"
+descripcion = "Incidencias de integridad: una clave que llega con otro contenido, una huella que dejó de coincidir, un archivo que no se pudo cargar o un escenario preliminar que después aparece en prueba."
+grano = "Una fila por incidencia"
+origen = "Cargador y «bd verificar»."
+fuente = "pendiente F3"
+filas_dev16 = "0 si todo está bien"
+cegado = "no"
+excepcion_solo_agregar = "Se permite una sola modificación: registrar la decisión (decision, decidido_en y decidido_por) cuando estaba vacía."
+clave_primaria = ["conflicto_id"]
+columnas = [
+  { nombre = "conflicto_id", tipo = "text", descripcion = "Identificador.", origen = "cargador" },
+  { nombre = "tipo", tipo = "text", descripcion = "key_conflict (clave repetida con otro contenido), hash_mismatch (la huella dejó de coincidir), not_loadable (no se pudo cargar) o preliminary_now_test (escenario preliminar asignado después a prueba).", origen = "cargador", regla = "tipo IN ('key_conflict','hash_mismatch','not_loadable','preliminary_now_test')" },
+  { nombre = "tabla_destino", tipo = "text", nulo = true, descripcion = "Tabla donde chocó la clave.", origen = "cargador" },
+  { nombre = "clave", tipo = "text", nulo = true, descripcion = "Clave natural en conflicto.", origen = "cargador" },
+  { nombre = "huella_cargada", tipo = "huella", nulo = true, descripcion = "Huella que ya estaba en la base.", origen = "control.artefactos" },
+  { nombre = "huella_nueva", tipo = "huella", nulo = true, descripcion = "Huella que llegó o que se recalculó.", origen = "cargador" },
+  { nombre = "detalle", tipo = "text", descripcion = "Explicación del problema.", origen = "cargador" },
+  { nombre = "detectado_en", tipo = "timestamptz", descripcion = "Cuándo se detectó.", origen = "cargador" },
+  { nombre = "decision", tipo = "text", nulo = true, descripcion = "kept_existing, new_version, discarded o accepted_risk; vacía mientras está pendiente.", origen = "PO", regla = "decision IS NULL OR decision IN ('kept_existing','new_version','discarded','accepted_risk')" },
+  { nombre = "decidido_en", tipo = "timestamptz", nulo = true, descripcion = "Cuándo se decidió.", origen = "PO" },
+  { nombre = "decidido_por", tipo = "text", nulo = true, descripcion = "Quién decidió.", origen = "PO" },
+]
+reglas = [
+  { nombre = "decision_completa", sql = "(decision IS NULL) = (decidido_en IS NULL) AND (decision IS NULL) = (decidido_por IS NULL)", descripcion = "Una decisión lleva fecha y responsable." },
+]
+
+[[tablas]]
+esquema = "control"
+nombre = "replicas"
+descripcion = "Comparación de una corrida con su réplica (QA09, I8)."
+grano = "Una fila por réplica comparada"
+origen = "replica.json (simulacion/replica.py, DEV14 A06). Solo se carga si las dos corridas están en datos/."
+fuente = "existe"
+filas_dev16 = "pocas"
+cegado = "no"
+clave_primaria = ["replica_id"]
+columnas = [
+  { nombre = "replica_id", tipo = "text", descripcion = "Identificador de la comparación.", origen = "cargador" },
+  { nombre = "run_id_a", tipo = "text", descripcion = "Corrida original.", origen = "replica.json: run_a" },
+  { nombre = "run_id_b", tipo = "text", descripcion = "Corrida que la repite.", origen = "replica.json: run_b" },
+  { nombre = "creada_en", tipo = "timestamptz", descripcion = "Cuándo se comparó.", origen = "replica.json: created_at" },
+  { nombre = "semilla_a", tipo = "integer", nulo = true, descripcion = "Semilla de la original.", origen = "replica.json: seed_a" },
+  { nombre = "semilla_b", tipo = "integer", nulo = true, descripcion = "Semilla de la réplica.", origen = "replica.json: seed_b" },
+  { nombre = "entradas_iguales", tipo = "boolean", descripcion = "Si las entradas son idénticas.", origen = "replica.json: inputs_equal" },
+  { nombre = "diferencias_entrada", tipo = "jsonb", descripcion = "Entradas que difieren.", origen = "replica.json: input_differences" },
+  { nombre = "tolerancia", tipo = "jsonb", descripcion = "Tolerancia numérica usada.", origen = "replica.json: tolerance" },
+  { nombre = "archivos", tipo = "jsonb", descripcion = "Cada archivo comparado, con su regla y si coincide.", origen = "replica.json: files" },
+  { nombre = "veredicto", tipo = "text", descripcion = "equivalent (equivalentes) o different (distintas).", origen = "replica.json: verdict", regla = "veredicto IN ('equivalent','different')" },
+  { nombre = "motivos", tipo = "jsonb", descripcion = "Motivos del veredicto.", origen = "replica.json: reasons" },
+]
+claves_foraneas = [
+  { columnas = ["run_id_a"], referencia = "simulacion.corridas", referidas = ["run_id"] },
+  { columnas = ["run_id_b"], referencia = "simulacion.corridas", referidas = ["run_id"] },
+]
+reglas = [
+  { nombre = "corridas_distintas", sql = "run_id_a <> run_id_b", descripcion = "Una réplica compara dos corridas distintas." },
+]
+
+# =====================================================================================
+# caso
+# =====================================================================================
+
+[[tablas]]
+esquema = "caso"
+nombre = "casos"
+descripcion = "Versión del cruce tal como se representa."
+grano = "Una fila por versión de caso"
+origen = "datos/casos/<caso>/case.json"
+fuente = "existe"
+filas_dev16 = "1"
+cegado = "no"
+clave_primaria = ["caso_id", "caso_version"]
+columnas = [
+  { nombre = "caso_id", tipo = "text", descripcion = "Identificador del cruce, por ejemplo caso-001.", origen = "case.json: case_id" },
+  { nombre = "caso_version", tipo = "text", descripcion = "Versión del caso.", origen = "case.json: case_version" },
+  { nombre = "origen", tipo = "text", descripcion = "synthetic (sintético) o field (de campo).", origen = "case.json: origin", regla = "origen IN ('synthetic','field')" },
+  { nombre = "descripcion", tipo = "text", descripcion = "Descripción del caso.", origen = "case.json: description" },
+  { nombre = "estado_representacion", tipo = "text", descripcion = "synthetic_fixture, unverified, calibrated o validated.", origen = "case.json: representation_status", regla = "estado_representacion IN ('synthetic_fixture','unverified','calibrated','validated')" },
+  { nombre = "red_ruta", tipo = "text", nulo = true, descripcion = "Ruta de la red SUMO del caso.", origen = "case.json: network.path" },
+  { nombre = "red_sha256", tipo = "huella", nulo = true, descripcion = "Huella de la red SUMO.", origen = "case.json: network.sha256" },
+  { nombre = "tick_s", tipo = "double precision", unidad = "s", descripcion = "Paso de tiempo de los planes.", origen = "case.json: tick_s", regla = "tick_s > 0" },
+  { nombre = "ciclo_min_s", tipo = "double precision", unidad = "s", descripcion = "Ciclo mínimo permitido.", origen = "case.json: cycle_s.min", regla = "ciclo_min_s > 0" },
+  { nombre = "ciclo_max_s", tipo = "double precision", unidad = "s", descripcion = "Ciclo máximo permitido.", origen = "case.json: cycle_s.max" },
+  { nombre = "politica_frontera", tipo = "text", descripcion = "Cómo se tratan los semáforos vecinos.", origen = "case.json: boundary_policy_id" },
+  { nombre = "evidencia_restricciones", tipo = "jsonb", descripcion = "Fuentes que sustentan las restricciones.", origen = "case.json: restrictions_evidence" },
+  { nombre = "huella_caso", tipo = "huella", descripcion = "Huella del case.json, la que citan los manifiestos de entradas.", origen = "inputs/manifiesto.json: case_sha256" },
+]
+reglas = [
+  { nombre = "ciclo_ordenado", sql = "ciclo_min_s <= ciclo_max_s", descripcion = "El mínimo no supera al máximo." },
+  { nombre = "red_completa", sql = "(red_ruta IS NULL) = (red_sha256 IS NULL)", descripcion = "Ruta y huella de la red van juntas." },
+]
+
+[[tablas]]
+esquema = "caso"
+nombre = "movimientos"
+descripcion = "Cada movimiento del cruce, con su acceso, carriles y dominio de demanda."
+grano = "Una fila por caso y movimiento"
+origen = "case.json: movements"
+fuente = "existe"
+filas_dev16 = "23"
+cegado = "no"
+clave_primaria = ["caso_id", "caso_version", "movimiento_id"]
+columnas = [
+  { nombre = "caso_id", tipo = "text", descripcion = "Caso.", origen = "case.json: case_id" },
+  { nombre = "caso_version", tipo = "text", descripcion = "Versión del caso.", origen = "case.json: case_version" },
+  { nombre = "movimiento_id", tipo = "text", descripcion = "Código del movimiento, por ejemplo M07.", origen = "case.json: movements[].id" },
+  { nombre = "orden", tipo = "integer", descripcion = "Posición en la lista del caso; fija el orden de las entradas del modelo.", origen = "case.json: movements (posición)", regla = "orden >= 0" },
+  { nombre = "acceso", tipo = "text", descripcion = "Acceso (entrada del cruce) del movimiento.", origen = "case.json: movements[].approach_id" },
+  { nombre = "carriles_entrada", tipo = "jsonb", descripcion = "Carriles por los que entra.", origen = "case.json: movements[].incoming_lanes" },
+  { nombre = "aristas_salida", tipo = "jsonb", descripcion = "Calles por las que sale.", origen = "case.json: movements[].outgoing_edges" },
+  { nombre = "tls_id", tipo = "text", descripcion = "Semáforo de SUMO que lo controla.", origen = "case.json: movements[].tls_id" },
+  { nombre = "indices_enlace", tipo = "jsonb", descripcion = "Índices de señal del semáforo.", origen = "case.json: movements[].link_indices" },
+  { nombre = "flujo_min_vph", tipo = "double precision", unidad = "veh/h", descripcion = "Límite inferior del dominio de demanda.", origen = "case.json: movements[].flow_domain_vph.min", regla = "flujo_min_vph >= 0" },
+  { nombre = "flujo_max_vph", tipo = "double precision", unidad = "veh/h", descripcion = "Límite superior del dominio de demanda.", origen = "case.json: movements[].flow_domain_vph.max" },
+]
+claves_foraneas = [
+  { columnas = ["caso_id", "caso_version"], referencia = "caso.casos", referidas = ["caso_id", "caso_version"] },
+]
+reglas = [
+  { nombre = "dominio_ordenado", sql = "flujo_min_vph <= flujo_max_vph", descripcion = "El mínimo no supera al máximo." },
+]
+
+[[tablas]]
+esquema = "caso"
+nombre = "tipos_vehiculo"
+descripcion = "Clases de vehículo del caso."
+grano = "Una fila por caso y clase"
+origen = "case.json: vehicle_classes"
+fuente = "existe"
+filas_dev16 = "4"
+cegado = "no"
+clave_primaria = ["caso_id", "caso_version", "clase_id"]
+columnas = [
+  { nombre = "caso_id", tipo = "text", descripcion = "Caso.", origen = "case.json: case_id" },
+  { nombre = "caso_version", tipo = "text", descripcion = "Versión del caso.", origen = "case.json: case_version" },
+  { nombre = "clase_id", tipo = "text", descripcion = "Clase como la usa el caso: passenger (auto), motorcycle (moto), bus o truck (camión).", origen = "case.json: vehicle_classes[]" },
+  { nombre = "orden", tipo = "integer", descripcion = "Posición en la lista; fija el orden de las proporciones en las entradas del modelo.", origen = "case.json: vehicle_classes (posición)", regla = "orden >= 0" },
+]
+claves_foraneas = [
+  { columnas = ["caso_id", "caso_version"], referencia = "caso.casos", referidas = ["caso_id", "caso_version"] },
+]
+
+[[tablas]]
+esquema = "caso"
+nombre = "tramos"
+descripcion = "Tramos de la secuencia fija de fases, con sus límites."
+grano = "Una fila por caso y tramo"
+origen = "case.json: slots"
+fuente = "existe"
+filas_dev16 = "9"
+cegado = "no"
+clave_primaria = ["caso_id", "caso_version", "tramo_id"]
+columnas = [
+  { nombre = "caso_id", tipo = "text", descripcion = "Caso.", origen = "case.json: case_id" },
+  { nombre = "caso_version", tipo = "text", descripcion = "Versión del caso.", origen = "case.json: case_version" },
+  { nombre = "tramo_id", tipo = "text", descripcion = "Código del tramo, por ejemplo t5.", origen = "case.json: slots[].id" },
+  { nombre = "orden", tipo = "integer", descripcion = "Posición en la secuencia.", origen = "case.json: slots (posición)", regla = "orden >= 0" },
+  { nombre = "tipo", tipo = "text", descripcion = "variable (lo ajusta el modelo) o fixed (fijo: ámbar o todo rojo).", origen = "case.json: slots[].kind", regla = "tipo IN ('variable','fixed')" },
+  { nombre = "minimo_s", tipo = "double precision", unidad = "s", descripcion = "Duración mínima.", origen = "case.json: slots[].min_s", regla = "minimo_s >= 0" },
+  { nombre = "maximo_s", tipo = "double precision", unidad = "s", descripcion = "Duración máxima.", origen = "case.json: slots[].max_s" },
+  { nombre = "estados", tipo = "jsonb", descripcion = "Estado de cada semáforo durante el tramo.", origen = "case.json: slots[].states" },
+]
+claves_foraneas = [
+  { columnas = ["caso_id", "caso_version"], referencia = "caso.casos", referidas = ["caso_id", "caso_version"] },
+]
+reglas = [
+  { nombre = "limites_ordenados", sql = "minimo_s <= maximo_s", descripcion = "El mínimo no supera al máximo." },
+  { nombre = "fijo_sin_rango", sql = "tipo = 'variable' OR minimo_s = maximo_s", descripcion = "Un tramo fijo tiene una sola duración." },
+]
+
+[[tablas]]
+esquema = "caso"
+nombre = "grupos_verde"
+descripcion = "Grupos de verde: lo que debe recibir verde junto, con su mínimo y máximo."
+grano = "Una fila por caso y grupo"
+origen = "case.json: green_groups"
+fuente = "existe"
+filas_dev16 = "5"
+cegado = "no"
+clave_primaria = ["caso_id", "caso_version", "grupo_id"]
+columnas = [
+  { nombre = "caso_id", tipo = "text", descripcion = "Caso.", origen = "case.json: case_id" },
+  { nombre = "caso_version", tipo = "text", descripcion = "Versión del caso.", origen = "case.json: case_version" },
+  { nombre = "grupo_id", tipo = "text", descripcion = "Identificador del grupo.", origen = "case.json: green_groups[].id" },
+  { nombre = "minimo_s", tipo = "double precision", unidad = "s", descripcion = "Verde mínimo del grupo.", origen = "case.json: green_groups[].min_s", regla = "minimo_s >= 0" },
+  { nombre = "maximo_s", tipo = "double precision", unidad = "s", descripcion = "Verde máximo del grupo.", origen = "case.json: green_groups[].max_s" },
+  { nombre = "proposito", tipo = "text", descripcion = "vehicle (vehicular) o pedestrian (peatonal).", origen = "case.json: green_groups[].purpose", regla = "proposito IN ('vehicle','pedestrian')" },
+]
+claves_foraneas = [
+  { columnas = ["caso_id", "caso_version"], referencia = "caso.casos", referidas = ["caso_id", "caso_version"] },
+]
+reglas = [
+  { nombre = "verde_ordenado", sql = "minimo_s <= maximo_s", descripcion = "El mínimo no supera al máximo." },
+]
+
+[[tablas]]
+esquema = "caso"
+nombre = "grupo_tramo"
+descripcion = "Qué tramos dan verde a cada grupo."
+grano = "Una fila por grupo y tramo"
+origen = "case.json: green_groups[].slot_ids"
+fuente = "existe"
+filas_dev16 = "8"
+cegado = "no"
+clave_primaria = ["caso_id", "caso_version", "grupo_id", "tramo_id"]
+columnas = [
+  { nombre = "caso_id", tipo = "text", descripcion = "Caso.", origen = "case.json: case_id" },
+  { nombre = "caso_version", tipo = "text", descripcion = "Versión del caso.", origen = "case.json: case_version" },
+  { nombre = "grupo_id", tipo = "text", descripcion = "Grupo de verde.", origen = "case.json: green_groups[].id" },
+  { nombre = "tramo_id", tipo = "text", descripcion = "Tramo del grupo.", origen = "case.json: green_groups[].slot_ids[]" },
+  { nombre = "orden", tipo = "integer", descripcion = "Posición del tramo dentro del grupo.", origen = "case.json: slot_ids (posición)", regla = "orden >= 0" },
+]
+claves_foraneas = [
+  { columnas = ["caso_id", "caso_version", "grupo_id"], referencia = "caso.grupos_verde", referidas = ["caso_id", "caso_version", "grupo_id"] },
+  { columnas = ["caso_id", "caso_version", "tramo_id"], referencia = "caso.tramos", referidas = ["caso_id", "caso_version", "tramo_id"] },
+]
+
+[[tablas]]
+esquema = "caso"
+nombre = "planes_observados"
+descripcion = "Plan vigente del semáforo real, con su fuente."
+grano = "Una fila por plan observado y caso"
+origen = "comparadores.json: current_plan (DEV15 F4)"
+fuente = "existe"
+filas_dev16 = "1"
+cegado = "no"
+clave_primaria = ["plan_observado_id"]
+columnas = [
+  { nombre = "plan_observado_id", tipo = "text", descripcion = "Caso y carpeta del programa, por ejemplo caso-001:20261031T041338Z_63437585.", origen = "cargador" },
+  { nombre = "caso_id", tipo = "text", descripcion = "Caso.", origen = "comparadores.json: case_id" },
+  { nombre = "caso_version", tipo = "text", descripcion = "Versión del caso.", origen = "comparadores.json: case_version" },
+  { nombre = "plan_id", tipo = "huella", descripcion = "Duraciones del plan vigente.", origen = "comparadores.json: current_plan.plan" },
+  { nombre = "fuente", tipo = "text", descripcion = "De dónde sale el plan.", origen = "comparadores.json: current_plan.source" },
+  { nombre = "variacion_horaria", tipo = "text", descripcion = "Si cambia por hora o día.", origen = "comparadores.json: current_plan.hourly_variation" },
+  { nombre = "confirmado_por", tipo = "text", descripcion = "Quién lo confirmó y cuándo.", origen = "comparadores.json: current_plan.confirmed_by" },
+  { nombre = "carpeta_programa", tipo = "text", descripcion = "Carpeta del programa derivado en datos/derivados/programas.", origen = "comparadores.json: current_plan.program_folder" },
+  { nombre = "reglas_incumplidas", tipo = "jsonb", descripcion = "Reglas del caso que incumple; lista vacía si cumple todas.", origen = "comparadores.json: current_plan.violated" },
+]
+claves_foraneas = [
+  { columnas = ["caso_id", "caso_version"], referencia = "caso.casos", referidas = ["caso_id", "caso_version"] },
+  { columnas = ["plan_id"], referencia = "simulacion.planes", referidas = ["plan_id"] },
+]
+
+[[tablas]]
+esquema = "caso"
+nombre = "aforos"
+descripcion = "Conteos de vehículos por movimiento, periodo y clase (I1)."
+grano = "Una fila por observación, movimiento y clase"
+origen = "CSV de aforos (DEV04): case_id, observation_id, source_id, origin, start, end, movement_id, vehicle_class, count, quality_state"
+fuente = "existe el formato (DEV04); aforos de campo pendientes (DEV22)"
+filas_dev16 = "0 (sin aforos de campo todavía)"
+cegado = "no"
+clave_primaria = ["caso_id", "caso_version", "observacion_id", "movimiento_id", "clase_id"]
+columnas = [
+  { nombre = "caso_id", tipo = "text", descripcion = "Caso.", origen = "CSV: case_id" },
+  { nombre = "caso_version", tipo = "text", descripcion = "Versión del caso con que se importó.", origen = "cargador (caso de la importación)" },
+  { nombre = "observacion_id", tipo = "text", descripcion = "Identificador de la observación (periodo contado).", origen = "CSV: observation_id" },
+  { nombre = "movimiento_id", tipo = "text", descripcion = "Movimiento contado.", origen = "CSV: movement_id" },
+  { nombre = "clase_id", tipo = "text", descripcion = "Clase de vehículo.", origen = "CSV: vehicle_class" },
+  { nombre = "fuente_id", tipo = "text", descripcion = "Video o registro de procedencia.", origen = "CSV: source_id" },
+  { nombre = "origen", tipo = "text", descripcion = "synthetic o field.", origen = "CSV: origin", regla = "origen IN ('synthetic','field')" },
+  { nombre = "inicio", tipo = "timestamptz", descripcion = "Inicio del periodo, con zona horaria.", origen = "CSV: start" },
+  { nombre = "fin", tipo = "timestamptz", descripcion = "Fin del periodo.", origen = "CSV: end" },
+  { nombre = "conteo", tipo = "integer", unidad = "veh", descripcion = "Vehículos contados; nunca negativo. Un cero es un cero observado, no un faltante.", origen = "CSV: count", regla = "conteo >= 0" },
+  { nombre = "estado_calidad", tipo = "text", descripcion = "Estado del conteo; hoy solo observed (otros valores pendientes del PO).", origen = "CSV: quality_state" },
+]
+claves_foraneas = [
+  { columnas = ["caso_id", "caso_version", "movimiento_id"], referencia = "caso.movimientos", referidas = ["caso_id", "caso_version", "movimiento_id"] },
+  { columnas = ["caso_id", "caso_version", "clase_id"], referencia = "caso.tipos_vehiculo", referidas = ["caso_id", "caso_version", "clase_id"] },
+]
+reglas = [
+  { nombre = "periodo_valido", sql = "fin > inicio", descripcion = "El periodo termina después de empezar." },
+]
+
+[[tablas]]
+esquema = "caso"
+nombre = "aforos_control"
+descripcion = "Conteos manuales de control, para medir el error de los aforos (I1)."
+grano = "Una fila por observación de control, movimiento y clase"
+origen = "CSV de control (DEV05), mismo formato que los aforos"
+fuente = "existe el formato (DEV05); controles de campo pendientes (DEV22)"
+filas_dev16 = "0"
+cegado = "no"
+clave_primaria = ["caso_id", "caso_version", "observacion_id", "movimiento_id", "clase_id"]
+columnas = [
+  { nombre = "caso_id", tipo = "text", descripcion = "Caso.", origen = "CSV: case_id" },
+  { nombre = "caso_version", tipo = "text", descripcion = "Versión del caso con que se importó.", origen = "cargador" },
+  { nombre = "observacion_id", tipo = "text", descripcion = "Identificador de la observación de control.", origen = "CSV: observation_id" },
+  { nombre = "movimiento_id", tipo = "text", descripcion = "Movimiento contado.", origen = "CSV: movement_id" },
+  { nombre = "clase_id", tipo = "text", descripcion = "Clase de vehículo.", origen = "CSV: vehicle_class" },
+  { nombre = "fuente_id", tipo = "text", descripcion = "Quién o qué hizo el conteo de control.", origen = "CSV: source_id" },
+  { nombre = "origen", tipo = "text", descripcion = "synthetic o field.", origen = "CSV: origin", regla = "origen IN ('synthetic','field')" },
+  { nombre = "inicio", tipo = "timestamptz", descripcion = "Inicio del periodo.", origen = "CSV: start" },
+  { nombre = "fin", tipo = "timestamptz", descripcion = "Fin del periodo.", origen = "CSV: end" },
+  { nombre = "conteo", tipo = "integer", unidad = "veh", descripcion = "Vehículos contados a mano.", origen = "CSV: count", regla = "conteo >= 0" },
+  { nombre = "estado_calidad", tipo = "text", descripcion = "Estado del conteo.", origen = "CSV: quality_state" },
+]
+claves_foraneas = [
+  { columnas = ["caso_id", "caso_version", "movimiento_id"], referencia = "caso.movimientos", referidas = ["caso_id", "caso_version", "movimiento_id"] },
+  { columnas = ["caso_id", "caso_version", "clase_id"], referencia = "caso.tipos_vehiculo", referidas = ["caso_id", "caso_version", "clase_id"] },
+]
+reglas = [
+  { nombre = "periodo_valido", sql = "fin > inicio", descripcion = "El periodo termina después de empezar." },
+]
+
+[[tablas]]
+esquema = "caso"
+nombre = "calidad_aforos"
+descripcion = "Comparación de cada aforo con su control: error absoluto y relativo, y estado (I1)."
+grano = "Una fila por fila de calidad.csv"
+origen = "Reporte de calidad (DEV05 y DEV09): calidad.csv"
+fuente = "existe el formato; reportes de campo pendientes (DEV22)"
+filas_dev16 = "0"
+cegado = "no"
+clave_primaria = ["reporte_id", "fila"]
+columnas = [
+  { nombre = "reporte_id", tipo = "text", descripcion = "Carpeta del reporte de calidad.", origen = "cargador" },
+  { nombre = "fila", tipo = "integer", descripcion = "Número de fila en calidad.csv.", origen = "calidad.csv (posición)", regla = "fila >= 1" },
+  { nombre = "caso_id", tipo = "text", descripcion = "Caso.", origen = "resumen.json: case_id" },
+  { nombre = "caso_version", tipo = "text", descripcion = "Versión del caso.", origen = "cargador" },
+  { nombre = "observacion_id", tipo = "text", nulo = true, descripcion = "Observación comparada; vacía si solo hay control.", origen = "calidad.csv: observation_id" },
+  { nombre = "fuente_control_id", tipo = "text", nulo = true, descripcion = "Fuente del control; vacía si solo hay observación.", origen = "calidad.csv: control_source_id" },
+  { nombre = "inicio", tipo = "timestamptz", descripcion = "Inicio del periodo.", origen = "calidad.csv: start" },
+  { nombre = "fin", tipo = "timestamptz", descripcion = "Fin del periodo.", origen = "calidad.csv: end" },
+  { nombre = "movimiento_id", tipo = "text", descripcion = "Movimiento.", origen = "calidad.csv: movement_id" },
+  { nombre = "clase_id", tipo = "text", descripcion = "Clase de vehículo.", origen = "calidad.csv: vehicle_class" },
+  { nombre = "observado", tipo = "integer", nulo = true, unidad = "veh", descripcion = "Conteo del aforo; vacío si no hay.", origen = "calidad.csv: observado" },
+  { nombre = "control", tipo = "integer", nulo = true, unidad = "veh", descripcion = "Conteo de control; vacío si no hay.", origen = "calidad.csv: control" },
+  { nombre = "error_absoluto", tipo = "integer", nulo = true, unidad = "veh", descripcion = "Observado menos control.", origen = "calidad.csv: error_absoluto" },
+  { nombre = "error_relativo", tipo = "double precision", nulo = true, unidad = "fracción", descripcion = "Error absoluto entre el control; vacío si el control es cero.", origen = "calidad.csv: error_relativo" },
+  { nombre = "motivo_error_relativo", tipo = "text", nulo = true, descripcion = "Por qué el error relativo está vacío.", origen = "calidad.csv: motivo_error_relativo" },
+  { nombre = "estado", tipo = "text", descripcion = "comparable, only_observed, only_control, not_comparable o excluded.", origen = "calidad.csv: estado", regla = "estado IN ('comparable','only_observed','only_control','not_comparable','excluded')" },
+  { nombre = "motivo_estado", tipo = "text", nulo = true, descripcion = "Motivo del estado, por ejemplo de la exclusión.", origen = "calidad.csv: motivo_estado" },
+]
+claves_foraneas = [
+  { columnas = ["reporte_id"], referencia = "caso.reportes_calidad", referidas = ["reporte_id"] },
+  { columnas = ["caso_id", "caso_version", "movimiento_id"], referencia = "caso.movimientos", referidas = ["caso_id", "caso_version", "movimiento_id"] },
+  { columnas = ["caso_id", "caso_version", "clase_id"], referencia = "caso.tipos_vehiculo", referidas = ["caso_id", "caso_version", "clase_id"] },
+]
+reglas = [
+  { nombre = "relativo_o_motivo", sql = "estado <> 'comparable' OR error_relativo IS NOT NULL OR motivo_error_relativo IS NOT NULL", descripcion = "Una fila comparable tiene error relativo o dice por qué no." },
+]
+
+[[tablas]]
+esquema = "caso"
+nombre = "reportes_calidad"
+propuesta = true
+descripcion = "Resumen de cada reporte de calidad: ventana, cobertura por movimiento, huecos, faltantes y exclusiones (I1)."
+grano = "Una fila por reporte de calidad"
+origen = "Reporte de calidad (DEV05 y DEV09): resumen.json"
+fuente = "existe el formato; reportes de campo pendientes (DEV22)"
+filas_dev16 = "0"
+cegado = "no"
+clave_primaria = ["reporte_id"]
+columnas = [
+  { nombre = "reporte_id", tipo = "text", descripcion = "Carpeta del reporte.", origen = "cargador" },
+  { nombre = "caso_id", tipo = "text", descripcion = "Caso.", origen = "resumen.json: case_id" },
+  { nombre = "caso_version", tipo = "text", descripcion = "Versión del caso.", origen = "cargador" },
+  { nombre = "observado_sha256", tipo = "huella", descripcion = "Huella del archivo de aforos.", origen = "resumen.json: observed_sha256" },
+  { nombre = "control_sha256", tipo = "huella", descripcion = "Huella del archivo de control.", origen = "resumen.json: control_sha256" },
+  { nombre = "ventana_inicio", tipo = "timestamptz", descripcion = "Inicio de la ventana evaluada.", origen = "resumen.json: window.start" },
+  { nombre = "ventana_fin", tipo = "timestamptz", descripcion = "Fin de la ventana evaluada.", origen = "resumen.json: window.end" },
+  { nombre = "ventana_declarada", tipo = "boolean", descripcion = "Si la ventana la declaró el usuario o se dedujo.", origen = "resumen.json: window.declared" },
+  { nombre = "ventana_s", tipo = "double precision", unidad = "s", descripcion = "Duración de la ventana.", origen = "resumen.json: window.window_s" },
+  { nombre = "cubierto_s", tipo = "double precision", unidad = "s", descripcion = "Tiempo con datos.", origen = "resumen.json: window.covered_s" },
+  { nombre = "cobertura", tipo = "double precision", unidad = "fracción", descripcion = "Cubierto entre ventana.", origen = "resumen.json: window.coverage", regla = "cobertura BETWEEN 0 AND 1" },
+  { nombre = "cumple_minimo", tipo = "boolean", nulo = true, descripcion = "Si alcanza la cobertura mínima; vacío si no hay mínimo fijado.", origen = "resumen.json: window.meets_minimum" },
+  { nombre = "cobertura_por_movimiento", tipo = "jsonb", descripcion = "Cobertura de cada movimiento.", origen = "resumen.json: per_movement" },
+  { nombre = "huecos", tipo = "jsonb", descripcion = "Intervalos sin datos.", origen = "resumen.json: gaps" },
+  { nombre = "solapes", tipo = "jsonb", descripcion = "Observaciones que se solapan.", origen = "resumen.json: overlaps" },
+  { nombre = "fuera_de_ventana", tipo = "jsonb", descripcion = "Observaciones fuera de la ventana.", origen = "resumen.json: outside_window" },
+  { nombre = "ventanas_por_estado", tipo = "jsonb", descripcion = "Cantidad de filas por estado.", origen = "resumen.json: windows_by_status" },
+  { nombre = "faltantes", tipo = "jsonb", descripcion = "Combinaciones esperadas sin conteo.", origen = "resumen.json: missing" },
+  { nombre = "exclusiones", tipo = "jsonb", descripcion = "Filas excluidas, con su motivo.", origen = "resumen.json: exclusions" },
+]
+claves_foraneas = [
+  { columnas = ["caso_id", "caso_version"], referencia = "caso.casos", referidas = ["caso_id", "caso_version"] },
+]
+
+[[tablas]]
+esquema = "caso"
+nombre = "calibracion_intentos"
+descripcion = "Cada intento de ajustar los parámetros de SUMO, separado entre ajuste y validación (I2)."
+grano = "Una fila por intento"
+origen = "Pendiente DEV23. Campos según 03_Pruebas_y_operacion.md («Registros independientes»): parámetro, rango, valor inicial, fuente y justificación."
+fuente = "pendiente DEV23"
+filas_dev16 = "0"
+cegado = "no"
+clave_primaria = ["intento_id"]
+columnas = [
+  { nombre = "intento_id", tipo = "text", descripcion = "Identificador del intento.", origen = "artefacto de calibración (DEV23)" },
+  { nombre = "caso_id", tipo = "text", descripcion = "Caso.", origen = "artefacto de calibración" },
+  { nombre = "caso_version", tipo = "text", descripcion = "Versión del caso.", origen = "artefacto de calibración" },
+  { nombre = "numero", tipo = "integer", descripcion = "Orden del intento.", origen = "artefacto de calibración", regla = "numero >= 1" },
+  { nombre = "conjunto", tipo = "text", descripcion = "calibration (ajuste) o validation (comprobación); nunca se mezclan.", origen = "artefacto de calibración", regla = "conjunto IN ('calibration','validation')" },
+  { nombre = "parametros", tipo = "jsonb", descripcion = "Cada parámetro con su valor, rango, valor inicial, fuente y justificación.", origen = "artefacto de calibración" },
+  { nombre = "congelado", tipo = "boolean", descripcion = "Si es la configuración final congelada.", origen = "artefacto de calibración" },
+  { nombre = "corridas", tipo = "jsonb", descripcion = "run_id de las corridas usadas.", origen = "artefacto de calibración" },
+  { nombre = "registrado_en", tipo = "timestamptz", descripcion = "Cuándo se hizo el intento.", origen = "artefacto de calibración" },
+]
+claves_foraneas = [
+  { columnas = ["caso_id", "caso_version"], referencia = "caso.casos", referidas = ["caso_id", "caso_version"] },
+]
+
+[[tablas]]
+esquema = "caso"
+nombre = "calibracion_contraste"
+descripcion = "Observado frente a simulado por variable, con el criterio fijado antes (I2)."
+grano = "Una fila por intento, variable, métrica y alcance"
+origen = "Pendiente DEV23. Campos según protocol.calibration_criteria: variable, metric, unit, scope, maximum_error, pilot_evidence."
+fuente = "pendiente DEV23"
+filas_dev16 = "0"
+cegado = "no"
+clave_primaria = ["intento_id", "variable", "metrica", "alcance"]
+columnas = [
+  { nombre = "intento_id", tipo = "text", descripcion = "Intento evaluado.", origen = "artefacto de calibración" },
+  { nombre = "variable", tipo = "text", descripcion = "volume (volumen), queue (cola) o travel_time (tiempo de recorrido).", origen = "criterio de calibración: variable", regla = "variable IN ('volume','queue','travel_time')" },
+  { nombre = "metrica", tipo = "text", descripcion = "Métrica de comparación, por ejemplo GEH o error relativo.", origen = "criterio de calibración: metric" },
+  { nombre = "alcance", tipo = "text", descripcion = "Movimiento, acceso o periodo comparado.", origen = "criterio de calibración: scope" },
+  { nombre = "unidad", tipo = "text", descripcion = "Unidad de la variable.", origen = "criterio de calibración: unit" },
+  { nombre = "observado", tipo = "double precision", nulo = true, descripcion = "Valor de campo.", origen = "artefacto de calibración" },
+  { nombre = "simulado", tipo = "double precision", nulo = true, descripcion = "Valor de SUMO.", origen = "artefacto de calibración" },
+  { nombre = "error", tipo = "double precision", nulo = true, descripcion = "Error según la métrica.", origen = "artefacto de calibración" },
+  { nombre = "error_maximo", tipo = "double precision", nulo = true, descripcion = "Error máximo admitido por el protocolo.", origen = "criterio de calibración: maximum_error" },
+  { nombre = "cumple", tipo = "boolean", nulo = true, descripcion = "Si cumple el criterio; vacío si no hay criterio.", origen = "artefacto de calibración" },
+  { nombre = "evidencia_piloto", tipo = "text", nulo = true, descripcion = "Evidencia del piloto que justifica el criterio.", origen = "criterio de calibración: pilot_evidence" },
+]
+claves_foraneas = [
+  { columnas = ["intento_id"], referencia = "caso.calibracion_intentos", referidas = ["intento_id"] },
+]
+
+# =====================================================================================
+# experimento
+# =====================================================================================
+
+[[tablas]]
+esquema = "experimento"
+nombre = "familias"
+descripcion = "Familias (grupos) de escenarios: un patrón de demanda con sus variantes."
+grano = "Una fila por caso y familia"
+origen = "Especificación de escenarios (DEV11: families) o, si no existe, el group_id del escenario."
+fuente = "existe"
+filas_dev16 = "unas 20"
+cegado = "no"
+clave_primaria = ["caso_id", "caso_version", "familia_id"]
+columnas = [
+  { nombre = "caso_id", tipo = "text", descripcion = "Caso.", origen = "escenario o especificación" },
+  { nombre = "caso_version", tipo = "text", descripcion = "Versión del caso.", origen = "escenario o especificación" },
+  { nombre = "familia_id", tipo = "text", descripcion = "Identificador del grupo de escenarios.", origen = "scenario.json: group_id; spec: family_id" },
+  { nombre = "origen", tipo = "text", descripcion = "synthetic o field_derived.", origen = "scenario.json: origin", regla = "origen IN ('synthetic','field_derived')" },
+  { nombre = "variantes", tipo = "integer", nulo = true, descripcion = "Variantes de flujo que genera la familia; vacío si no hay especificación.", origen = "spec: families[].variants", regla = "variantes IS NULL OR variantes >= 1" },
+  { nombre = "semillas", tipo = "integer", nulo = true, descripcion = "Semillas de llegada por variante.", origen = "spec: families[].seeds", regla = "semillas IS NULL OR semillas >= 1" },
+  { nombre = "rangos_demanda", tipo = "jsonb", nulo = true, descripcion = "Rango de flujo y composición por movimiento.", origen = "spec: families[].demand" },
+]
+claves_foraneas = [
+  { columnas = ["caso_id", "caso_version"], referencia = "caso.casos", referidas = ["caso_id", "caso_version"] },
+]
+
+[[tablas]]
+esquema = "experimento"
+nombre = "escenarios"
+descripcion = "Un escenario de demanda: familia, semilla, ventana de medición y origen."
+grano = "Una fila por escenario"
+origen = "datos/escenarios/<caso>/<escenario>.json (contrato scenario)"
+fuente = "existe"
+filas_dev16 = "unos 46"
+cegado = "raiz:escenario_id"
+clave_primaria = ["escenario_id"]
+columnas = [
+  { nombre = "escenario_id", tipo = "text", descripcion = "Identificador, por ejemplo ESC-SINT-001.", origen = "scenario.json: scenario_id" },
+  { nombre = "caso_id", tipo = "text", descripcion = "Caso.", origen = "scenario.json: case_id" },
+  { nombre = "caso_version", tipo = "text", descripcion = "Versión del caso.", origen = "scenario.json: case_version" },
+  { nombre = "familia_id", tipo = "text", descripcion = "Familia (grupo) del escenario.", origen = "scenario.json: group_id" },
+  { nombre = "origen", tipo = "text", descripcion = "synthetic o field_derived.", origen = "scenario.json: origin", regla = "origen IN ('synthetic','field_derived')" },
+  { nombre = "preliminar", tipo = "boolean", descripcion = "Verdadero si se cargó sin partición congelada, con autorización explícita en la carga.", origen = "cargador (bd cargar --preliminar)" },
+  { nombre = "request_id", tipo = "text", descripcion = "Solicitud de demanda del escenario.", origen = "scenario.json: request.request_id" },
+  { nombre = "origen_solicitud", tipo = "text", descripcion = "synthetic o field.", origen = "scenario.json: request.origin", regla = "origen_solicitud IN ('synthetic','field')" },
+  { nombre = "inicio_observacion", tipo = "timestamptz", descripcion = "Inicio del periodo que representa.", origen = "scenario.json: request.observation_start" },
+  { nombre = "fin_observacion", tipo = "timestamptz", descripcion = "Fin del periodo que representa.", origen = "scenario.json: request.observation_end" },
+  { nombre = "fuentes", tipo = "jsonb", descripcion = "Fuentes de la demanda.", origen = "scenario.json: source_ids" },
+  { nombre = "politica_frontera", tipo = "text", descripcion = "Política de frontera.", origen = "scenario.json: boundary_policy_id" },
+  { nombre = "calentamiento_s", tipo = "double precision", unidad = "s", descripcion = "Arranque que no se mide.", origen = "scenario.json: warmup_s", regla = "calentamiento_s >= 0" },
+  { nombre = "medicion_s", tipo = "double precision", unidad = "s", descripcion = "Intervalo medido.", origen = "scenario.json: measure_s", regla = "medicion_s > 0" },
+  { nombre = "vaciado_max_s", tipo = "double precision", unidad = "s", descripcion = "Tiempo máximo para que terminen los vehículos.", origen = "scenario.json: drain_max_s", regla = "vaciado_max_s >= 0" },
+  { nombre = "semilla_demanda", tipo = "integer", descripcion = "Semilla con la que se generó la demanda.", origen = "scenario.json: demand_seed" },
+  { nombre = "demanda_ruta", tipo = "text", nulo = true, descripcion = "Archivo de demanda materializada, si existe.", origen = "scenario.json: demand_artifact.path" },
+  { nombre = "demanda_sha256", tipo = "huella", nulo = true, descripcion = "Huella de ese archivo.", origen = "scenario.json: demand_artifact.sha256" },
+  { nombre = "huella_escenario", tipo = "huella", descripcion = "Huella del escenario completo.", origen = "inputs/manifiesto.json: scenario_sha256" },
+]
+claves_foraneas = [
+  { columnas = ["caso_id", "caso_version"], referencia = "caso.casos", referidas = ["caso_id", "caso_version"] },
+  { columnas = ["caso_id", "caso_version", "familia_id"], referencia = "experimento.familias", referidas = ["caso_id", "caso_version", "familia_id"] },
+]
+unicas = [["escenario_id", "familia_id"]]
+reglas = [
+  { nombre = "demanda_completa", sql = "(demanda_ruta IS NULL) = (demanda_sha256 IS NULL)", descripcion = "Ruta y huella van juntas." },
+  { nombre = "sin_particion_solo_preliminar", sql = "", descripcion = "El cargador no carga un escenario sin asignación en una partición congelada, salvo autorización explícita (preliminar = verdadero)." },
+]
+
+[[tablas]]
+esquema = "experimento"
+nombre = "demanda"
+descripcion = "Demanda de cada movimiento y clase en un escenario. Es la entrada del modelo."
+grano = "Una fila por escenario, movimiento y clase"
+origen = "scenario.json: request.demand (flow_vph y composition)"
+fuente = "existe"
+filas_dev16 = "unas 4 200"
+cegado = "raiz:escenario_id"
+clave_primaria = ["escenario_id", "movimiento_id", "clase_id"]
+columnas = [
+  { nombre = "escenario_id", tipo = "text", descripcion = "Escenario.", origen = "scenario.json: scenario_id" },
+  { nombre = "caso_id", tipo = "text", descripcion = "Caso.", origen = "scenario.json: case_id" },
+  { nombre = "caso_version", tipo = "text", descripcion = "Versión del caso.", origen = "scenario.json: case_version" },
+  { nombre = "movimiento_id", tipo = "text", descripcion = "Movimiento.", origen = "request.demand[].movement_id" },
+  { nombre = "clase_id", tipo = "text", descripcion = "Clase de vehículo; si el flujo es cero, una fila por clase del caso.", origen = "request.demand[].composition (clave)" },
+  { nombre = "flujo_vph", tipo = "double precision", unidad = "veh/h", descripcion = "Demanda total del movimiento (se repite en cada clase).", origen = "request.demand[].flow_vph", regla = "flujo_vph >= 0" },
+  { nombre = "proporcion", tipo = "double precision", nulo = true, unidad = "fracción", descripcion = "Parte del flujo de esta clase; vacía si el flujo es cero (composición no aplica).", origen = "request.demand[].composition (valor)", regla = "proporcion IS NULL OR proporcion BETWEEN 0 AND 1" },
+]
+claves_foraneas = [
+  { columnas = ["escenario_id"], referencia = "experimento.escenarios", referidas = ["escenario_id"] },
+  { columnas = ["caso_id", "caso_version", "movimiento_id"], referencia = "caso.movimientos", referidas = ["caso_id", "caso_version", "movimiento_id"] },
+  { columnas = ["caso_id", "caso_version", "clase_id"], referencia = "caso.tipos_vehiculo", referidas = ["caso_id", "caso_version", "clase_id"] },
+]
+reglas = [
+  { nombre = "cero_sin_composicion", sql = "(flujo_vph = 0) = (proporcion IS NULL)", descripcion = "Con flujo cero no hay composición; con flujo positivo sí." },
+  { nombre = "proporciones_suman_uno", sql = "", descripcion = "Consulta de verificación (QA): por escenario y movimiento con flujo positivo, las proporciones suman 1 con tolerancia del protocolo." },
+]
+
+[[tablas]]
+esquema = "experimento"
+nombre = "particiones"
+descripcion = "Particiones congeladas del conjunto de escenarios."
+grano = "Una fila por partición"
+origen = "Archivo de partición (contrato split, DEV12). Solo se cargan las congeladas."
+fuente = "existe el código; ninguna publicada todavía"
+filas_dev16 = "1"
+cegado = "no"
+clave_primaria = ["particion_id"]
+columnas = [
+  { nombre = "particion_id", tipo = "text", descripcion = "Identificador.", origen = "split: split_id" },
+  { nombre = "politica", tipo = "text", descripcion = "Política de reparto usada.", origen = "split: policy" },
+  { nombre = "semilla", tipo = "integer", descripcion = "Semilla del reparto.", origen = "split: seed", regla = "semilla >= 0" },
+  { nombre = "congelada", tipo = "boolean", descripcion = "Siempre verdadera: una partición sin congelar no se carga.", origen = "split: frozen", regla = "congelada" },
+]
+
+[[tablas]]
+esquema = "experimento"
+nombre = "asignaciones"
+descripcion = "A qué parte de la partición va cada escenario (entrenamiento, validación o prueba). Es la base del cegado."
+grano = "Una fila por partición y escenario"
+origen = "split: assignments (scenario_id, group_id, partition)"
+fuente = "existe el código; ninguna publicada todavía"
+filas_dev16 = "unas 46"
+cegado = "no"
+clave_primaria = ["particion_id", "escenario_id"]
+columnas = [
+  { nombre = "particion_id", tipo = "text", descripcion = "Partición.", origen = "split: split_id" },
+  { nombre = "escenario_id", tipo = "text", descripcion = "Escenario.", origen = "split: assignments[].scenario_id" },
+  { nombre = "familia_id", tipo = "text", descripcion = "Familia del escenario.", origen = "split: assignments[].group_id" },
+  { nombre = "asignacion", tipo = "text", descripcion = "train (entrenamiento), validation (validación) o test (prueba).", origen = "split: assignments[].partition", regla = "asignacion IN ('train','validation','test')" },
+]
+claves_foraneas = [
+  { columnas = ["particion_id"], referencia = "experimento.particiones", referidas = ["particion_id"] },
+  { columnas = ["escenario_id", "familia_id"], referencia = "experimento.escenarios", referidas = ["escenario_id", "familia_id"], nota = "Diferible: la partición y sus escenarios se cargan en la misma transacción." },
+]
+unicas = [["escenario_id"]]
+reglas = [
+  { nombre = "una_particion_por_escenario", sql = "", descripcion = "Índice único en escenario_id: un escenario pertenece a una sola partición congelada." },
+  { nombre = "familia_completa", sql = "", descripcion = "Disparador experimento.validar_asignacion(): todos los escenarios de una familia tienen la misma asignación; un preliminar no pasa a test." },
+]
+
+[[tablas]]
+esquema = "experimento"
+nombre = "protocolos"
+descripcion = "Reglas de medición, búsqueda y decisión fijadas antes del experimento."
+grano = "Una fila por protocolo"
+origen = "datos/derivados/protocolos/<caso>/*.json (contrato protocol)"
+fuente = "existe"
+filas_dev16 = "pocas"
+cegado = "no"
+clave_primaria = ["protocolo_id"]
+columnas = [
+  { nombre = "protocolo_id", tipo = "text", descripcion = "Identificador.", origen = "protocol: protocol_id" },
+  { nombre = "estado", tipo = "text", descripcion = "draft (borrador) o frozen (congelado). La fecha de congelamiento está en hitos.", origen = "protocol: status", regla = "estado IN ('draft','frozen')" },
+  { nombre = "proposito", tipo = "text", descripcion = "synthetic_fixture (desarrollo sintético) o main_experiment (experimento principal).", origen = "protocol: purpose", regla = "proposito IN ('synthetic_fixture','main_experiment')" },
+  { nombre = "definicion_metrica", tipo = "text", descripcion = "Qué se mide como demora, cola y detención.", origen = "protocol: metric_definition" },
+  { nombre = "politica_cohorte", tipo = "text", descripcion = "Qué vehículos forman la cohorte medida.", origen = "protocol: cohort_policy" },
+  { nombre = "politica_censura", tipo = "text", descripcion = "complete_cohort_or_no_label o approved_alternative.", origen = "protocol: censoring_policy", regla = "politica_censura IN ('complete_cohort_or_no_label','approved_alternative')" },
+  { nombre = "regla_censura_alternativa", tipo = "text", nulo = true, descripcion = "Regla aprobada si no es la de cohorte completa.", origen = "protocol: alternate_censoring_rule" },
+  { nombre = "presupuesto_busqueda", tipo = "integer", descripcion = "Candidatos que consumen presupuesto.", origen = "protocol: search_budget", regla = "presupuesto_busqueda >= 0" },
+  { nombre = "limite_intentos", tipo = "integer", descripcion = "Máximo de planes generados.", origen = "protocol: sampling_attempt_limit", regla = "limite_intentos >= 0" },
+  { nombre = "finalistas", tipo = "integer", descripcion = "Candidatos que pasan a la reevaluación.", origen = "protocol: finalist_count", regla = "finalistas >= 0" },
+  { nombre = "epsilon_empate_s", tipo = "double precision", unidad = "s", descripcion = "Diferencia de demora bajo la que hay empate.", origen = "protocol: tie_epsilon_s", regla = "epsilon_empate_s >= 0" },
+  { nombre = "umbral_cola_mps", tipo = "double precision", unidad = "m/s", descripcion = "Velocidad bajo la que un vehículo está en cola.", origen = "protocol: queue_speed_threshold_mps", regla = "umbral_cola_mps >= 0" },
+  { nombre = "umbral_detencion_mps", tipo = "double precision", unidad = "m/s", descripcion = "Velocidad bajo la que cuenta una detención.", origen = "protocol: stop_speed_threshold_mps", regla = "umbral_detencion_mps >= 0" },
+  { nombre = "muestreo_cola_s", tipo = "double precision", unidad = "s", descripcion = "Cada cuánto se mide la cola.", origen = "protocol: queue_sampling_s", regla = "muestreo_cola_s > 0" },
+  { nombre = "carriles_zona", tipo = "jsonb", descripcion = "Carriles de la zona medida.", origen = "protocol: zone_lane_ids" },
+  { nombre = "nivel_confianza", tipo = "double precision", unidad = "fracción", descripcion = "Nivel de los intervalos de confianza.", origen = "protocol: confidence_level", regla = "nivel_confianza > 0 AND nivel_confianza < 1" },
+  { nombre = "remuestreos_bootstrap", tipo = "integer", descripcion = "Remuestreos para los intervalos.", origen = "protocol: bootstrap_repetitions", regla = "remuestreos_bootstrap >= 0" },
+  { nombre = "margen_aceptacion_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Margen admitido frente a la búsqueda; vacío mientras no se fije.", origen = "protocol: acceptance_margin_s" },
+  { nombre = "tolerancia_error_conteo", tipo = "double precision", nulo = true, descripcion = "Tolerancia de error de aforos (I1).", origen = "protocol: count_error_tolerance" },
+  { nombre = "tolerancia_ajuste_simulacion", tipo = "double precision", nulo = true, descripcion = "Tolerancia de ajuste de SUMO (I2).", origen = "protocol: simulation_fit_tolerance" },
+  { nombre = "referencia_aprobacion", tipo = "text", nulo = true, descripcion = "Acta o aprobación que lo respalda.", origen = "protocol: approval_reference" },
+  { nombre = "criterios_calibracion", tipo = "jsonb", descripcion = "Criterios de calibración.", origen = "protocol: calibration_criteria" },
+  { nombre = "agregacion_grupos", tipo = "text", descripcion = "equal_group_weight o declared_field_weights.", origen = "protocol: group_aggregation", regla = "agregacion_grupos IN ('equal_group_weight','declared_field_weights')" },
+  { nombre = "pesos_grupos_ruta", tipo = "text", nulo = true, descripcion = "Archivo de pesos por grupo, si aplica.", origen = "protocol: group_weight_artifact.path" },
+  { nombre = "politica_reajuste", tipo = "text", descripcion = "train_only o train_plus_validation_after_selection.", origen = "protocol: refit_policy", regla = "politica_reajuste IN ('train_only','train_plus_validation_after_selection')" },
+  { nombre = "tolerancia_numerica", tipo = "double precision", descripcion = "Tolerancia para comparar réplicas.", origen = "protocol: numeric_abs_tolerance", regla = "tolerancia_numerica >= 0" },
+]
+
+[[tablas]]
+esquema = "experimento"
+nombre = "protocolo_semillas"
+descripcion = "Semillas de cada etapa del protocolo. La base impide que una semilla esté en dos etapas."
+grano = "Una fila por protocolo, etapa y semilla"
+origen = "protocol: seeds.search, seeds.finalists, seeds.final"
+fuente = "existe"
+filas_dev16 = "decenas"
+cegado = "no"
+clave_primaria = ["protocolo_id", "etapa", "semilla"]
+columnas = [
+  { nombre = "protocolo_id", tipo = "text", descripcion = "Protocolo.", origen = "protocol: protocol_id" },
+  { nombre = "etapa", tipo = "text", descripcion = "search (búsqueda), finalists (finalistas) o final (prueba final).", origen = "protocol: seeds (clave)", regla = "etapa IN ('search','finalists','final')" },
+  { nombre = "semilla", tipo = "integer", descripcion = "Valor de la semilla.", origen = "protocol: seeds (valores)" },
+  { nombre = "orden", tipo = "integer", descripcion = "Posición dentro de la etapa.", origen = "protocol: seeds (posición)", regla = "orden >= 0" },
+]
+claves_foraneas = [
+  { columnas = ["protocolo_id"], referencia = "experimento.protocolos", referidas = ["protocolo_id"] },
+]
+unicas = [["protocolo_id", "semilla"]]
+
+# =====================================================================================
+# simulacion
+# =====================================================================================
+
+[[tablas]]
+esquema = "simulacion"
+nombre = "planes"
+descripcion = "Un plan de tiempos: la duración de cada tramo y el ciclo."
+grano = "Una fila por plan distinto (vector de duraciones)"
+origen = "traza.json (candidatos), label.json, comparadores.json, respuestas del modelo y programas de las corridas."
+fuente = "existe"
+filas_dev16 = "unas 1 000"
+cegado = "no"
+clave_primaria = ["plan_id"]
+columnas = [
+  { nombre = "plan_id", tipo = "huella", descripcion = "Huella del vector de duraciones en el orden de los tramos del caso.", origen = "cargador" },
+  { nombre = "caso_id", tipo = "text", descripcion = "Caso.", origen = "artefacto de origen" },
+  { nombre = "caso_version", tipo = "text", descripcion = "Versión del caso.", origen = "artefacto de origen" },
+  { nombre = "duraciones_s", tipo = "jsonb", unidad = "s", descripcion = "Duración de cada tramo, por tramo_id (si se aprueba plan_tramos, pasa a esa tabla).", origen = "durations_s o slot_durations_s del artefacto" },
+  { nombre = "ciclo_s", tipo = "double precision", unidad = "s", descripcion = "Suma de todos los tramos.", origen = "cycle_s del artefacto", regla = "ciclo_s > 0" },
+]
+claves_foraneas = [
+  { columnas = ["caso_id", "caso_version"], referencia = "caso.casos", referidas = ["caso_id", "caso_version"] },
+]
+
+[[tablas]]
+esquema = "simulacion"
+nombre = "plan_tramos"
+propuesta = true
+descripcion = "Duración de cada tramo de un plan, en filas. Permite consultar «el t5 de todos los planes» y exige que el tramo exista en el caso."
+grano = "Una fila por plan y tramo"
+origen = "Las mismas fuentes que planes."
+fuente = "existe"
+filas_dev16 = "unas 9 000"
+cegado = "no"
+clave_primaria = ["plan_id", "tramo_id"]
+columnas = [
+  { nombre = "plan_id", tipo = "huella", descripcion = "Plan.", origen = "cargador" },
+  { nombre = "caso_id", tipo = "text", descripcion = "Caso.", origen = "artefacto de origen" },
+  { nombre = "caso_version", tipo = "text", descripcion = "Versión del caso.", origen = "artefacto de origen" },
+  { nombre = "tramo_id", tipo = "text", descripcion = "Tramo.", origen = "durations_s (clave)" },
+  { nombre = "duracion_s", tipo = "double precision", unidad = "s", descripcion = "Duración del tramo.", origen = "durations_s (valor)", regla = "duracion_s >= 0" },
+]
+claves_foraneas = [
+  { columnas = ["plan_id"], referencia = "simulacion.planes", referidas = ["plan_id"] },
+  { columnas = ["caso_id", "caso_version", "tramo_id"], referencia = "caso.tramos", referidas = ["caso_id", "caso_version", "tramo_id"] },
+]
+
+[[tablas]]
+esquema = "simulacion"
+nombre = "corridas"
+descripcion = "Una simulación de SUMO: escenario, plan, semilla, etapa, estado, versiones y huellas de sus entradas."
+grano = "Una fila por corrida"
+origen = "datos/ejecuciones/<run_id>/: manifest.json, inputs/manifiesto.json y outputs/tiempos.json"
+fuente = "existe"
+filas_dev16 = "unas 4 700"
+cegado = "raiz:escenario_id"
+clave_primaria = ["run_id"]
+columnas = [
+  { nombre = "run_id", tipo = "text", descripcion = "Identificador de la corrida.", origen = "manifest.json: run_id" },
+  { nombre = "estado", tipo = "text", descripcion = "succeeded (exitosa), failed (fallida) o cancelled (cancelada).", origen = "manifest.json: status", regla = "estado IN ('succeeded','failed','cancelled')" },
+  { nombre = "creada_en", tipo = "timestamptz", descripcion = "Cuándo se creó.", origen = "manifest.json: created_at" },
+  { nombre = "caso_id", tipo = "text", descripcion = "Caso.", origen = "manifest.json: case_id" },
+  { nombre = "caso_version", tipo = "text", descripcion = "Versión del caso.", origen = "manifest.json: case_version" },
+  { nombre = "escenario_id", tipo = "text", descripcion = "Escenario simulado.", origen = "manifest.json: scenario_id" },
+  { nombre = "etapa", tipo = "text", descripcion = "search, finalists, final o diagnostic (corrida fuera de una búsqueda o evaluación).", origen = "traza.json (etapa de la semilla); diagnostic si ninguna búsqueda la usa", regla = "etapa IN ('search','finalists','final','diagnostic')" },
+  { nombre = "semilla_sumo", tipo = "integer", nulo = true, descripcion = "Semilla de SUMO.", origen = "manifest.json: seed" },
+  { nombre = "semilla_demanda", tipo = "integer", nulo = true, descripcion = "Semilla de la demanda materializada.", origen = "inputs/manifiesto.json: seeds.demand_seed" },
+  { nombre = "protocolo_id", tipo = "text", nulo = true, descripcion = "Protocolo; vacío si el manifiesto no lo dice y ninguna búsqueda lo usa.", origen = "manifest.json: protocol_id o traza.json: identity.protocol_id" },
+  { nombre = "plan_id", tipo = "huella", nulo = true, descripcion = "Plan aplicado; vacío si el programa no corresponde a un plan del caso.", origen = "traza.json (candidato) o inputs/programa.tll.xml" },
+  { nombre = "programa_id", tipo = "text", nulo = true, descripcion = "Identificador del programa de SUMO.", origen = "inputs/manifiesto.json: program.program_id" },
+  { nombre = "tls_id", tipo = "text", nulo = true, descripcion = "Semáforo programado.", origen = "inputs/manifiesto.json: program.tls_id" },
+  { nombre = "red_sha256", tipo = "huella", nulo = true, descripcion = "Huella de la red.", origen = "inputs/manifiesto.json: network.sha256" },
+  { nombre = "programa_sha256", tipo = "huella", nulo = true, descripcion = "Huella del programa.", origen = "inputs/manifiesto.json: program.sha256" },
+  { nombre = "rutas_sha256", tipo = "huella", nulo = true, descripcion = "Huella de las rutas: la demanda materializada, igual entre alternativas comparadas.", origen = "inputs/manifiesto.json: routes_sha256" },
+  { nombre = "tipos_sha256", tipo = "huella", nulo = true, descripcion = "Huella de los tipos de vehículo.", origen = "inputs/manifiesto.json: vehicle_types_sha256" },
+  { nombre = "entradas_sha256", tipo = "huella", nulo = true, descripcion = "Huella del manifiesto de entradas completo.", origen = "inputs/manifiesto.json (huella)" },
+  { nombre = "politica_frontera", tipo = "text", nulo = true, descripcion = "Política de frontera.", origen = "inputs/manifiesto.json: boundary_policy_id" },
+  { nombre = "paso_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Paso de simulación.", origen = "inputs/manifiesto.json: times.step_length_s" },
+  { nombre = "calentamiento_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Arranque sin medir.", origen = "inputs/manifiesto.json: times.warmup_s" },
+  { nombre = "medicion_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Intervalo medido.", origen = "inputs/manifiesto.json: times.measure_s" },
+  { nombre = "vaciado_max_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Vaciado máximo.", origen = "inputs/manifiesto.json: times.drain_max_s" },
+  { nombre = "fin_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Fin de la simulación.", origen = "inputs/manifiesto.json: times.end_s" },
+  { nombre = "inicio_cohorte_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Desde cuándo se mide la cohorte.", origen = "inputs/manifiesto.json: times.cohort_start_s" },
+  { nombre = "fin_cohorte_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Hasta cuándo se mide la cohorte.", origen = "inputs/manifiesto.json: times.cohort_end_s" },
+  { nombre = "vehiculos_total", tipo = "integer", nulo = true, unidad = "veh", descripcion = "Vehículos pedidos en total.", origen = "inputs/manifiesto.json: vehicles.total" },
+  { nombre = "vehiculos_cohorte", tipo = "integer", nulo = true, unidad = "veh", descripcion = "Vehículos de la cohorte.", origen = "inputs/manifiesto.json: vehicles.cohort" },
+  { nombre = "vehiculos_calentamiento", tipo = "integer", nulo = true, unidad = "veh", descripcion = "Vehículos del calentamiento.", origen = "inputs/manifiesto.json: vehicles.warmup" },
+  { nombre = "opciones_sumo", tipo = "jsonb", nulo = true, descripcion = "Opciones de SUMO usadas.", origen = "inputs/manifiesto.json: sumo_options" },
+  { nombre = "limitaciones", tipo = "jsonb", nulo = true, descripcion = "Limitaciones declaradas de la corrida.", origen = "inputs/manifiesto.json: limitations" },
+  { nombre = "comando", tipo = "jsonb", descripcion = "Comando con que se lanzó SUMO.", origen = "manifest.json: command" },
+  { nombre = "entorno_id", tipo = "huella", descripcion = "Versiones usadas.", origen = "manifest.json: environment" },
+  { nombre = "codigo_salida", tipo = "integer", nulo = true, descripcion = "Código con que terminó SUMO.", origen = "manifest.json: exit_code" },
+  { nombre = "error", tipo = "jsonb", nulo = true, descripcion = "Error tipado si falló.", origen = "manifest.json: error" },
+  { nombre = "reintento_de", tipo = "text", nulo = true, descripcion = "Corrida anterior si es un reintento.", origen = "manifest.json: retry_of" },
+  { nombre = "terminacion", tipo = "text", nulo = true, descripcion = "completed, sumo_error, timeout, cancelled, output_budget, memory_budget o not_started.", origen = "outputs/tiempos.json: termination", regla = "terminacion IS NULL OR terminacion IN ('completed','sumo_error','timeout','cancelled','output_budget','memory_budget','not_started')" },
+  { nombre = "inicio_ejecucion", tipo = "timestamptz", nulo = true, descripcion = "Cuándo arrancó SUMO.", origen = "outputs/tiempos.json: started_at" },
+  { nombre = "fin_ejecucion", tipo = "timestamptz", nulo = true, descripcion = "Cuándo terminó.", origen = "outputs/tiempos.json: finished_at" },
+  { nombre = "duracion_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Tiempo de cálculo (I7).", origen = "outputs/tiempos.json: duration_s", regla = "duracion_s IS NULL OR duracion_s >= 0" },
+  { nombre = "limite_tiempo_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Tiempo máximo permitido.", origen = "outputs/tiempos.json: wall_timeout_s" },
+  { nombre = "memoria_pico_bytes", tipo = "bigint", nulo = true, unidad = "bytes", descripcion = "Memoria máxima usada.", origen = "outputs/tiempos.json: peak_memory_bytes" },
+  { nombre = "bytes_salida", tipo = "bigint", nulo = true, unidad = "bytes", descripcion = "Tamaño de las salidas.", origen = "outputs/tiempos.json: output_bytes" },
+]
+claves_foraneas = [
+  { columnas = ["caso_id", "caso_version"], referencia = "caso.casos", referidas = ["caso_id", "caso_version"] },
+  { columnas = ["escenario_id"], referencia = "experimento.escenarios", referidas = ["escenario_id"] },
+  { columnas = ["protocolo_id"], referencia = "experimento.protocolos", referidas = ["protocolo_id"], opcional = true },
+  { columnas = ["plan_id"], referencia = "simulacion.planes", referidas = ["plan_id"], opcional = true },
+  { columnas = ["entorno_id"], referencia = "control.entornos", referidas = ["entorno_id"] },
+  { columnas = ["reintento_de"], referencia = "simulacion.corridas", referidas = ["run_id"], opcional = true },
+]
+reglas = [
+  { nombre = "exito_con_codigo_cero", sql = "estado <> 'succeeded' OR codigo_salida = 0", descripcion = "Una corrida exitosa terminó con código 0." },
+  { nombre = "etapa_con_plan_y_protocolo", sql = "etapa = 'diagnostic' OR (plan_id IS NOT NULL AND protocolo_id IS NOT NULL)", descripcion = "Una corrida de búsqueda, finalistas o final tiene plan y protocolo." },
+  { nombre = "final_solo_en_prueba", sql = "", descripcion = "Disparador simulacion.validar_corrida(): la etapa final solo en escenarios asignados a test, y la semilla pertenece a esa etapa del protocolo." },
+]
+indices = [["escenario_id"], ["plan_id"], ["protocolo_id", "etapa"]]
+
+[[tablas]]
+esquema = "simulacion"
+nombre = "resultados_corrida"
+descripcion = "Resultados de una corrida: lo que reporta SUMO y las métricas de la cohorte y la zona calculadas por el código oficial (DEV19)."
+grano = "Una fila por corrida"
+origen = "outputs/summary.json y métricas publicadas (metricas.json, DEV31 F2)"
+fuente = "existe (summary.json); métricas publicadas pendientes de F2"
+filas_dev16 = "unas 4 700"
+cegado = "padre:simulacion.corridas(run_id)"
+clave_primaria = ["run_id"]
+columnas = [
+  { nombre = "run_id", tipo = "text", descripcion = "Corrida.", origen = "manifest.json: run_id" },
+  { nombre = "artefacto_metricas_id", tipo = "text", nulo = true, descripcion = "Archivo de métricas publicado; vacío si la corrida aún no tiene métricas.", origen = "cargador" },
+  { nombre = "modo", tipo = "text", descripcion = "smoke (prueba corta) o base.", origen = "summary.json: mode", regla = "modo IN ('smoke','base')" },
+  { nombre = "fin_limite_s", tipo = "double precision", unidad = "s", descripcion = "Fin previsto.", origen = "summary.json: end_limit_s" },
+  { nombre = "fin_simulado_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Hasta dónde llegó la simulación.", origen = "summary.json: simulated_end_s" },
+  { nombre = "vehiculos_declarados", tipo = "integer", nulo = true, unidad = "veh", descripcion = "Vehículos declarados en la demanda.", origen = "summary.json: declared_vehicles" },
+  { nombre = "vehiculos_cargados", tipo = "integer", unidad = "veh", descripcion = "Vehículos que SUMO cargó.", origen = "summary.json: vehicles_loaded", regla = "vehiculos_cargados >= 0" },
+  { nombre = "vehiculos_insertados", tipo = "integer", unidad = "veh", descripcion = "Vehículos que entraron a la red.", origen = "summary.json: vehicles_inserted", regla = "vehiculos_insertados >= 0" },
+  { nombre = "vehiculos_en_red", tipo = "integer", unidad = "veh", descripcion = "Vehículos todavía en la red al final.", origen = "summary.json: vehicles_running", regla = "vehiculos_en_red >= 0" },
+  { nombre = "vehiculos_esperando", tipo = "integer", unidad = "veh", descripcion = "Vehículos esperando entrar al final.", origen = "summary.json: vehicles_waiting", regla = "vehiculos_esperando >= 0" },
+  { nombre = "viajes_terminados", tipo = "integer", unidad = "veh", descripcion = "Viajes terminados.", origen = "summary.json: trips_finished", regla = "viajes_terminados >= 0" },
+  { nombre = "viajes_sin_terminar", tipo = "integer", unidad = "veh", descripcion = "Viajes sin terminar.", origen = "summary.json: trips_unfinished", regla = "viajes_sin_terminar >= 0" },
+  { nombre = "teletransportes_total", tipo = "integer", descripcion = "Teletransportes en toda la red.", origen = "summary.json: teleports_total", regla = "teletransportes_total >= 0" },
+  { nombre = "teletransportes_atasco", tipo = "integer", descripcion = "Teletransportes por atasco.", origen = "summary.json: teleports_jam", regla = "teletransportes_atasco >= 0" },
+  { nombre = "teletransportes_cruce", tipo = "integer", descripcion = "Teletransportes al ceder el paso.", origen = "summary.json: teleports_yield", regla = "teletransportes_cruce >= 0" },
+  { nombre = "teletransportes_carril", tipo = "integer", descripcion = "Teletransportes por carril equivocado.", origen = "summary.json: teleports_wrong_lane", regla = "teletransportes_carril >= 0" },
+  { nombre = "choques", tipo = "integer", descripcion = "Choques.", origen = "summary.json: collisions", regla = "choques >= 0" },
+  { nombre = "avisos_sumo", tipo = "integer", descripcion = "Avisos en el registro de SUMO.", origen = "summary.json: sumo_warnings", regla = "avisos_sumo >= 0" },
+  { nombre = "demora_salida_media_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Espera media para entrar, de todos los vehículos.", origen = "summary.json: mean_depart_delay_s" },
+  { nombre = "demanda_insatisfecha", tipo = "boolean", descripcion = "Si quedó demanda sin atender.", origen = "summary.json: demand_unmet" },
+  { nombre = "hallazgos", tipo = "jsonb", descripcion = "Observaciones de la corrida (avisos, teletransportes, choques...).", origen = "summary.json: findings" },
+  { nombre = "version_metricas", tipo = "text", nulo = true, descripcion = "Versión del formato de métricas.", origen = "metricas.json: schema_version" },
+  { nombre = "protocolo_metricas_id", tipo = "text", nulo = true, descripcion = "Protocolo con que se calcularon las métricas.", origen = "metricas.json: protocol_id" },
+  { nombre = "estado_protocolo_metricas", tipo = "text", nulo = true, descripcion = "draft o frozen.", origen = "metricas.json: protocol_status", regla = "estado_protocolo_metricas IS NULL OR estado_protocolo_metricas IN ('draft','frozen')" },
+  { nombre = "definicion_demora", tipo = "text", nulo = true, descripcion = "Definición de demora usada.", origen = "metricas.json: delay_definition" },
+  { nombre = "origen_caso", tipo = "text", nulo = true, descripcion = "synthetic o field.", origen = "metricas.json: case_origin", regla = "origen_caso IS NULL OR origen_caso IN ('synthetic','field')" },
+  { nombre = "origen_demanda", tipo = "text", nulo = true, descripcion = "synthetic o field.", origen = "metricas.json: demand_origin", regla = "origen_demanda IS NULL OR origen_demanda IN ('synthetic','field')" },
+  { nombre = "origen_evidencia", tipo = "text", nulo = true, descripcion = "field solo si caso y demanda lo son; si no, synthetic (auditoría A03).", origen = "metricas.json: evidence_origin", regla = "origen_evidencia IS NULL OR origen_evidencia IN ('synthetic','field')" },
+  { nombre = "cohorte_solicitada", tipo = "integer", nulo = true, unidad = "veh", descripcion = "Vehículos de la cohorte pedidos.", origen = "metricas.json: cohort.total.requested" },
+  { nombre = "cohorte_terminada", tipo = "integer", nulo = true, unidad = "veh", descripcion = "Vehículos de la cohorte que terminaron.", origen = "metricas.json: cohort.total.finished" },
+  { nombre = "cohorte_sin_terminar", tipo = "integer", nulo = true, unidad = "veh", descripcion = "Vehículos de la cohorte que no terminaron.", origen = "metricas.json: cohort.total.unfinished" },
+  { nombre = "cohorte_no_insertada", tipo = "integer", nulo = true, unidad = "veh", descripcion = "Vehículos de la cohorte que no entraron.", origen = "metricas.json: cohort.total.not_inserted" },
+  { nombre = "estado_demora", tipo = "text", nulo = true, descripcion = "complete (cohorte completa), censored (incompleta: solo cota inferior) o empty (sin vehículos).", origen = "metricas.json: cohort.total.status", regla = "estado_demora IS NULL OR estado_demora IN ('complete','censored','empty')" },
+  { nombre = "suma_demora_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Suma de demoras de la cohorte.", origen = "metricas.json: cohort.total.sum_delay_s" },
+  { nombre = "demora_media_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Demora media por vehículo (pérdida de tiempo más espera de salida); vacía si la cohorte no terminó.", origen = "metricas.json: cohort.total.mean_delay_s" },
+  { nombre = "perdida_tiempo_media_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Media de la pérdida de tiempo (timeLoss).", origen = "metricas.json: cohort.total.mean_time_loss_s" },
+  { nombre = "demora_salida_media_cohorte_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Media de la espera de salida de la cohorte.", origen = "metricas.json: cohort.total.mean_depart_delay_s" },
+  { nombre = "cota_inf_demora_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Demora media mínima cuando la cohorte no terminó.", origen = "metricas.json: cohort.total.lower_bound_mean_delay_s" },
+  { nombre = "cota_inf_perdida_tiempo_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Cota inferior de la pérdida de tiempo.", origen = "metricas.json: cohort.total.lower_bound_mean_time_loss_s" },
+  { nombre = "cota_inf_demora_salida_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Cota inferior de la espera de salida.", origen = "metricas.json: cohort.total.lower_bound_mean_depart_delay_s" },
+  { nombre = "vehiculos_calentamiento", tipo = "integer", nulo = true, unidad = "veh", descripcion = "Vehículos del calentamiento (fuera de la cohorte).", origen = "metricas.json: cohort.warmup_vehicles" },
+  { nombre = "zona_disponible", tipo = "boolean", nulo = true, descripcion = "Si hay datos de la zona (cola y detenciones).", origen = "metricas.json: zone (presencia)" },
+  { nombre = "motivo_zona_no_disponible", tipo = "text", nulo = true, descripcion = "Por qué no hay datos de la zona.", origen = "metricas.json: zone_unavailable" },
+  { nombre = "carriles_zona", tipo = "jsonb", nulo = true, descripcion = "Carriles medidos.", origen = "metricas.json: zone.settings.zone_lane_ids" },
+  { nombre = "umbral_cola_mps", tipo = "double precision", nulo = true, unidad = "m/s", descripcion = "Umbral de cola usado.", origen = "metricas.json: zone.settings.queue_speed_threshold_mps" },
+  { nombre = "umbral_detencion_mps", tipo = "double precision", nulo = true, unidad = "m/s", descripcion = "Umbral de detención usado.", origen = "metricas.json: zone.settings.stop_speed_threshold_mps" },
+  { nombre = "muestreo_cola_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Muestreo de la cola.", origen = "metricas.json: zone.settings.queue_sampling_s" },
+  { nombre = "inicio_medicion_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Inicio de la medición de la zona.", origen = "metricas.json: zone.settings.measure_start_s" },
+  { nombre = "fin_medicion_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Fin de la medición de la zona.", origen = "metricas.json: zone.settings.measure_end_s" },
+  { nombre = "estado_cola", tipo = "text", nulo = true, descripcion = "complete, incomplete o empty.", origen = "metricas.json: zone.queue.status", regla = "estado_cola IS NULL OR estado_cola IN ('complete','incomplete','empty')" },
+  { nombre = "ticks_esperados", tipo = "integer", nulo = true, descripcion = "Muestras de cola esperadas.", origen = "metricas.json: zone.queue.ticks_expected" },
+  { nombre = "ticks_observados", tipo = "integer", nulo = true, descripcion = "Muestras de cola observadas.", origen = "metricas.json: zone.queue.ticks_observed" },
+  { nombre = "cobertura_cola", tipo = "double precision", nulo = true, unidad = "fracción", descripcion = "Observadas entre esperadas.", origen = "metricas.json: zone.queue.coverage" },
+  { nombre = "vehiculo_ticks", tipo = "bigint", nulo = true, descripcion = "Suma de vehículos en cola en todas las muestras.", origen = "metricas.json: zone.queue.vehicle_ticks" },
+  { nombre = "cola_media_veh", tipo = "double precision", nulo = true, unidad = "veh", descripcion = "Cola media en la zona.", origen = "metricas.json: zone.queue.mean_vehicles" },
+  { nombre = "cola_maxima_veh", tipo = "integer", nulo = true, unidad = "veh", descripcion = "Cola máxima en la zona.", origen = "metricas.json: zone.queue.max_vehicles" },
+  { nombre = "estado_detenciones", tipo = "text", nulo = true, descripcion = "complete, censored o empty.", origen = "metricas.json: zone.stops.status", regla = "estado_detenciones IS NULL OR estado_detenciones IN ('complete','censored','empty')" },
+  { nombre = "detenciones_solicitados", tipo = "integer", nulo = true, unidad = "veh", descripcion = "Vehículos considerados para detenciones.", origen = "metricas.json: zone.stops.requested" },
+  { nombre = "detenciones_total", tipo = "integer", nulo = true, descripcion = "Detenciones totales.", origen = "metricas.json: zone.stops.total_stops" },
+  { nombre = "detenciones_media", tipo = "double precision", nulo = true, descripcion = "Detenciones por vehículo.", origen = "metricas.json: zone.stops.mean_stops" },
+  { nombre = "cota_inf_detenciones", tipo = "double precision", nulo = true, descripcion = "Cota inferior de detenciones por vehículo.", origen = "metricas.json: zone.stops.lower_bound_mean_stops" },
+  { nombre = "pasos_fcd", tipo = "integer", nulo = true, descripcion = "Pasos leídos del archivo de posiciones.", origen = "metricas.json: zone.fcd_steps" },
+]
+claves_foraneas = [
+  { columnas = ["run_id"], referencia = "simulacion.corridas", referidas = ["run_id"], uno_a_uno = true },
+  { columnas = ["artefacto_metricas_id"], referencia = "control.artefactos", referidas = ["artefacto_id"], opcional = true },
+  { columnas = ["protocolo_metricas_id"], referencia = "experimento.protocolos", referidas = ["protocolo_id"], opcional = true },
+]
+reglas = [
+  { nombre = "demora_completa", sql = "estado_demora IS DISTINCT FROM 'complete' OR demora_media_s IS NOT NULL", descripcion = "Con cohorte completa hay demora media." },
+  { nombre = "demora_censurada", sql = "estado_demora IS DISTINCT FROM 'censored' OR (demora_media_s IS NULL AND cota_inf_demora_s IS NOT NULL)", descripcion = "Con cohorte incompleta no hay media: solo la cota inferior." },
+  { nombre = "zona_con_motivo", sql = "zona_disponible IS DISTINCT FROM false OR motivo_zona_no_disponible IS NOT NULL", descripcion = "Si falta la zona, se dice por qué." },
+]
+
+[[tablas]]
+esquema = "simulacion"
+nombre = "resultados_acceso"
+descripcion = "Demora, cola y detenciones por acceso del cruce (I6 por acceso)."
+grano = "Una fila por corrida y acceso"
+origen = "metricas.json: cohort.by_access, zone.queue_by_access, zone.stops_by_access"
+fuente = "pendiente F2 (métricas publicadas)"
+filas_dev16 = "unas 33 000"
+cegado = "padre:simulacion.corridas(run_id)"
+clave_primaria = ["run_id", "acceso"]
+columnas = [
+  { nombre = "run_id", tipo = "text", descripcion = "Corrida.", origen = "metricas.json: run_id" },
+  { nombre = "acceso", tipo = "text", descripcion = "Acceso: approach_id del caso o, para carriles de la zona sin movimiento, su calle.", origen = "metricas.json (clave del acceso)" },
+  { nombre = "solicitados", tipo = "integer", unidad = "veh", descripcion = "Vehículos de la cohorte por este acceso.", origen = "by_access: requested" },
+  { nombre = "terminados", tipo = "integer", unidad = "veh", descripcion = "Terminados.", origen = "by_access: finished" },
+  { nombre = "sin_terminar", tipo = "integer", unidad = "veh", descripcion = "Sin terminar.", origen = "by_access: unfinished" },
+  { nombre = "no_insertados", tipo = "integer", unidad = "veh", descripcion = "No insertados.", origen = "by_access: not_inserted" },
+  { nombre = "estado_demora", tipo = "text", descripcion = "complete, censored o empty.", origen = "by_access: status", regla = "estado_demora IN ('complete','censored','empty')" },
+  { nombre = "suma_demora_s", tipo = "double precision", unidad = "s", descripcion = "Suma de demoras.", origen = "by_access: sum_delay_s" },
+  { nombre = "demora_media_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Demora media; vacía si está censurada.", origen = "by_access: mean_delay_s" },
+  { nombre = "perdida_tiempo_media_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Pérdida de tiempo media.", origen = "by_access: mean_time_loss_s" },
+  { nombre = "demora_salida_media_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Espera de salida media.", origen = "by_access: mean_depart_delay_s" },
+  { nombre = "cota_inf_demora_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Cota inferior de la demora.", origen = "by_access: lower_bound_mean_delay_s" },
+  { nombre = "cota_inf_perdida_tiempo_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Cota inferior de la pérdida de tiempo.", origen = "by_access: lower_bound_mean_time_loss_s" },
+  { nombre = "cota_inf_demora_salida_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Cota inferior de la espera de salida.", origen = "by_access: lower_bound_mean_depart_delay_s" },
+  { nombre = "estado_cola", tipo = "text", nulo = true, descripcion = "complete, incomplete o empty; vacío sin zona.", origen = "queue_by_access: status", regla = "estado_cola IS NULL OR estado_cola IN ('complete','incomplete','empty')" },
+  { nombre = "ticks_esperados", tipo = "integer", nulo = true, descripcion = "Muestras esperadas.", origen = "queue_by_access: ticks_expected" },
+  { nombre = "ticks_observados", tipo = "integer", nulo = true, descripcion = "Muestras observadas.", origen = "queue_by_access: ticks_observed" },
+  { nombre = "cobertura_cola", tipo = "double precision", nulo = true, unidad = "fracción", descripcion = "Cobertura de la cola.", origen = "queue_by_access: coverage" },
+  { nombre = "vehiculo_ticks", tipo = "bigint", nulo = true, descripcion = "Suma de vehículos en cola.", origen = "queue_by_access: vehicle_ticks" },
+  { nombre = "cola_media_veh", tipo = "double precision", nulo = true, unidad = "veh", descripcion = "Cola media.", origen = "queue_by_access: mean_vehicles" },
+  { nombre = "cola_maxima_veh", tipo = "integer", nulo = true, unidad = "veh", descripcion = "Cola máxima.", origen = "queue_by_access: max_vehicles" },
+  { nombre = "estado_detenciones", tipo = "text", nulo = true, descripcion = "complete, censored o empty.", origen = "stops_by_access: status", regla = "estado_detenciones IS NULL OR estado_detenciones IN ('complete','censored','empty')" },
+  { nombre = "detenciones_solicitados", tipo = "integer", nulo = true, unidad = "veh", descripcion = "Vehículos considerados.", origen = "stops_by_access: requested" },
+  { nombre = "detenciones_total", tipo = "integer", nulo = true, descripcion = "Detenciones.", origen = "stops_by_access: total_stops" },
+  { nombre = "detenciones_media", tipo = "double precision", nulo = true, descripcion = "Detenciones por vehículo.", origen = "stops_by_access: mean_stops" },
+  { nombre = "cota_inf_detenciones", tipo = "double precision", nulo = true, descripcion = "Cota inferior de detenciones.", origen = "stops_by_access: lower_bound_mean_stops" },
+]
+claves_foraneas = [
+  { columnas = ["run_id"], referencia = "simulacion.corridas", referidas = ["run_id"] },
+]
+
+[[tablas]]
+esquema = "simulacion"
+nombre = "resultados_movimiento"
+descripcion = "Demora por movimiento del cruce."
+grano = "Una fila por corrida y movimiento"
+origen = "metricas.json: cohort.by_movement"
+fuente = "pendiente F2 (métricas publicadas)"
+filas_dev16 = "unas 108 000"
+cegado = "padre:simulacion.corridas(run_id)"
+clave_primaria = ["run_id", "movimiento_id"]
+columnas = [
+  { nombre = "run_id", tipo = "text", descripcion = "Corrida.", origen = "metricas.json: run_id" },
+  { nombre = "caso_id", tipo = "text", descripcion = "Caso.", origen = "metricas.json: case_id" },
+  { nombre = "caso_version", tipo = "text", descripcion = "Versión del caso.", origen = "metricas.json: case_version" },
+  { nombre = "movimiento_id", tipo = "text", descripcion = "Movimiento.", origen = "by_movement (clave)" },
+  { nombre = "solicitados", tipo = "integer", unidad = "veh", descripcion = "Vehículos de la cohorte en el movimiento.", origen = "by_movement: requested" },
+  { nombre = "terminados", tipo = "integer", unidad = "veh", descripcion = "Terminados.", origen = "by_movement: finished" },
+  { nombre = "sin_terminar", tipo = "integer", unidad = "veh", descripcion = "Sin terminar.", origen = "by_movement: unfinished" },
+  { nombre = "no_insertados", tipo = "integer", unidad = "veh", descripcion = "No insertados.", origen = "by_movement: not_inserted" },
+  { nombre = "estado_demora", tipo = "text", descripcion = "complete, censored o empty.", origen = "by_movement: status", regla = "estado_demora IN ('complete','censored','empty')" },
+  { nombre = "suma_demora_s", tipo = "double precision", unidad = "s", descripcion = "Suma de demoras.", origen = "by_movement: sum_delay_s" },
+  { nombre = "demora_media_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Demora media.", origen = "by_movement: mean_delay_s" },
+  { nombre = "perdida_tiempo_media_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Pérdida de tiempo media.", origen = "by_movement: mean_time_loss_s" },
+  { nombre = "demora_salida_media_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Espera de salida media.", origen = "by_movement: mean_depart_delay_s" },
+  { nombre = "cota_inf_demora_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Cota inferior de la demora.", origen = "by_movement: lower_bound_mean_delay_s" },
+  { nombre = "cota_inf_perdida_tiempo_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Cota inferior de la pérdida de tiempo.", origen = "by_movement: lower_bound_mean_time_loss_s" },
+  { nombre = "cota_inf_demora_salida_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Cota inferior de la espera de salida.", origen = "by_movement: lower_bound_mean_depart_delay_s" },
+]
+claves_foraneas = [
+  { columnas = ["run_id"], referencia = "simulacion.corridas", referidas = ["run_id"] },
+  { columnas = ["caso_id", "caso_version", "movimiento_id"], referencia = "caso.movimientos", referidas = ["caso_id", "caso_version", "movimiento_id"] },
+]
+
+[[tablas]]
+esquema = "simulacion"
+nombre = "vehiculos"
+descripcion = "Cada vehículo de una corrida: qué pidió, qué le pasó y cuánto tiempo perdió."
+grano = "Una fila por corrida y vehículo (unas 1 780 por corrida)"
+origen = "outputs/cohorte_conciliada.csv, outputs/tripinfo.xml y metricas.json (cohort.vehicles y zone.vehicle_stops)"
+fuente = "existe (cohorte y tripinfo); columnas de métricas pendientes de F2"
+filas_dev16 = "unos 8,4 millones"
+cegado = "padre:simulacion.corridas(run_id)"
+clave_primaria = ["run_id", "vehiculo_id"]
+columnas = [
+  { nombre = "run_id", tipo = "text", descripcion = "Corrida.", origen = "carpeta de la corrida" },
+  { nombre = "vehiculo_id", tipo = "text", descripcion = "Identificador del vehículo en SUMO.", origen = "cohorte_conciliada.csv: vehicle_id" },
+  { nombre = "caso_id", tipo = "text", descripcion = "Caso.", origen = "manifest.json: case_id" },
+  { nombre = "caso_version", tipo = "text", descripcion = "Versión del caso.", origen = "manifest.json: case_version" },
+  { nombre = "movimiento_id", tipo = "text", descripcion = "Movimiento que realiza.", origen = "cohorte_conciliada.csv: movement_id" },
+  { nombre = "clase_id", tipo = "text", descripcion = "Clase de vehículo.", origen = "cohorte_conciliada.csv: vehicle_class" },
+  { nombre = "en_cohorte", tipo = "boolean", descripcion = "Si cuenta para la demora oficial (salida pedida dentro de la ventana de medición).", origen = "cohorte_conciliada.csv: en_cohorte" },
+  { nombre = "salida_programada_s", tipo = "double precision", unidad = "s", descripcion = "Hora de salida pedida.", origen = "cohorte_conciliada.csv: depart_programada_s" },
+  { nombre = "estado", tipo = "text", descripcion = "finished (terminó), unfinished (no terminó) o not_inserted (no entró).", origen = "cohorte_conciliada.csv: estado", regla = "estado IN ('finished','unfinished','not_inserted')" },
+  { nombre = "entrada_real_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Hora en que entró; vacía si no entró.", origen = "cohorte_conciliada.csv: entrada_real_s" },
+  { nombre = "llegada_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Hora de llegada; vacía si no terminó.", origen = "cohorte_conciliada.csv: llegada_s" },
+  { nombre = "carril_salida", tipo = "text", nulo = true, descripcion = "Carril donde entró.", origen = "tripinfo.xml: departLane" },
+  { nombre = "demora_salida_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "departDelay: espera antes de entrar.", origen = "tripinfo.xml: departDelay" },
+  { nombre = "carril_llegada", tipo = "text", nulo = true, descripcion = "Carril donde terminó.", origen = "tripinfo.xml: arrivalLane" },
+  { nombre = "duracion_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Duración del viaje.", origen = "tripinfo.xml: duration" },
+  { nombre = "recorrido_m", tipo = "double precision", nulo = true, unidad = "m", descripcion = "Largo del recorrido.", origen = "tripinfo.xml: routeLength" },
+  { nombre = "espera_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "waitingTime: tiempo casi detenido. No es la demora de control.", origen = "tripinfo.xml: waitingTime" },
+  { nombre = "esperas", tipo = "integer", nulo = true, descripcion = "waitingCount: veces que quedó casi detenido.", origen = "tripinfo.xml: waitingCount" },
+  { nombre = "tiempo_detenido_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "stopTime: tiempo en paradas programadas.", origen = "tripinfo.xml: stopTime" },
+  { nombre = "perdida_tiempo_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "timeLoss: tiempo perdido por ir más lento que la velocidad ideal.", origen = "tripinfo.xml: timeLoss" },
+  { nombre = "factor_velocidad", tipo = "double precision", nulo = true, descripcion = "speedFactor del conductor.", origen = "tripinfo.xml: speedFactor" },
+  { nombre = "tipo_sumo", tipo = "text", nulo = true, descripcion = "vType de SUMO.", origen = "tripinfo.xml: vType" },
+  { nombre = "vaporizado", tipo = "boolean", nulo = true, descripcion = "Si SUMO lo retiró.", origen = "tripinfo.xml: vaporized" },
+  { nombre = "acceso", tipo = "text", nulo = true, descripcion = "Acceso del movimiento; vacío fuera de la cohorte.", origen = "metricas.json: cohort.vehicles[].access_id" },
+  { nombre = "perdida_tiempo_cohorte_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Pérdida de tiempo usada en la demora oficial (incluye viajes sin terminar hasta el fin).", origen = "metricas.json: cohort.vehicles[].time_loss_s" },
+  { nombre = "demora_salida_cohorte_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Espera de salida usada en la demora oficial.", origen = "metricas.json: cohort.vehicles[].depart_delay_s" },
+  { nombre = "fuente_demora_salida", tipo = "text", nulo = true, descripcion = "sumo (medida) o schedule (calculada con el horario, si no entró).", origen = "metricas.json: cohort.vehicles[].depart_delay_source", regla = "fuente_demora_salida IS NULL OR fuente_demora_salida IN ('sumo','schedule')" },
+  { nombre = "detenciones", tipo = "integer", nulo = true, descripcion = "Detenciones del vehículo en la zona; vacío fuera de la cohorte o sin zona.", origen = "metricas.json: zone.vehicle_stops" },
+]
+claves_foraneas = [
+  { columnas = ["run_id"], referencia = "simulacion.corridas", referidas = ["run_id"] },
+  { columnas = ["caso_id", "caso_version", "movimiento_id"], referencia = "caso.movimientos", referidas = ["caso_id", "caso_version", "movimiento_id"] },
+  { columnas = ["caso_id", "caso_version", "clase_id"], referencia = "caso.tipos_vehiculo", referidas = ["caso_id", "caso_version", "clase_id"] },
+]
+reglas = [
+  { nombre = "terminado_con_llegada", sql = "estado <> 'finished' OR llegada_s IS NOT NULL", descripcion = "Un vehículo que terminó tiene hora de llegada." },
+  { nombre = "no_insertado_sin_entrada", sql = "estado <> 'not_inserted' OR entrada_real_s IS NULL", descripcion = "Un vehículo que no entró no tiene hora de entrada." },
+]
+
+[[tablas]]
+esquema = "simulacion"
+nombre = "eventos"
+descripcion = "Teletransportes, choques, avisos y errores del registro de SUMO."
+grano = "Una fila por línea relevante del registro"
+origen = "outputs/sumo.log"
+fuente = "existe"
+filas_dev16 = "miles"
+cegado = "padre:simulacion.corridas(run_id)"
+clave_primaria = ["run_id", "orden"]
+columnas = [
+  { nombre = "run_id", tipo = "text", descripcion = "Corrida.", origen = "carpeta de la corrida" },
+  { nombre = "orden", tipo = "integer", descripcion = "Posición de la línea en el registro.", origen = "sumo.log (posición)", regla = "orden >= 1" },
+  { nombre = "tiempo_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Momento de simulación; vacío si la línea no lo trae.", origen = "sumo.log: time=" },
+  { nombre = "tipo", tipo = "text", descripcion = "teleport, collision, warning o error.", origen = "sumo.log (clasificación)", regla = "tipo IN ('teleport','collision','warning','error')" },
+  { nombre = "subtipo", tipo = "text", nulo = true, descripcion = "Causa: jam, yield, wrong_lane, o la etapa del choque.", origen = "sumo.log" },
+  { nombre = "vehiculo_id", tipo = "text", nulo = true, descripcion = "Vehículo involucrado.", origen = "sumo.log" },
+  { nombre = "otro_vehiculo_id", tipo = "text", nulo = true, descripcion = "Segundo vehículo en un choque.", origen = "sumo.log" },
+  { nombre = "carril_id", tipo = "text", nulo = true, descripcion = "Carril.", origen = "sumo.log: lane=" },
+  { nombre = "texto", tipo = "text", descripcion = "Línea original, guardada tal cual y escapada al mostrarla.", origen = "sumo.log" },
+]
+claves_foraneas = [
+  { columnas = ["run_id"], referencia = "simulacion.corridas", referidas = ["run_id"] },
+]
+
+[[tablas]]
+esquema = "simulacion"
+nombre = "cola_segundo"
+descripcion = "Vehículos detenidos en cada acceso, en cada muestra (cada segundo con el protocolo actual)."
+grano = "Una fila por corrida, acceso y muestra"
+origen = "metricas.json: serie de cola por acceso (se agrega en DEV31 F2, con la misma regla de DEV19)"
+fuente = "pendiente F2"
+filas_dev16 = "unos 69 millones"
+cegado = "padre:simulacion.corridas(run_id)"
+clave_primaria = ["run_id", "acceso", "tiempo_s"]
+columnas = [
+  { nombre = "run_id", tipo = "text", descripcion = "Corrida.", origen = "metricas.json: run_id" },
+  { nombre = "acceso", tipo = "text", descripcion = "Acceso.", origen = "metricas.json (serie por acceso)" },
+  { nombre = "tiempo_s", tipo = "double precision", unidad = "s", descripcion = "Momento de la muestra.", origen = "metricas.json (serie)", regla = "tiempo_s >= 0" },
+  { nombre = "vehiculos_en_cola", tipo = "integer", unidad = "veh", descripcion = "Vehículos a velocidad menor o igual que el umbral de cola, en los carriles de aproximación.", origen = "metricas.json (serie)", regla = "vehiculos_en_cola >= 0" },
+  { nombre = "en_ventana", tipo = "boolean", descripcion = "Si la muestra está dentro del intervalo de medición.", origen = "metricas.json (serie)" },
+]
+claves_foraneas = [
+  { columnas = ["run_id"], referencia = "simulacion.corridas", referidas = ["run_id"] },
+]
+
+[[tablas]]
+esquema = "simulacion"
+nombre = "busquedas"
+descripcion = "Búsqueda del mejor plan para un escenario: presupuesto, semillas, identidad y resultado de la selección."
+grano = "Una fila por búsqueda"
+origen = "datos/derivados/referencias/<caso>/<carpeta>/: traza.json, cobertura.json y manifiesto.json"
+fuente = "existe"
+filas_dev16 = "unas 46"
+cegado = "raiz:escenario_id"
+clave_primaria = ["busqueda_id"]
+columnas = [
+  { nombre = "busqueda_id", tipo = "text", descripcion = "Identificador de la búsqueda.", origen = "label.json: search_run_id" },
+  { nombre = "escenario_id", tipo = "text", descripcion = "Escenario.", origen = "traza.json: identity.scenario_id" },
+  { nombre = "caso_id", tipo = "text", descripcion = "Caso.", origen = "traza.json: identity.case_id" },
+  { nombre = "caso_version", tipo = "text", descripcion = "Versión del caso.", origen = "traza.json: identity.case_version" },
+  { nombre = "protocolo_id", tipo = "text", descripcion = "Protocolo.", origen = "traza.json: identity.protocol_id" },
+  { nombre = "estado_protocolo", tipo = "text", descripcion = "draft o frozen al momento de buscar.", origen = "traza.json: identity.protocol_status", regla = "estado_protocolo IN ('draft','frozen')" },
+  { nombre = "metodo", tipo = "text", descripcion = "grid (cuadrícula) o sampling (muestreo).", origen = "traza.json: candidates.method", regla = "metodo IN ('grid','sampling')" },
+  { nombre = "version_busqueda", tipo = "text", descripcion = "Versión del algoritmo de búsqueda.", origen = "traza.json: candidates.search_version" },
+  { nombre = "version_reglas", tipo = "text", descripcion = "Huella de las reglas de factibilidad.", origen = "traza.json: candidates.rules_version" },
+  { nombre = "version_identidad", tipo = "text", nulo = true, descripcion = "Versión de la identidad (1.0.0 o 2.0.0 tras A01).", origen = "manifiesto.json: identity_version" },
+  { nombre = "version_bitacora", tipo = "text", nulo = true, descripcion = "Versión de la bitácora.", origen = "traza.json: identity.journal_version" },
+  { nombre = "semilla", tipo = "integer", descripcion = "Semilla del generador de candidatos.", origen = "traza.json: candidates.seed" },
+  { nombre = "presupuesto", tipo = "integer", descripcion = "Candidatos que pueden consumir presupuesto.", origen = "traza.json: candidates.budget", regla = "presupuesto >= 0" },
+  { nombre = "cuenta_presupuesto", tipo = "text", descripcion = "Qué cuenta como presupuesto.", origen = "traza.json: candidates.budget_counts" },
+  { nombre = "presupuesto_usado", tipo = "integer", descripcion = "Candidatos que lo consumieron.", origen = "traza.json: candidates.budget_used", regla = "presupuesto_usado >= 0" },
+  { nombre = "limite_intentos", tipo = "integer", descripcion = "Máximo de planes generados.", origen = "traza.json: candidates.attempt_limit" },
+  { nombre = "intentos", tipo = "integer", descripcion = "Planes generados.", origen = "traza.json: candidates.attempts", regla = "intentos >= 0" },
+  { nombre = "duplicados", tipo = "integer", descripcion = "Planes repetidos descartados.", origen = "traza.json: candidates.duplicates", regla = "duplicados >= 0" },
+  { nombre = "inviables", tipo = "integer", descripcion = "Planes descartados por reglas.", origen = "traza.json: candidates.infeasible", regla = "inviables >= 0" },
+  { nombre = "inviables_por_regla", tipo = "jsonb", descripcion = "Descartes por cada regla.", origen = "traza.json: candidates.infeasible_by_rule" },
+  { nombre = "cuadricula_factible", tipo = "bigint", nulo = true, descripcion = "Planes factibles de la cuadrícula; vacío con muestreo.", origen = "traza.json: candidates.grid_feasible" },
+  { nombre = "limite_cuadricula", tipo = "bigint", descripcion = "Tope de la cuadrícula.", origen = "traza.json: candidates.grid_scan_limit" },
+  { nombre = "tamano_espacio", tipo = "bigint", nulo = true, descripcion = "Planes posibles.", origen = "traza.json: candidates.space_size" },
+  { nombre = "agotado", tipo = "boolean", descripcion = "Si se agotaron los intentos.", origen = "traza.json: candidates.exhausted" },
+  { nombre = "estado_plan_vigente", tipo = "text", descripcion = "absent, included, excluded o duplicate.", origen = "traza.json: candidates.current_plan.status", regla = "estado_plan_vigente IN ('absent','included','excluded','duplicate')" },
+  { nombre = "estado_webster", tipo = "text", nulo = true, descripcion = "absent, included, excluded o duplicate; vacío en búsquedas anteriores a DEV15 F4.", origen = "traza.json: candidates (Webster)", regla = "estado_webster IS NULL OR estado_webster IN ('absent','included','excluded','duplicate')" },
+  { nombre = "finalistas", tipo = "integer", descripcion = "Candidatos reevaluados.", origen = "traza.json: identity.finalist_count" },
+  { nombre = "epsilon_empate_s", tipo = "double precision", unidad = "s", descripcion = "Umbral de empate.", origen = "traza.json: identity.tie_epsilon_s" },
+  { nombre = "semillas_busqueda", tipo = "jsonb", descripcion = "Semillas de la etapa de búsqueda.", origen = "traza.json: identity.seeds_search" },
+  { nombre = "semillas_finalistas", tipo = "jsonb", descripcion = "Semillas de finalistas.", origen = "traza.json: identity.seeds_finalists" },
+  { nombre = "opciones_sumo", tipo = "jsonb", descripcion = "Opciones de SUMO.", origen = "traza.json: identity.sumo_options" },
+  { nombre = "huella_candidatos", tipo = "huella", descripcion = "Huella de la lista de candidatos.", origen = "traza.json: identity.candidates_sha256" },
+  { nombre = "regla_seleccion", tipo = "text", descripcion = "Regla con que se eligió (texto y versión).", origen = "traza.json: selection.rule" },
+  { nombre = "estado_seleccion", tipo = "text", descripcion = "reference (hay ganador) o no_reference.", origen = "traza.json: selection.status", regla = "estado_seleccion IN ('reference','no_reference')" },
+  { nombre = "motivo_sin_referencia", tipo = "text", nulo = true, descripcion = "no_candidates, no_eligible_candidate o no_eligible_finalist.", origen = "traza.json: selection.reason", regla = "motivo_sin_referencia IS NULL OR motivo_sin_referencia IN ('no_candidates','no_eligible_candidate','no_eligible_finalist')" },
+  { nombre = "cobertura", tipo = "jsonb", descripcion = "Elegibles y descartados por motivo, en búsqueda y finalistas.", origen = "cobertura.json" },
+  { nombre = "simulaciones", tipo = "integer", descripcion = "Corridas usadas.", origen = "traza.json: simulation_count", regla = "simulaciones >= 0" },
+  { nombre = "interrumpida", tipo = "boolean", descripcion = "Si se cortó antes de terminar.", origen = "traza.json: interrupted" },
+]
+claves_foraneas = [
+  { columnas = ["escenario_id"], referencia = "experimento.escenarios", referidas = ["escenario_id"] },
+  { columnas = ["caso_id", "caso_version"], referencia = "caso.casos", referidas = ["caso_id", "caso_version"] },
+  { columnas = ["protocolo_id"], referencia = "experimento.protocolos", referidas = ["protocolo_id"] },
+]
+reglas = [
+  { nombre = "motivo_si_sin_referencia", sql = "(estado_seleccion = 'no_reference') = (motivo_sin_referencia IS NOT NULL)", descripcion = "Sin ganador, se dice por qué." },
+]
+
+[[tablas]]
+esquema = "simulacion"
+nombre = "candidatos"
+descripcion = "Cada plan que evaluó una búsqueda, con su resultado en la etapa de búsqueda y, si llegó, en la de finalistas."
+grano = "Una fila por búsqueda y candidato"
+origen = "traza.json: candidates.candidates, search_scores, finalist_scores y selection"
+fuente = "existe"
+filas_dev16 = "unas 1 000"
+cegado = "padre:simulacion.busquedas(busqueda_id)"
+clave_primaria = ["busqueda_id", "candidato_id"]
+columnas = [
+  { nombre = "busqueda_id", tipo = "text", descripcion = "Búsqueda.", origen = "label.json: search_run_id" },
+  { nombre = "candidato_id", tipo = "text", descripcion = "Identificador del candidato.", origen = "traza.json: candidates[].candidate_id" },
+  { nombre = "plan_id", tipo = "huella", descripcion = "Plan evaluado.", origen = "traza.json: candidates[].durations_s" },
+  { nombre = "origen", tipo = "text", descripcion = "grid, sampled, current_plan o webster.", origen = "traza.json: candidates[].origin", regla = "origen IN ('grid','sampled','current_plan','webster')" },
+  { nombre = "consume_presupuesto", tipo = "boolean", descripcion = "Si cuenta para el presupuesto.", origen = "traza.json: candidates[].consumes_budget" },
+  { nombre = "orden", tipo = "integer", descripcion = "Posición en la lista de candidatos.", origen = "traza.json (posición)", regla = "orden >= 0" },
+  { nombre = "elegible_busqueda", tipo = "boolean", nulo = true, descripcion = "Si fue elegible en la búsqueda.", origen = "search_scores[].eligible" },
+  { nombre = "puntaje_busqueda_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Demora media en la búsqueda.", origen = "search_scores[].score_s" },
+  { nombre = "cola_media_busqueda_veh", tipo = "double precision", nulo = true, unidad = "veh", descripcion = "Cola media en la búsqueda.", origen = "search_scores[].mean_queue_veh" },
+  { nombre = "detenciones_media_busqueda", tipo = "double precision", nulo = true, descripcion = "Detenciones por vehículo en la búsqueda.", origen = "search_scores[].mean_stops" },
+  { nombre = "problemas_busqueda", tipo = "jsonb", nulo = true, descripcion = "Problemas por tipo en la búsqueda.", origen = "search_scores[].problems" },
+  { nombre = "semillas_faltantes_busqueda", tipo = "jsonb", nulo = true, descripcion = "Semillas sin resultado en la búsqueda.", origen = "search_scores[].missing_seeds" },
+  { nombre = "posicion_busqueda", tipo = "integer", nulo = true, descripcion = "Lugar en el ranking de la búsqueda.", origen = "selection.search_ranking" },
+  { nombre = "finalista", tipo = "boolean", descripcion = "Si pasó a la reevaluación.", origen = "selection.finalists" },
+  { nombre = "elegible_finalistas", tipo = "boolean", nulo = true, descripcion = "Si fue elegible como finalista.", origen = "finalist_scores[].eligible" },
+  { nombre = "puntaje_finalistas_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Demora media como finalista.", origen = "finalist_scores[].score_s" },
+  { nombre = "cola_media_finalistas_veh", tipo = "double precision", nulo = true, unidad = "veh", descripcion = "Cola media como finalista.", origen = "finalist_scores[].mean_queue_veh" },
+  { nombre = "detenciones_media_finalistas", tipo = "double precision", nulo = true, descripcion = "Detenciones como finalista.", origen = "finalist_scores[].mean_stops" },
+  { nombre = "problemas_finalistas", tipo = "jsonb", nulo = true, descripcion = "Problemas por tipo como finalista.", origen = "finalist_scores[].problems" },
+  { nombre = "semillas_faltantes_finalistas", tipo = "jsonb", nulo = true, descripcion = "Semillas sin resultado como finalista.", origen = "finalist_scores[].missing_seeds" },
+  { nombre = "posicion_finalistas", tipo = "integer", nulo = true, descripcion = "Lugar en el ranking de finalistas.", origen = "selection.finalist_ranking" },
+  { nombre = "ganador", tipo = "boolean", descripcion = "Si es el plan elegido como etiqueta.", origen = "selection.winner" },
+]
+claves_foraneas = [
+  { columnas = ["busqueda_id"], referencia = "simulacion.busquedas", referidas = ["busqueda_id"] },
+  { columnas = ["plan_id"], referencia = "simulacion.planes", referidas = ["plan_id"] },
+]
+reglas = [
+  { nombre = "ganador_es_finalista", sql = "NOT ganador OR (finalista AND elegible_finalistas)", descripcion = "El ganador es un finalista elegible." },
+]
+
+[[tablas]]
+esquema = "simulacion"
+nombre = "candidato_semillas"
+descripcion = "Resultado de un candidato con cada semilla, con su clasificación según la regla C."
+grano = "Una fila por candidato, etapa y semilla"
+origen = "traza.json: search_scores[].seeds y finalist_scores[].seeds"
+fuente = "existe (clase_incidente desde la regla de selección de DEV16)"
+filas_dev16 = "unas 4 700"
+cegado = "padre:simulacion.candidatos(busqueda_id,candidato_id)"
+clave_primaria = ["busqueda_id", "candidato_id", "etapa", "semilla"]
+columnas = [
+  { nombre = "busqueda_id", tipo = "text", descripcion = "Búsqueda.", origen = "label.json: search_run_id" },
+  { nombre = "candidato_id", tipo = "text", descripcion = "Candidato.", origen = "scores[].candidate_id" },
+  { nombre = "etapa", tipo = "text", descripcion = "search o finalists.", origen = "scores[].stage", regla = "etapa IN ('search','finalists')" },
+  { nombre = "semilla", tipo = "integer", descripcion = "Semilla.", origen = "seeds[].seed" },
+  { nombre = "run_id", tipo = "text", nulo = true, descripcion = "Corrida; vacía si no llegó a crearse.", origen = "seeds[].run_id" },
+  { nombre = "estado_corrida", tipo = "text", nulo = true, descripcion = "succeeded, failed o cancelled.", origen = "seeds[].run_status", regla = "estado_corrida IS NULL OR estado_corrida IN ('succeeded','failed','cancelled')" },
+  { nombre = "demora_media_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Demora media; vacía si la cohorte no terminó.", origen = "seeds[].mean_delay_s" },
+  { nombre = "cola_media_veh", tipo = "double precision", nulo = true, unidad = "veh", descripcion = "Cola media.", origen = "seeds[].mean_queue_veh" },
+  { nombre = "detenciones_media", tipo = "double precision", nulo = true, descripcion = "Detenciones por vehículo.", origen = "seeds[].mean_stops" },
+  { nombre = "teletransportes", tipo = "integer", descripcion = "Teletransportes.", origen = "seeds[].teleports", regla = "teletransportes >= 0" },
+  { nombre = "choques", tipo = "integer", descripcion = "Choques.", origen = "seeds[].collisions", regla = "choques >= 0" },
+  { nombre = "problemas", tipo = "jsonb", descripcion = "run_failed, evaluation_failed, cohort_incomplete, teleports, collisions o zone_incomplete.", origen = "seeds[].problems" },
+  { nombre = "mensaje", tipo = "text", nulo = true, descripcion = "Mensaje de error.", origen = "seeds[].message" },
+  { nombre = "clase_incidente", tipo = "text", nulo = true, descripcion = "clean (limpia), isolated_incident (incidente aislado) o collapse (colapso), según la regla C; vacía en búsquedas anteriores.", origen = "traza.json (regla de selección de DEV16)", regla = "clase_incidente IS NULL OR clase_incidente IN ('clean','isolated_incident','collapse')" },
+]
+claves_foraneas = [
+  { columnas = ["busqueda_id", "candidato_id"], referencia = "simulacion.candidatos", referidas = ["busqueda_id", "candidato_id"] },
+  { columnas = ["run_id"], referencia = "simulacion.corridas", referidas = ["run_id"], opcional = true },
+]
+
+[[tablas]]
+esquema = "simulacion"
+nombre = "etiquetas"
+descripcion = "El mejor plan encontrado para un escenario, o «sin referencia» con su motivo. Son los ejemplos de entrenamiento."
+grano = "Una fila por etiqueta"
+origen = "label.json y manifiesto.json de la carpeta de referencias"
+fuente = "existe"
+filas_dev16 = "unas 46"
+cegado = "raiz:escenario_id"
+clave_primaria = ["etiqueta_id"]
+columnas = [
+  { nombre = "etiqueta_id", tipo = "text", descripcion = "Identificador.", origen = "label.json: label_id" },
+  { nombre = "escenario_id", tipo = "text", descripcion = "Escenario.", origen = "label.json: scenario_id" },
+  { nombre = "caso_id", tipo = "text", descripcion = "Caso.", origen = "manifiesto.json: case_id" },
+  { nombre = "caso_version", tipo = "text", descripcion = "Versión del caso.", origen = "label.json: case_version" },
+  { nombre = "busqueda_id", tipo = "text", descripcion = "Búsqueda que la produjo.", origen = "label.json: search_run_id" },
+  { nombre = "protocolo_id", tipo = "text", descripcion = "Protocolo.", origen = "label.json: protocol_id" },
+  { nombre = "estado", tipo = "text", descripcion = "reference (con plan) o no_reference.", origen = "label.json: status", regla = "estado IN ('reference','no_reference')" },
+  { nombre = "plan_id", tipo = "huella", nulo = true, descripcion = "Plan ganador; vacío sin referencia.", origen = "label.json: plan.slot_durations_s" },
+  { nombre = "verdes_s", tipo = "jsonb", nulo = true, unidad = "s", descripcion = "Verde de cada grupo del plan ganador.", origen = "label.json: plan.greens_s" },
+  { nombre = "candidatos_cantidad", tipo = "integer", descripcion = "Candidatos evaluados.", origen = "label.json: candidate_count", regla = "candidatos_cantidad >= 0" },
+  { nombre = "simulaciones_cantidad", tipo = "integer", descripcion = "Corridas usadas.", origen = "label.json: simulation_count", regla = "simulaciones_cantidad >= 0" },
+  { nombre = "estado_evidencia", tipo = "text", descripcion = "fixture_only (solo prueba sintética) o evaluated.", origen = "label.json: evidence_status", regla = "estado_evidencia IN ('fixture_only','evaluated')" },
+  { nombre = "motivo", tipo = "text", nulo = true, descripcion = "Motivo de no_reference.", origen = "label.json: reason" },
+  { nombre = "red_sha256", tipo = "huella", descripcion = "Huella de la red usada.", origen = "manifiesto.json: network_sha256" },
+  { nombre = "creada_en", tipo = "timestamptz", descripcion = "Cuándo se publicó.", origen = "manifiesto.json: created_at" },
+]
+claves_foraneas = [
+  { columnas = ["escenario_id"], referencia = "experimento.escenarios", referidas = ["escenario_id"] },
+  { columnas = ["caso_id", "caso_version"], referencia = "caso.casos", referidas = ["caso_id", "caso_version"] },
+  { columnas = ["busqueda_id"], referencia = "simulacion.busquedas", referidas = ["busqueda_id"] },
+  { columnas = ["protocolo_id"], referencia = "experimento.protocolos", referidas = ["protocolo_id"] },
+  { columnas = ["plan_id"], referencia = "simulacion.planes", referidas = ["plan_id"], opcional = true },
+]
+reglas = [
+  { nombre = "plan_si_referencia", sql = "(estado = 'reference') = (plan_id IS NOT NULL)", descripcion = "Una etiqueta con referencia tiene plan; sin referencia, no." },
+  { nombre = "motivo_si_sin_referencia", sql = "estado = 'reference' OR motivo IS NOT NULL", descripcion = "Sin referencia, se dice por qué." },
+]
+
+[[tablas]]
+esquema = "simulacion"
+nombre = "comparadores"
+descripcion = "Referencias de comparación de un escenario: el plan vigente y Webster, con su aplicabilidad y sus parámetros."
+grano = "Una fila por publicación de comparadores (escenario y conjunto de parámetros)"
+origen = "datos/derivados/comparadores/<caso>/<carpeta>/: comparadores.json y parametros.json"
+fuente = "existe"
+filas_dev16 = "unas 46"
+cegado = "raiz:escenario_id"
+clave_primaria = ["comparador_id"]
+columnas = [
+  { nombre = "comparador_id", tipo = "text", descripcion = "Carpeta de la publicación.", origen = "cargador" },
+  { nombre = "escenario_id", tipo = "text", descripcion = "Escenario.", origen = "comparadores.json: scenario_id" },
+  { nombre = "caso_id", tipo = "text", descripcion = "Caso.", origen = "comparadores.json: case_id" },
+  { nombre = "caso_version", tipo = "text", descripcion = "Versión del caso.", origen = "comparadores.json: case_version" },
+  { nombre = "origen_caso", tipo = "text", descripcion = "synthetic o field.", origen = "comparadores.json: case_origin", regla = "origen_caso IN ('synthetic','field')" },
+  { nombre = "origen_demanda", tipo = "text", descripcion = "synthetic o field.", origen = "comparadores.json: demand_origin", regla = "origen_demanda IN ('synthetic','field')" },
+  { nombre = "origen_evidencia", tipo = "text", descripcion = "synthetic o field.", origen = "comparadores.json: evidence_origin", regla = "origen_evidencia IN ('synthetic','field')" },
+  { nombre = "plan_observado_id", tipo = "text", descripcion = "Plan vigente.", origen = "comparadores.json: current_plan" },
+  { nombre = "webster_estado", tipo = "text", descripcion = "applicable (aplica) o not_applicable (no aplica).", origen = "comparadores.json: webster.status", regla = "webster_estado IN ('applicable','not_applicable')" },
+  { nombre = "webster_adaptacion", tipo = "text", descripcion = "Variante de Webster, por ejemplo webster-solapes-v1.", origen = "comparadores.json: webster.adaptation" },
+  { nombre = "conjunto_parametros", tipo = "text", descripcion = "Conjunto de parámetros, por ejemplo webster-parametros-v2.", origen = "comparadores.json: webster.parameter_set" },
+  { nombre = "provisional", tipo = "boolean", descripcion = "Si los parámetros siguen sin aprobación del especialista (DEC08).", origen = "comparadores.json: webster.provisional" },
+  { nombre = "webster_ciclo_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Ciclo que da la fórmula, sin recortar.", origen = "comparadores.json: webster.webster_cycle_s" },
+  { nombre = "webster_plan_id", tipo = "huella", nulo = true, descripcion = "Plan de Webster; vacío si no aplica.", origen = "comparadores.json: webster.plan" },
+  { nombre = "webster_reglas_incumplidas", tipo = "jsonb", descripcion = "Reglas del caso que incumple el plan de Webster.", origen = "comparadores.json: webster.violated" },
+  { nombre = "webster_problemas", tipo = "jsonb", descripcion = "Por qué no aplica (código, sujeto y mensaje).", origen = "comparadores.json: webster.problems" },
+  { nombre = "y_critico", tipo = "double precision", nulo = true, descripcion = "Suma de relaciones de flujo del recorrido crítico.", origen = "comparadores.json: webster.critical_path.y" },
+  { nombre = "tiempo_perdido_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Tiempo perdido L del recorrido crítico.", origen = "comparadores.json: webster.critical_path.lost_time_s" },
+  { nombre = "ciclo_recorrido_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Ciclo que exige el recorrido crítico.", origen = "comparadores.json: webster.critical_path.cycle_s" },
+  { nombre = "carriles_criticos", tipo = "jsonb", nulo = true, descripcion = "Carriles del recorrido crítico.", origen = "comparadores.json: webster.critical_path.lane_ids" },
+  { nombre = "tramos_perdidos", tipo = "jsonb", nulo = true, descripcion = "Tramos que cuentan como tiempo perdido.", origen = "comparadores.json: webster.critical_path.lost_slot_ids" },
+  { nombre = "saturacion_vph_carril", tipo = "double precision", unidad = "veh/h", descripcion = "Saturación por carril usada.", origen = "parametros.json: saturation_flow_veh_h_lane", regla = "saturacion_vph_carril > 0" },
+  { nombre = "equivalencias_vehiculo", tipo = "jsonb", descripcion = "Equivalencia de cada clase en autos.", origen = "parametros.json: vehicle_equivalence" },
+  { nombre = "estado_parametros", tipo = "text", descripcion = "provisional o approved.", origen = "parametros.json: status", regla = "estado_parametros IN ('provisional','approved')" },
+  { nombre = "parametros", tipo = "jsonb", descripcion = "parametros.json completo.", origen = "parametros.json" },
+]
+claves_foraneas = [
+  { columnas = ["escenario_id"], referencia = "experimento.escenarios", referidas = ["escenario_id"] },
+  { columnas = ["caso_id", "caso_version"], referencia = "caso.casos", referidas = ["caso_id", "caso_version"] },
+  { columnas = ["plan_observado_id"], referencia = "caso.planes_observados", referidas = ["plan_observado_id"] },
+  { columnas = ["webster_plan_id"], referencia = "simulacion.planes", referidas = ["plan_id"], opcional = true },
+]
+reglas = [
+  { nombre = "plan_si_aplica", sql = "(webster_estado = 'applicable') = (webster_plan_id IS NOT NULL)", descripcion = "Webster tiene plan solo si aplica." },
+]
+
+# =====================================================================================
+# aprendizaje (fuentes pendientes: DEV16, DEV17 y DEV18)
+# =====================================================================================
+
+[[tablas]]
+esquema = "aprendizaje"
+nombre = "conjuntos"
+descripcion = "Conjunto de datos de entrenamiento: qué etiquetas, de qué partición y en qué orden de variables."
+grano = "Una fila por conjunto"
+origen = "Pendiente DEV16. Campos según model_manifest (dataset_id, feature_order, variable_slot_order) y 01_Diseno_tecnico «Aprendizaje y selección»."
+fuente = "pendiente DEV16"
+filas_dev16 = "pocas"
+cegado = "no"
+clave_primaria = ["conjunto_id"]
+columnas = [
+  { nombre = "conjunto_id", tipo = "text", descripcion = "Identificador.", origen = "model_manifest: dataset_id" },
+  { nombre = "particion_id", tipo = "text", descripcion = "Partición de la que sale.", origen = "model_manifest: split_id" },
+  { nombre = "caso_id", tipo = "text", descripcion = "Caso.", origen = "model_manifest: case_id" },
+  { nombre = "caso_version", tipo = "text", descripcion = "Versión del caso.", origen = "model_manifest: case_version" },
+  { nombre = "orden_entradas", tipo = "jsonb", descripcion = "Orden exacto de las variables de entrada (flujos y proporciones).", origen = "model_manifest: feature_order" },
+  { nombre = "orden_salidas", tipo = "jsonb", descripcion = "Orden de los tramos variables que predice el modelo.", origen = "model_manifest: variable_slot_order" },
+  { nombre = "etiquetas_entrenamiento", tipo = "integer", descripcion = "Etiquetas de train.", origen = "artefacto del conjunto (DEV16)", regla = "etiquetas_entrenamiento >= 0" },
+  { nombre = "etiquetas_validacion", tipo = "integer", descripcion = "Etiquetas de validation.", origen = "artefacto del conjunto (DEV16)", regla = "etiquetas_validacion >= 0" },
+  { nombre = "etiquetas_excluidas", tipo = "integer", descripcion = "Etiquetas excluidas (por ejemplo no_reference).", origen = "artefacto del conjunto (DEV16)", regla = "etiquetas_excluidas >= 0" },
+  { nombre = "motivos_exclusion", tipo = "jsonb", descripcion = "Motivo de cada exclusión.", origen = "artefacto del conjunto (DEV16)" },
+  { nombre = "huella_conjunto", tipo = "huella", descripcion = "Huella del conjunto completo.", origen = "artefacto del conjunto (DEV16)" },
+  { nombre = "creado_en", tipo = "timestamptz", descripcion = "Cuándo se armó.", origen = "artefacto del conjunto (DEV16)" },
+]
+claves_foraneas = [
+  { columnas = ["particion_id"], referencia = "experimento.particiones", referidas = ["particion_id"] },
+  { columnas = ["caso_id", "caso_version"], referencia = "caso.casos", referidas = ["caso_id", "caso_version"] },
+]
+
+[[tablas]]
+esquema = "aprendizaje"
+nombre = "conjunto_etiquetas"
+descripcion = "Qué etiquetas entran a cada conjunto. La base impide meter una etiqueta de prueba."
+grano = "Una fila por conjunto y etiqueta"
+origen = "Pendiente DEV16 (artefacto del conjunto)."
+fuente = "pendiente DEV16"
+filas_dev16 = "unas 40"
+cegado = "no"
+clave_primaria = ["conjunto_id", "etiqueta_id"]
+columnas = [
+  { nombre = "conjunto_id", tipo = "text", descripcion = "Conjunto.", origen = "artefacto del conjunto (DEV16)" },
+  { nombre = "etiqueta_id", tipo = "text", descripcion = "Etiqueta.", origen = "artefacto del conjunto (DEV16)" },
+  { nombre = "asignacion", tipo = "text", descripcion = "train o validation; nunca test.", origen = "artefacto del conjunto (DEV16)", regla = "asignacion IN ('train','validation')" },
+]
+claves_foraneas = [
+  { columnas = ["conjunto_id"], referencia = "aprendizaje.conjuntos", referidas = ["conjunto_id"] },
+  { columnas = ["etiqueta_id"], referencia = "simulacion.etiquetas", referidas = ["etiqueta_id"] },
+]
+reglas = [
+  { nombre = "etiqueta_de_la_particion", sql = "", descripcion = "Disparador aprendizaje.validar_conjunto_etiqueta(): el escenario de la etiqueta tiene esa misma asignación en la partición del conjunto." },
+]
+
+[[tablas]]
+esquema = "aprendizaje"
+nombre = "entrenamientos"
+descripcion = "Cada entrenamiento: algoritmo, configuración, semilla, versiones y costo inicial (I7)."
+grano = "Una fila por entrenamiento"
+origen = "Pendiente DEV16. Campos según model_manifest (training_run_id, algorithm, training_partitions) y protocol (refit_policy)."
+fuente = "pendiente DEV16"
+filas_dev16 = "decenas"
+cegado = "no"
+clave_primaria = ["entrenamiento_id"]
+columnas = [
+  { nombre = "entrenamiento_id", tipo = "text", descripcion = "Identificador.", origen = "model_manifest: training_run_id" },
+  { nombre = "conjunto_id", tipo = "text", descripcion = "Conjunto usado.", origen = "model_manifest: dataset_id" },
+  { nombre = "algoritmo", tipo = "text", descripcion = "median (mediana) o xgboost_per_output (un XGBoost por salida).", origen = "model_manifest: algorithm", regla = "algoritmo IN ('median','xgboost_per_output')" },
+  { nombre = "configuracion", tipo = "jsonb", descripcion = "Hiperparámetros y opciones; objeto vacío para la mediana.", origen = "artefacto de entrenamiento (DEV16)" },
+  { nombre = "semilla", tipo = "integer", nulo = true, descripcion = "Semilla fija; vacía si el algoritmo no usa azar.", origen = "artefacto de entrenamiento (DEV16)" },
+  { nombre = "particiones_entrenamiento", tipo = "jsonb", descripcion = "train o train y validation (reajuste tras la selección).", origen = "model_manifest: training_partitions" },
+  { nombre = "politica_reajuste", tipo = "text", descripcion = "train_only o train_plus_validation_after_selection.", origen = "protocol: refit_policy", regla = "politica_reajuste IN ('train_only','train_plus_validation_after_selection')" },
+  { nombre = "version_libreria", tipo = "text", nulo = true, descripcion = "Versión exacta de XGBoost; vacía para la mediana.", origen = "artefacto de entrenamiento (DEV16)" },
+  { nombre = "entorno_id", tipo = "huella", descripcion = "Versiones y equipo.", origen = "artefacto de entrenamiento (DEV16)" },
+  { nombre = "estado", tipo = "text", descripcion = "succeeded o failed.", origen = "artefacto de entrenamiento (DEV16)", regla = "estado IN ('succeeded','failed')" },
+  { nombre = "inicio", tipo = "timestamptz", descripcion = "Cuándo empezó.", origen = "artefacto de entrenamiento (DEV16)" },
+  { nombre = "fin", tipo = "timestamptz", nulo = true, descripcion = "Cuándo terminó.", origen = "artefacto de entrenamiento (DEV16)" },
+  { nombre = "duracion_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Costo inicial de entrenar (I7).", origen = "artefacto de entrenamiento (DEV16)", regla = "duracion_s IS NULL OR duracion_s >= 0" },
+]
+claves_foraneas = [
+  { columnas = ["conjunto_id"], referencia = "aprendizaje.conjuntos", referidas = ["conjunto_id"] },
+  { columnas = ["entorno_id"], referencia = "control.entornos", referidas = ["entorno_id"] },
+]
+
+[[tablas]]
+esquema = "aprendizaje"
+nombre = "curva_aprendizaje"
+descripcion = "Error por vuelta de entrenamiento, con datos de entrenamiento y de validación. Muestra si el modelo aprende o se sobreajusta."
+grano = "Una fila por entrenamiento, salida y vuelta"
+origen = "Pendiente DEV16 (registro de evaluación de XGBoost)."
+fuente = "pendiente DEV16"
+filas_dev16 = "miles"
+cegado = "no"
+clave_primaria = ["entrenamiento_id", "salida", "vuelta"]
+columnas = [
+  { nombre = "entrenamiento_id", tipo = "text", descripcion = "Entrenamiento.", origen = "artefacto de entrenamiento (DEV16)" },
+  { nombre = "salida", tipo = "text", descripcion = "Tramo variable predicho, por ejemplo t5.", origen = "artefacto de entrenamiento (DEV16)" },
+  { nombre = "vuelta", tipo = "integer", descripcion = "Número de vuelta (árbol) del entrenamiento.", origen = "artefacto de entrenamiento (DEV16)", regla = "vuelta >= 0" },
+  { nombre = "metrica", tipo = "text", descripcion = "Métrica registrada, por ejemplo error absoluto medio.", origen = "artefacto de entrenamiento (DEV16)" },
+  { nombre = "error_entrenamiento", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Error con datos de entrenamiento.", origen = "artefacto de entrenamiento (DEV16)" },
+  { nombre = "error_validacion", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Error con datos de validación.", origen = "artefacto de entrenamiento (DEV16)" },
+]
+claves_foraneas = [
+  { columnas = ["entrenamiento_id"], referencia = "aprendizaje.entrenamientos", referidas = ["entrenamiento_id"] },
+]
+
+[[tablas]]
+esquema = "aprendizaje"
+nombre = "metricas_modelo"
+descripcion = "Métricas de cada entrenamiento por partición: error (I5), factibilidad y cobertura (I4), con numerador y denominador."
+grano = "Una fila por entrenamiento, asignación, métrica y alcance"
+origen = "Pendiente DEV16 y DEV25. Definiciones de I4 e I5 en 03_Pruebas_y_operacion.md."
+fuente = "pendiente DEV16"
+filas_dev16 = "cientos"
+cegado = "apertura_particion:particion_id,asignacion"
+clave_primaria = ["entrenamiento_id", "asignacion", "metrica", "alcance"]
+columnas = [
+  { nombre = "entrenamiento_id", tipo = "text", descripcion = "Entrenamiento.", origen = "artefacto de evaluación del modelo" },
+  { nombre = "particion_id", tipo = "text", descripcion = "Partición evaluada.", origen = "artefacto de evaluación del modelo" },
+  { nombre = "asignacion", tipo = "text", descripcion = "train, validation o test (test solo visible tras la apertura).", origen = "artefacto de evaluación del modelo", regla = "asignacion IN ('train','validation','test')" },
+  { nombre = "metrica", tipo = "text", descripcion = "mae, feasibility_original, feasibility_final, coverage, rejections o inference_failures.", origen = "artefacto de evaluación del modelo", regla = "metrica IN ('mae','feasibility_original','feasibility_final','coverage','rejections','inference_failures')" },
+  { nombre = "alcance", tipo = "text", descripcion = "cycle, el verde de un grupo, un tramo, o all.", origen = "artefacto de evaluación del modelo" },
+  { nombre = "valor", tipo = "double precision", nulo = true, descripcion = "Valor de la métrica; vacío si no hay casos.", origen = "artefacto de evaluación del modelo" },
+  { nombre = "unidad", tipo = "text", descripcion = "s, fracción o casos.", origen = "artefacto de evaluación del modelo" },
+  { nombre = "numerador", tipo = "integer", nulo = true, descripcion = "Casos que cumplen.", origen = "artefacto de evaluación del modelo" },
+  { nombre = "denominador", tipo = "integer", nulo = true, descripcion = "Casos considerados.", origen = "artefacto de evaluación del modelo" },
+  { nombre = "version_calculo", tipo = "text", descripcion = "Versión del código que calculó la métrica.", origen = "artefacto de evaluación del modelo" },
+]
+claves_foraneas = [
+  { columnas = ["entrenamiento_id"], referencia = "aprendizaje.entrenamientos", referidas = ["entrenamiento_id"] },
+  { columnas = ["particion_id"], referencia = "experimento.particiones", referidas = ["particion_id"] },
+]
+reglas = [
+  { nombre = "fraccion_coherente", sql = "numerador IS NULL OR denominador IS NULL OR (numerador >= 0 AND numerador <= denominador)", descripcion = "El numerador no supera al denominador." },
+]
+
+[[tablas]]
+esquema = "aprendizaje"
+nombre = "errores_por_escenario"
+descripcion = "Error de cada modelo en cada escenario y salida, antes y después de la corrección."
+grano = "Una fila por modelo, escenario y salida"
+origen = "Pendiente DEV16 y DEV20."
+fuente = "pendiente DEV16"
+filas_dev16 = "cientos"
+cegado = "raiz:escenario_id"
+clave_primaria = ["modelo_id", "escenario_id", "salida"]
+columnas = [
+  { nombre = "modelo_id", tipo = "text", descripcion = "Modelo.", origen = "artefacto de evaluación del modelo" },
+  { nombre = "escenario_id", tipo = "text", descripcion = "Escenario.", origen = "artefacto de evaluación del modelo" },
+  { nombre = "salida", tipo = "text", descripcion = "cycle, el verde de un grupo o un tramo.", origen = "artefacto de evaluación del modelo" },
+  { nombre = "etiqueta_id", tipo = "text", descripcion = "Etiqueta de referencia.", origen = "artefacto de evaluación del modelo" },
+  { nombre = "predicho_original_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Lo que propuso el modelo.", origen = "artefacto de evaluación del modelo" },
+  { nombre = "predicho_final_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Lo que quedó tras la corrección.", origen = "artefacto de evaluación del modelo" },
+  { nombre = "referencia_s", tipo = "double precision", unidad = "s", descripcion = "Valor de la etiqueta.", origen = "artefacto de evaluación del modelo" },
+  { nombre = "error_original_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Original menos referencia.", origen = "artefacto de evaluación del modelo" },
+  { nombre = "error_final_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Final menos referencia.", origen = "artefacto de evaluación del modelo" },
+  { nombre = "estado_prediccion", tipo = "text", descripcion = "accepted, corrected, rejected, invalid_input, out_of_domain o failed.", origen = "respuesta del modelo: status", regla = "estado_prediccion IN ('accepted','corrected','rejected','invalid_input','out_of_domain','failed')" },
+]
+claves_foraneas = [
+  { columnas = ["modelo_id"], referencia = "aprendizaje.modelos", referidas = ["modelo_id"] },
+  { columnas = ["escenario_id"], referencia = "experimento.escenarios", referidas = ["escenario_id"] },
+  { columnas = ["etiqueta_id"], referencia = "simulacion.etiquetas", referidas = ["etiqueta_id"] },
+]
+
+[[tablas]]
+esquema = "aprendizaje"
+nombre = "modelos"
+descripcion = "Paquete del modelo entrenado. Su congelamiento es un hito; el paquete no cambia."
+grano = "Una fila por modelo"
+origen = "model_manifest (contrato) y paquete del modelo (DEV17)"
+fuente = "pendiente DEV16 y DEV17"
+filas_dev16 = "decenas"
+cegado = "no"
+clave_primaria = ["modelo_id"]
+columnas = [
+  { nombre = "modelo_id", tipo = "text", descripcion = "Identificador.", origen = "model_manifest: model_id" },
+  { nombre = "estado_manifiesto", tipo = "text", descripcion = "draft o frozen, tal como se publicó.", origen = "model_manifest: status", regla = "estado_manifiesto IN ('draft','frozen')" },
+  { nombre = "caso_id", tipo = "text", descripcion = "Caso.", origen = "model_manifest: case_id" },
+  { nombre = "caso_version", tipo = "text", descripcion = "Versión del caso.", origen = "model_manifest: case_version" },
+  { nombre = "algoritmo", tipo = "text", descripcion = "median o xgboost_per_output.", origen = "model_manifest: algorithm", regla = "algoritmo IN ('median','xgboost_per_output')" },
+  { nombre = "orden_entradas", tipo = "jsonb", descripcion = "Orden de las variables de entrada.", origen = "model_manifest: feature_order" },
+  { nombre = "orden_tramos_variables", tipo = "jsonb", descripcion = "Orden de los tramos que predice.", origen = "model_manifest: variable_slot_order" },
+  { nombre = "version_reglas", tipo = "text", descripcion = "Huella de las reglas de factibilidad.", origen = "model_manifest: rules_version" },
+  { nombre = "particion_id", tipo = "text", descripcion = "Partición usada.", origen = "model_manifest: split_id" },
+  { nombre = "conjunto_id", tipo = "text", descripcion = "Conjunto usado.", origen = "model_manifest: dataset_id" },
+  { nombre = "entrenamiento_id", tipo = "text", descripcion = "Entrenamiento que lo produjo.", origen = "model_manifest: training_run_id" },
+  { nombre = "particiones_entrenamiento", tipo = "jsonb", descripcion = "train o train y validation.", origen = "model_manifest: training_partitions" },
+  { nombre = "archivos", tipo = "jsonb", descripcion = "Archivos del modelo con su huella (JSON; nunca pickle).", origen = "model_manifest: artifacts" },
+  { nombre = "entorno", tipo = "jsonb", descripcion = "Versiones de librerías del paquete.", origen = "model_manifest: environment" },
+  { nombre = "dominio", tipo = "jsonb", nulo = true, descripcion = "Dominio de demanda que acepta; vacío hasta DEV17.", origen = "paquete del modelo (DEV17)" },
+  { nombre = "huella_paquete", tipo = "huella", nulo = true, descripcion = "Huella del paquete completo.", origen = "paquete del modelo (DEV17)" },
+]
+claves_foraneas = [
+  { columnas = ["caso_id", "caso_version"], referencia = "caso.casos", referidas = ["caso_id", "caso_version"] },
+  { columnas = ["particion_id"], referencia = "experimento.particiones", referidas = ["particion_id"] },
+  { columnas = ["conjunto_id"], referencia = "aprendizaje.conjuntos", referidas = ["conjunto_id"] },
+  { columnas = ["entrenamiento_id"], referencia = "aprendizaje.entrenamientos", referidas = ["entrenamiento_id"] },
+]
+
+[[tablas]]
+esquema = "aprendizaje"
+nombre = "seleccion"
+descripcion = "Decisión de elegir un modelo, con el orden de criterios fijado antes y los candidatos comparados (QA19)."
+grano = "Una fila por decisión"
+origen = "Pendiente DEV16 F4 (registro de selección)."
+fuente = "pendiente DEV16"
+filas_dev16 = "1 o pocas"
+cegado = "no"
+clave_primaria = ["seleccion_id"]
+columnas = [
+  { nombre = "seleccion_id", tipo = "text", descripcion = "Identificador.", origen = "registro de selección (DEV16)" },
+  { nombre = "particion_id", tipo = "text", descripcion = "Partición con cuya validación se eligió.", origen = "registro de selección (DEV16)" },
+  { nombre = "protocolo_id", tipo = "text", nulo = true, descripcion = "Protocolo aplicado.", origen = "registro de selección (DEV16)" },
+  { nombre = "criterios", tipo = "jsonb", descripcion = "Orden de criterios: factibilidad, cobertura, error en validación y costo.", origen = "registro de selección (DEV16)" },
+  { nombre = "candidatos", tipo = "jsonb", descripcion = "Modelos comparados y sus métricas de validación.", origen = "registro de selección (DEV16)" },
+  { nombre = "modelo_ganador_id", tipo = "text", descripcion = "Modelo elegido.", origen = "registro de selección (DEV16)" },
+  { nombre = "motivo", tipo = "text", descripcion = "Explicación de la decisión.", origen = "registro de selección (DEV16)" },
+  { nombre = "decidido_en", tipo = "timestamptz", descripcion = "Cuándo se decidió.", origen = "registro de selección (DEV16)" },
+]
+claves_foraneas = [
+  { columnas = ["particion_id"], referencia = "experimento.particiones", referidas = ["particion_id"] },
+  { columnas = ["protocolo_id"], referencia = "experimento.protocolos", referidas = ["protocolo_id"], opcional = true },
+  { columnas = ["modelo_ganador_id"], referencia = "aprendizaje.modelos", referidas = ["modelo_id"] },
+]
+
+[[tablas]]
+esquema = "aprendizaje"
+nombre = "consultas"
+descripcion = "Cada consulta al modelo: entrada, propuesta original, plan final o rechazo, y tiempo por etapa (I4, I7)."
+grano = "Una fila por consulta"
+origen = "Solicitud (contrato request) y respuesta (contrato response), DEV18"
+fuente = "pendiente DEV18"
+filas_dev16 = "decenas"
+cegado = "raiz_opcional:escenario_id"
+clave_primaria = ["request_id"]
+columnas = [
+  { nombre = "request_id", tipo = "text", descripcion = "Identificador de la consulta.", origen = "request: request_id" },
+  { nombre = "caso_id", tipo = "text", descripcion = "Caso.", origen = "request: case_id" },
+  { nombre = "caso_version", tipo = "text", descripcion = "Versión del caso.", origen = "request: case_version" },
+  { nombre = "modelo_id", tipo = "text", nulo = true, descripcion = "Modelo; vacío si se rechazó antes de cargar un modelo.", origen = "response: model_id" },
+  { nombre = "escenario_id", tipo = "text", nulo = true, descripcion = "Escenario del que sale la solicitud, si sale de uno.", origen = "cargador (evaluación DEV20)" },
+  { nombre = "origen", tipo = "text", descripcion = "synthetic o field.", origen = "request: origin", regla = "origen IN ('synthetic','field')" },
+  { nombre = "inicio_observacion", tipo = "timestamptz", descripcion = "Inicio del periodo de la demanda.", origen = "request: observation_start" },
+  { nombre = "fin_observacion", tipo = "timestamptz", descripcion = "Fin del periodo.", origen = "request: observation_end" },
+  { nombre = "fuentes", tipo = "jsonb", descripcion = "Fuentes de la demanda.", origen = "request: source_ids" },
+  { nombre = "demanda", tipo = "jsonb", descripcion = "Demanda por movimiento con su composición (entrada).", origen = "request: demand" },
+  { nombre = "estado", tipo = "text", descripcion = "accepted (aceptado), corrected (corregido), rejected (rechazado), invalid_input, out_of_domain o failed.", origen = "response: status", regla = "estado IN ('accepted','corrected','rejected','invalid_input','out_of_domain','failed')" },
+  { nombre = "duraciones_originales_s", tipo = "jsonb", nulo = true, unidad = "s", descripcion = "Lo que propuso el modelo antes de corregir.", origen = "response: original_variable_durations_s" },
+  { nombre = "plan_id", tipo = "huella", nulo = true, descripcion = "Plan final; vacío si no hay plan.", origen = "response: plan" },
+  { nombre = "verdes_s", tipo = "jsonb", nulo = true, unidad = "s", descripcion = "Verde de cada grupo del plan final.", origen = "response: plan.greens_s" },
+  { nombre = "tiempos_ms", tipo = "jsonb", unidad = "ms", descripcion = "Tiempo de cada etapa de la consulta.", origen = "response: duration_ms" },
+  { nombre = "version_reglas", tipo = "text", descripcion = "Huella de las reglas usadas.", origen = "response: rules_version" },
+]
+claves_foraneas = [
+  { columnas = ["caso_id", "caso_version"], referencia = "caso.casos", referidas = ["caso_id", "caso_version"] },
+  { columnas = ["modelo_id"], referencia = "aprendizaje.modelos", referidas = ["modelo_id"], opcional = true },
+  { columnas = ["escenario_id"], referencia = "experimento.escenarios", referidas = ["escenario_id"], opcional = true },
+  { columnas = ["plan_id"], referencia = "simulacion.planes", referidas = ["plan_id"], opcional = true },
+]
+reglas = [
+  { nombre = "plan_si_aceptado", sql = "(estado IN ('accepted','corrected')) = (plan_id IS NOT NULL)", descripcion = "Solo una consulta aceptada o corregida tiene plan." },
+]
+
+[[tablas]]
+esquema = "aprendizaje"
+nombre = "consulta_tramos"
+descripcion = "Duración propuesta y final de cada tramo en una consulta."
+grano = "Una fila por consulta y tramo"
+origen = "response: original_variable_durations_s y plan.slot_durations_s"
+fuente = "pendiente DEV18"
+filas_dev16 = "cientos"
+cegado = "padre:aprendizaje.consultas(request_id)"
+clave_primaria = ["request_id", "tramo_id"]
+columnas = [
+  { nombre = "request_id", tipo = "text", descripcion = "Consulta.", origen = "response: request_id" },
+  { nombre = "caso_id", tipo = "text", descripcion = "Caso.", origen = "response: case_id" },
+  { nombre = "caso_version", tipo = "text", descripcion = "Versión del caso.", origen = "response: case_version" },
+  { nombre = "tramo_id", tipo = "text", descripcion = "Tramo.", origen = "response (clave del tramo)" },
+  { nombre = "duracion_original_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Lo que propuso el modelo; vacío en tramos fijos.", origen = "response: original_variable_durations_s" },
+  { nombre = "duracion_final_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Lo que quedó; vacío si se rechazó.", origen = "response: plan.slot_durations_s" },
+]
+claves_foraneas = [
+  { columnas = ["request_id"], referencia = "aprendizaje.consultas", referidas = ["request_id"] },
+  { columnas = ["caso_id", "caso_version", "tramo_id"], referencia = "caso.tramos", referidas = ["caso_id", "caso_version", "tramo_id"] },
+]
+
+[[tablas]]
+esquema = "aprendizaje"
+nombre = "consulta_reglas"
+descripcion = "Reglas incumplidas y errores de cada consulta."
+grano = "Una fila por error de la respuesta"
+origen = "response: errors (code, field, message, artifact_id)"
+fuente = "pendiente DEV18"
+filas_dev16 = "decenas"
+cegado = "padre:aprendizaje.consultas(request_id)"
+clave_primaria = ["request_id", "orden"]
+columnas = [
+  { nombre = "request_id", tipo = "text", descripcion = "Consulta.", origen = "response: request_id" },
+  { nombre = "orden", tipo = "integer", descripcion = "Posición en la lista de errores.", origen = "response: errors (posición)", regla = "orden >= 0" },
+  { nombre = "codigo", tipo = "text", descripcion = "Código, por ejemplo PLAN_INFEASIBLE u OUT_OF_DOMAIN.", origen = "response: errors[].code" },
+  { nombre = "campo", tipo = "text", nulo = true, descripcion = "Campo afectado.", origen = "response: errors[].field" },
+  { nombre = "mensaje", tipo = "text", descripcion = "Explicación.", origen = "response: errors[].message" },
+  { nombre = "artefacto_referido", tipo = "text", nulo = true, descripcion = "Artefacto mencionado por el error.", origen = "response: errors[].artifact_id" },
+]
+claves_foraneas = [
+  { columnas = ["request_id"], referencia = "aprendizaje.consultas", referidas = ["request_id"] },
+]
+
+# =====================================================================================
+# evaluacion (fuentes pendientes: DEV20 y DEV26)
+# =====================================================================================
+
+[[tablas]]
+esquema = "evaluacion"
+nombre = "experimentos"
+descripcion = "Experimento de evaluación: protocolo, partición y modelo congelados. Su apertura es un hito."
+grano = "Una fila por experimento"
+origen = "Pendiente DEV20 y DEV26 (manifiesto de evaluación)."
+fuente = "pendiente DEV20"
+filas_dev16 = "0 a 1"
+cegado = "no"
+clave_primaria = ["experimento_id"]
+columnas = [
+  { nombre = "experimento_id", tipo = "text", descripcion = "Identificador.", origen = "manifiesto de evaluación" },
+  { nombre = "caso_id", tipo = "text", descripcion = "Caso.", origen = "manifiesto de evaluación" },
+  { nombre = "caso_version", tipo = "text", descripcion = "Versión del caso.", origen = "manifiesto de evaluación" },
+  { nombre = "protocolo_id", tipo = "text", descripcion = "Protocolo congelado.", origen = "manifiesto de evaluación" },
+  { nombre = "particion_id", tipo = "text", descripcion = "Partición cuya prueba se usa.", origen = "manifiesto de evaluación" },
+  { nombre = "modelo_id", tipo = "text", descripcion = "Modelo congelado.", origen = "manifiesto de evaluación" },
+  { nombre = "alternativas", tipo = "jsonb", descripcion = "Alternativas comparadas: modelo, mediana, vigente, Webster y búsqueda.", origen = "manifiesto de evaluación" },
+  { nombre = "creado_en", tipo = "timestamptz", descripcion = "Cuándo se preparó.", origen = "manifiesto de evaluación" },
+  { nombre = "huella_experimento", tipo = "huella", descripcion = "Huella de lo congelado.", origen = "manifiesto de evaluación" },
+]
+claves_foraneas = [
+  { columnas = ["caso_id", "caso_version"], referencia = "caso.casos", referidas = ["caso_id", "caso_version"] },
+  { columnas = ["protocolo_id"], referencia = "experimento.protocolos", referidas = ["protocolo_id"] },
+  { columnas = ["particion_id"], referencia = "experimento.particiones", referidas = ["particion_id"] },
+  { columnas = ["modelo_id"], referencia = "aprendizaje.modelos", referidas = ["modelo_id"] },
+]
+
+[[tablas]]
+esquema = "evaluacion"
+nombre = "comparaciones"
+descripcion = "Una alternativa aplicada a un escenario de prueba con una semilla final, con las huellas que prueban que todas usaron la misma demanda."
+grano = "Una fila por experimento, escenario, alternativa y semilla"
+origen = "Pendiente DEV20 y DEV26."
+fuente = "pendiente DEV20"
+filas_dev16 = "0"
+cegado = "raiz:escenario_id"
+clave_primaria = ["comparacion_id"]
+columnas = [
+  { nombre = "comparacion_id", tipo = "text", descripcion = "Identificador.", origen = "artefacto de comparación" },
+  { nombre = "experimento_id", tipo = "text", descripcion = "Experimento.", origen = "artefacto de comparación" },
+  { nombre = "escenario_id", tipo = "text", descripcion = "Escenario de prueba.", origen = "artefacto de comparación" },
+  { nombre = "alternativa", tipo = "text", descripcion = "model, median, current_plan, webster o search.", origen = "artefacto de comparación", regla = "alternativa IN ('model','median','current_plan','webster','search')" },
+  { nombre = "semilla", tipo = "integer", descripcion = "Semilla final.", origen = "artefacto de comparación" },
+  { nombre = "aplicable", tipo = "boolean", descripcion = "Si la alternativa se pudo calcular.", origen = "artefacto de comparación" },
+  { nombre = "motivo_no_aplicable", tipo = "text", nulo = true, descripcion = "Por qué no; vacío si aplica.", origen = "artefacto de comparación" },
+  { nombre = "run_id", tipo = "text", nulo = true, descripcion = "Corrida que la mide; vacía si no aplica.", origen = "artefacto de comparación" },
+  { nombre = "plan_id", tipo = "huella", nulo = true, descripcion = "Plan aplicado.", origen = "artefacto de comparación" },
+  { nombre = "request_id", tipo = "text", nulo = true, descripcion = "Consulta que dio el plan (modelo y mediana).", origen = "artefacto de comparación" },
+  { nombre = "etiqueta_id", tipo = "text", nulo = true, descripcion = "Etiqueta que dio el plan (búsqueda).", origen = "artefacto de comparación" },
+  { nombre = "comparador_id", tipo = "text", nulo = true, descripcion = "Comparadores que dieron el plan (vigente y Webster).", origen = "artefacto de comparación" },
+  { nombre = "rutas_sha256", tipo = "huella", nulo = true, descripcion = "Huella de la demanda materializada; igual en todas las alternativas del mismo escenario y semilla.", origen = "inputs/manifiesto.json de la corrida" },
+  { nombre = "red_sha256", tipo = "huella", nulo = true, descripcion = "Huella de la red.", origen = "inputs/manifiesto.json de la corrida" },
+]
+claves_foraneas = [
+  { columnas = ["experimento_id"], referencia = "evaluacion.experimentos", referidas = ["experimento_id"] },
+  { columnas = ["escenario_id"], referencia = "experimento.escenarios", referidas = ["escenario_id"] },
+  { columnas = ["run_id"], referencia = "simulacion.corridas", referidas = ["run_id"], opcional = true },
+  { columnas = ["plan_id"], referencia = "simulacion.planes", referidas = ["plan_id"], opcional = true },
+  { columnas = ["request_id"], referencia = "aprendizaje.consultas", referidas = ["request_id"], opcional = true },
+  { columnas = ["etiqueta_id"], referencia = "simulacion.etiquetas", referidas = ["etiqueta_id"], opcional = true },
+  { columnas = ["comparador_id"], referencia = "simulacion.comparadores", referidas = ["comparador_id"], opcional = true },
+]
+unicas = [["experimento_id", "escenario_id", "alternativa", "semilla"]]
+reglas = [
+  { nombre = "motivo_si_no_aplica", sql = "aplicable OR motivo_no_aplicable IS NOT NULL", descripcion = "Si no aplica, se dice por qué." },
+  { nombre = "misma_demanda", sql = "", descripcion = "Consulta de verificación (QA18): mismo escenario y semilla, misma rutas_sha256 en todas las alternativas aplicables." },
+]
+
+[[tablas]]
+esquema = "evaluacion"
+nombre = "diferencias"
+descripcion = "Diferencia emparejada entre dos alternativas en un escenario y una semilla (I6)."
+grano = "Una fila por par de comparaciones, métrica y alcance"
+origen = "Pendiente DEV20 y DEV26 (compare_cohorts de DEV19)."
+fuente = "pendiente DEV20"
+filas_dev16 = "0"
+cegado = "padre:evaluacion.comparaciones(comparacion_a_id)"
+clave_primaria = ["diferencia_id"]
+columnas = [
+  { nombre = "diferencia_id", tipo = "text", descripcion = "Identificador.", origen = "artefacto de comparación" },
+  { nombre = "experimento_id", tipo = "text", descripcion = "Experimento.", origen = "artefacto de comparación" },
+  { nombre = "comparacion_a_id", tipo = "text", descripcion = "Primera alternativa.", origen = "artefacto de comparación" },
+  { nombre = "comparacion_b_id", tipo = "text", descripcion = "Segunda alternativa.", origen = "artefacto de comparación" },
+  { nombre = "metrica", tipo = "text", descripcion = "delay (demora), queue (cola) o stops (detenciones).", origen = "artefacto de comparación", regla = "metrica IN ('delay','queue','stops')" },
+  { nombre = "alcance", tipo = "text", descripcion = "total o un acceso.", origen = "artefacto de comparación" },
+  { nombre = "valor_a", tipo = "double precision", nulo = true, descripcion = "Valor de a.", origen = "artefacto de comparación" },
+  { nombre = "valor_b", tipo = "double precision", nulo = true, descripcion = "Valor de b.", origen = "artefacto de comparación" },
+  { nombre = "diferencia", tipo = "double precision", nulo = true, descripcion = "a menos b; vacía si no es comparable.", origen = "artefacto de comparación" },
+  { nombre = "unidad", tipo = "text", descripcion = "s, veh o detenciones por vehículo.", origen = "artefacto de comparación" },
+  { nombre = "censurada", tipo = "boolean", descripcion = "Si alguna tiene viajes sin terminar o cola incompleta.", origen = "artefacto de comparación" },
+  { nombre = "veredicto", tipo = "text", descripcion = "a_lower, b_lower, equal, undetermined o not_comparable.", origen = "compare_cohorts: verdict", regla = "veredicto IN ('a_lower','b_lower','equal','undetermined','not_comparable')" },
+  { nombre = "tolerancia", tipo = "double precision", nulo = true, descripcion = "Tolerancia del empate.", origen = "artefacto de comparación" },
+]
+claves_foraneas = [
+  { columnas = ["experimento_id"], referencia = "evaluacion.experimentos", referidas = ["experimento_id"] },
+  { columnas = ["comparacion_a_id"], referencia = "evaluacion.comparaciones", referidas = ["comparacion_id"] },
+  { columnas = ["comparacion_b_id"], referencia = "evaluacion.comparaciones", referidas = ["comparacion_id"] },
+]
+reglas = [
+  { nombre = "par_distinto", sql = "comparacion_a_id <> comparacion_b_id", descripcion = "Se comparan dos alternativas distintas." },
+]
+
+[[tablas]]
+esquema = "evaluacion"
+nombre = "indicadores"
+descripcion = "Indicadores finales I4 a I7: valor, numerador, denominador, faltantes e intervalo de confianza."
+grano = "Una fila por experimento, indicador, métrica, alternativas y alcance"
+origen = "Pendiente DEV20 y DEV26."
+fuente = "pendiente DEV20"
+filas_dev16 = "0"
+cegado = "apertura_experimento:experimento_id"
+clave_primaria = ["indicador_id"]
+columnas = [
+  { nombre = "indicador_id", tipo = "text", descripcion = "Identificador.", origen = "artefacto de evaluación" },
+  { nombre = "experimento_id", tipo = "text", descripcion = "Experimento.", origen = "artefacto de evaluación" },
+  { nombre = "indicador", tipo = "text", descripcion = "I4, I5, I6 o I7.", origen = "artefacto de evaluación", regla = "indicador IN ('I4','I5','I6','I7')" },
+  { nombre = "metrica", tipo = "text", descripcion = "Métrica concreta, por ejemplo diferencia de demora.", origen = "artefacto de evaluación" },
+  { nombre = "alternativa_a", tipo = "text", descripcion = "Alternativa evaluada.", origen = "artefacto de evaluación" },
+  { nombre = "alternativa_b", tipo = "text", nulo = true, descripcion = "Referencia comparada; vacía si no es una diferencia.", origen = "artefacto de evaluación" },
+  { nombre = "alcance", tipo = "text", descripcion = "global, una familia o un acceso.", origen = "artefacto de evaluación" },
+  { nombre = "valor", tipo = "double precision", nulo = true, descripcion = "Valor del indicador.", origen = "artefacto de evaluación" },
+  { nombre = "unidad", tipo = "text", descripcion = "Unidad.", origen = "artefacto de evaluación" },
+  { nombre = "numerador", tipo = "integer", nulo = true, descripcion = "Casos que cumplen.", origen = "artefacto de evaluación" },
+  { nombre = "denominador", tipo = "integer", nulo = true, descripcion = "Casos considerados.", origen = "artefacto de evaluación" },
+  { nombre = "faltantes", tipo = "integer", nulo = true, descripcion = "Pares sin resultado, que no se ocultan.", origen = "artefacto de evaluación" },
+  { nombre = "ic_nivel", tipo = "double precision", nulo = true, descripcion = "Nivel del intervalo.", origen = "artefacto de evaluación" },
+  { nombre = "ic_inferior", tipo = "double precision", nulo = true, descripcion = "Límite inferior.", origen = "artefacto de evaluación" },
+  { nombre = "ic_superior", tipo = "double precision", nulo = true, descripcion = "Límite superior.", origen = "artefacto de evaluación" },
+  { nombre = "remuestreos", tipo = "integer", nulo = true, descripcion = "Remuestreos del bootstrap por grupos.", origen = "artefacto de evaluación" },
+  { nombre = "semilla_remuestreo", tipo = "integer", nulo = true, descripcion = "Semilla del bootstrap.", origen = "artefacto de evaluación" },
+  { nombre = "agregacion", tipo = "text", nulo = true, descripcion = "Cómo se agregan los grupos.", origen = "protocol: group_aggregation" },
+  { nombre = "version_calculo", tipo = "text", descripcion = "Versión del código que lo calculó.", origen = "artefacto de evaluación" },
+]
+claves_foraneas = [
+  { columnas = ["experimento_id"], referencia = "evaluacion.experimentos", referidas = ["experimento_id"] },
+]
+reglas = [
+  { nombre = "intervalo_ordenado", sql = "ic_inferior IS NULL OR ic_superior IS NULL OR ic_inferior <= ic_superior", descripcion = "El intervalo está ordenado." },
+]
+
+[[tablas]]
+esquema = "evaluacion"
+nombre = "costos"
+descripcion = "Costo computacional de cada proceso, separado en inicial, por consulta y de evaluación (I7)."
+grano = "Una fila por proceso medido"
+origen = "Pendiente DEV20 y DEV26. Las corridas, búsquedas y entrenamientos ya guardan su duración."
+fuente = "pendiente DEV20"
+filas_dev16 = "decenas"
+cegado = "no"
+clave_primaria = ["costo_id"]
+columnas = [
+  { nombre = "costo_id", tipo = "text", descripcion = "Identificador.", origen = "artefacto de evaluación" },
+  { nombre = "proceso_tipo", tipo = "text", descripcion = "search, label_generation, training, query_cold, query_warm o evaluation.", origen = "artefacto de evaluación", regla = "proceso_tipo IN ('search','label_generation','training','query_cold','query_warm','evaluation')" },
+  { nombre = "proceso_id", tipo = "text", descripcion = "Identificador del proceso medido; sin clave foránea porque puede venir de varias tablas.", origen = "artefacto de evaluación" },
+  { nombre = "etapa", tipo = "text", descripcion = "initial (costo inicial), query (por consulta) o evaluation.", origen = "artefacto de evaluación", regla = "etapa IN ('initial','query','evaluation')" },
+  { nombre = "duracion_s", tipo = "double precision", unidad = "s", descripcion = "Tiempo total.", origen = "artefacto de evaluación", regla = "duracion_s >= 0" },
+  { nombre = "simulaciones", tipo = "integer", nulo = true, descripcion = "Corridas incluidas, si aplica.", origen = "artefacto de evaluación" },
+  { nombre = "consultas", tipo = "integer", nulo = true, descripcion = "Consultas incluidas, si aplica.", origen = "artefacto de evaluación" },
+  { nombre = "entorno_id", tipo = "huella", descripcion = "Equipo y versiones.", origen = "artefacto de evaluación" },
+  { nombre = "medido_en", tipo = "timestamptz", descripcion = "Cuándo se midió.", origen = "artefacto de evaluación" },
+]
+claves_foraneas = [
+  { columnas = ["entorno_id"], referencia = "control.entornos", referidas = ["entorno_id"] },
+]
