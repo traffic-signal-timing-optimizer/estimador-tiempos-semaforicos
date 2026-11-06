@@ -16,9 +16,11 @@ from semaforo.bd.carga.hitos import Milestone, MilestoneKind, milestone_row, pub
 from semaforo.bd.carga.insercion import Catalog, write_rows
 from semaforo.bd.carga.modelo import REPOSITORY_ROOT, FileRecord, Unit, read_file
 from semaforo.bd.carga.motor import LoadOptions, LoadReport, artifact_rows, load_workspace
+from semaforo.bd.conciliacion import ReconcileReport, reconcile
 from semaforo.bd.conexion import CARGA, BdError, Connection, connect
 from semaforo.bd.esquema import installed_version
 from semaforo.bd.instalacion import InstallReport, InstallRequest, install
+from semaforo.bd.metricas import MetricsReport, publish_missing
 from semaforo.bd.respaldo import BackupReport, backup
 from semaforo.bd.temporales import scratch_database
 from semaforo.bd.verificacion import (
@@ -37,11 +39,16 @@ from semaforo.trazabilidad.store import utc_now
 
 __all__ = [
     "LoadReport",
+    "MetricsReport",
+    "ReconcileReport",
     "VerifyReport",
     "backup_database",
     "initialize",
     "load",
     "load_exit_code",
+    "publish_metrics",
+    "reconcile_database",
+    "reconcile_exit_code",
     "register_milestone",
     "verify",
     "verify_exit_code",
@@ -347,3 +354,27 @@ def _dry_run(connection: Connection, milestone: Milestone, acta_record: FileReco
 def backup_database(folder: Path, *, database: str | None = None) -> BackupReport:
     """``bd respaldar``: ``pg_dump`` de la base en ``folder``, con su huella al lado."""
     return backup(folder, database=database)
+
+
+# --- métricas y conciliación (F4) ------------------------------------------------------------
+
+
+def publish_metrics(workspace: Path, *, protocol_id: str | None = None) -> MetricsReport:
+    """``bd metricas``: calcula y publica las métricas de las corridas que todavía no las tienen."""
+    return publish_missing(workspace, protocol_id=protocol_id)
+
+
+def reconcile_database(
+    workspace: Path,
+    *,
+    repository: Path | None = None,
+    recompute: bool = True,
+    database: str | None = None,
+) -> ReconcileReport:
+    """``bd conciliar``: compara la base con los archivos (conteos y demora recalculada)."""
+    return reconcile(workspace, database=database, repository=repository, recompute=recompute)
+
+
+def reconcile_exit_code(report: ReconcileReport) -> int:
+    """0 si la base coincide con los archivos; 5 si hay alguna diferencia."""
+    return 0 if report.status == "equal" else INTEGRITY_EXIT

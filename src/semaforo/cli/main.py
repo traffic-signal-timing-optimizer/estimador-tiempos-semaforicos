@@ -46,10 +46,15 @@ from pathlib import Path
 
 from semaforo.app.bd_commands import (
     LoadReport,
+    MetricsReport,
+    ReconcileReport,
     backup_database,
     initialize,
     load,
     load_exit_code,
+    publish_metrics,
+    reconcile_database,
+    reconcile_exit_code,
     register_milestone,
     verify,
     verify_exit_code,
@@ -216,18 +221,35 @@ def _add_database_commands(
     milestone.add_argument("--notas", default=None, help="aclaraciones del acta")
     backup = actions.add_parser("respaldar", help="respaldo de la base con pg_dump")
     backup.add_argument("--carpeta", type=Path, required=True, help="carpeta de los respaldos")
-    for command in (load, check, milestone, backup):
+    metrics = actions.add_parser(
+        "metricas",
+        help="calcula y publica las métricas que faltan, en carpetas nuevas de solo lectura",
+    )
+    metrics.add_argument(
+        "--protocolo",
+        default=None,
+        help="protocolo con que medir las corridas sueltas cuya zona calza con varios",
+    )
+    reconcile = actions.add_parser(
+        "conciliar", help="compara la base con los archivos: conteos y demora recalculada (QA33)"
+    )
+    reconcile.add_argument(
+        "--sin-recalcular",
+        action="store_true",
+        help="no vuelve a calcular las métricas (solo archivos y conteos)",
+    )
+    for command in (load, check, milestone, backup, reconcile):
         command.add_argument(
             "--base", default=None, help="base de datos (por defecto, la del servicio: semaforo)"
         )
-    for command in (load, check, milestone):
+    for command in (load, check, milestone, reconcile):
         command.add_argument(
             "--repositorio",
             type=Path,
             default=Path(),
             help="carpeta del repositorio, para las actas de los hitos (por defecto, la actual)",
         )
-    return [start, load, check, milestone, backup]
+    return [start, load, check, milestone, backup, metrics, reconcile]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -526,6 +548,61 @@ def _load_summary(report: LoadReport) -> str:
     return "\n".join(lines)
 
 
+METRIC_WORDS = {
+    "published": "publicadas",
+    "already": "ya estaban",
+    "skipped": "sin medir",
+    "failed": "con error",
+}
+
+
+def _metrics_summary(report: MetricsReport) -> str:
+    counts = ", ".join(f"{report.counts[k]} {word}" for k, word in METRIC_WORDS.items())
+    lines = [f"Métricas de las corridas: {counts}."]
+    reasons: dict[str, int] = {}
+    for run in report.runs:
+        if run.status in ("skipped", "failed"):
+            reason = f"{METRIC_WORDS[run.status]}: {run.detail}"
+            reasons[reason] = reasons.get(reason, 0) + 1
+    lines += [f"- {count} {reason}" for reason, count in sorted(reasons.items())]
+    return "\n".join(lines)
+
+
+def _reconcile_summary(report: ReconcileReport) -> str:
+    verdict = "coincide con los archivos" if report.status == "equal" else "NO coincide"
+    lines = [
+        f"La base {verdict}: {report.files_checked} archivos, {report.runs_checked} corridas "
+        f"({report.runs_recomputed} recalculadas), {report.differences_total} diferencias."
+    ]
+    lines += [
+        f"- {d.where}: {d.item}: base {d.database}, archivos {d.files}"
+        for d in report.differences[:20]
+    ]
+    return "\n".join(lines)
+
+
+def _database_checks(arguments: argparse.Namespace, workspace: Path) -> int:
+    """``bd metricas`` y ``bd conciliar`` (F4)."""
+    if arguments.action == "metricas":
+        published = publish_metrics(
+            workspace, protocol_id=None if arguments.protocolo is None else str(arguments.protocolo)
+        )
+        code = 4 if published.counts["failed"] else 0
+        _emit(_with_exit(published.model_dump(mode="json"), code))
+        _say(_metrics_summary(published))
+        return code
+    compared = reconcile_database(
+        workspace,
+        repository=Path(arguments.repositorio),
+        recompute=not arguments.sin_recalcular,
+        database=arguments.base,
+    )
+    code = reconcile_exit_code(compared)
+    _emit(_with_exit(compared.model_dump(mode="json"), code))
+    _say(_reconcile_summary(compared))
+    return code
+
+
 def _database(arguments: argparse.Namespace, workspace: Path) -> int:
     action = arguments.action
     if action == "iniciar":
@@ -586,6 +663,8 @@ def _database(arguments: argparse.Namespace, workspace: Path) -> int:
         _emit(_with_exit({"hito_id": hito_id, "carga": report.model_dump(mode="json")}, code))
         _say(f"Hito {hito_id} registrado.\n{_load_summary(report)}")
         return code
+    if action in ("metricas", "conciliar"):
+        return _database_checks(arguments, workspace)
     saved = backup_database(Path(arguments.carpeta), database=arguments.base)
     _emit(_with_exit(saved.model_dump(mode="json"), 0))
     _say(f"Respaldo {saved.file} ({saved.size_bytes} bytes), huella {saved.sha256}")
