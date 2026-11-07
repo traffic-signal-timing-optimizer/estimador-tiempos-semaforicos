@@ -6,50 +6,89 @@ lleva contraseñas ni rutas de la máquina.
 """
 
 import secrets
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 import psycopg
 from psycopg import sql
 
+from semaforo.bd.acceso import NetworkReport, network_report
+from semaforo.bd.carga.decisiones import (
+    Decision,
+    DecisionKind,
+    publish_decision,
+    read_decision,
+)
+from semaforo.bd.carga.fuentes import discover
 from semaforo.bd.carga.hitos import Milestone, MilestoneKind, milestone_row, publish_milestone
 from semaforo.bd.carga.insercion import Catalog, write_rows
-from semaforo.bd.carga.modelo import REPOSITORY_ROOT, FileRecord, Unit, read_file
+from semaforo.bd.carga.modelo import (
+    DATA_ROOT,
+    REPOSITORY_ROOT,
+    CargaError,
+    FileRecord,
+    Unit,
+    artifact_id,
+    read_file,
+)
 from semaforo.bd.carga.motor import LoadOptions, LoadReport, artifact_rows, load_workspace
 from semaforo.bd.conciliacion import ReconcileReport, reconcile
-from semaforo.bd.conexion import CARGA, BdError, Connection, connect
+from semaforo.bd.conexion import CARGA, DATABASE, BdError, Connection, connect
 from semaforo.bd.esquema import installed_version
 from semaforo.bd.instalacion import InstallReport, InstallRequest, install
+from semaforo.bd.instantanea import Inconcluso, lectura_estable
 from semaforo.bd.metricas import MetricsReport, publish_missing
-from semaforo.bd.respaldo import BackupReport, backup
+from semaforo.bd.prueba_respaldo import BackupTest, backup_test_exit_code, probar_respaldo
+from semaforo.bd.reglas import RULES_ALGORITHM, rules_digest
+from semaforo.bd.respaldo import BackupReport, Ficha, FichaCampo, backup, ficha_de_archivo
 from semaforo.bd.temporales import scratch_database
 from semaforo.bd.verificacion import (
+    HASH_ALGORITHM,
     FingerprintFile,
+    Measured,
+    ReferenceCheck,
     RootCheck,
     check_roots,
+    compare_with_reference,
     content_hash,
+    read_fingerprints,
     root_fingerprints,
     write_fingerprints,
 )
 from semaforo.dominio.base_model import FrozenModel
-from semaforo.dominio.errors import ErrorCode
+from semaforo.dominio.errors import DomainError, ErrorCode
 from semaforo.simulacion.herramientas import git_output
+from semaforo.trazabilidad.hashing import sha256_file
 from semaforo.trazabilidad.paths import check_relative_path
 from semaforo.trazabilidad.store import utc_now
 
 __all__ = [
+    "DATABASE",
+    "BackupTest",
+    "Ficha",
+    "FichaCampo",
+    "LoadOptions",
     "LoadReport",
     "MetricsReport",
     "ReconcileReport",
+    "RegenerateReport",
     "VerifyReport",
+    "backup_card",
     "backup_database",
+    "backup_test_exit_code",
     "initialize",
     "load",
     "load_exit_code",
+    "load_options_of",
     "publish_metrics",
     "reconcile_database",
     "reconcile_exit_code",
+    "regenerate",
+    "regenerate_exit_code",
+    "register_decision",
     "register_milestone",
+    "test_backup",
     "verify",
     "verify_exit_code",
 ]
@@ -82,27 +121,50 @@ def load(  # noqa: PLR0913  (cada autorización es de solo palabra clave)
 
 
 def load_exit_code(report: LoadReport) -> int:
-    """0 si la carga terminó sin conflictos; 5 si alguna unidad fue rechazada."""
-    return INTEGRITY_EXIT if report.counts.get("rejected") else 0
+    """0 si todo quedó cargado o excluido con decisión; 5 si alguna unidad quedó rechazada,
+    pendiente o no cargable sin decisión."""
+    counts = report.counts
+    open_items = (
+        counts.get("rejected", 0) + counts.get("pending", 0) + counts.get("not_loadable", 0)
+    )
+    return INTEGRITY_EXIT if open_items else 0
 
 
 # --- verificar -------------------------------------------------------------------------------
 
 
-class VerifyReport(FrozenModel):
-    """Resultado de ``bd verificar``."""
+HUELLAS_FILE = "docs/bd/huellas.json"
+INCONCLUSIVE_EXIT = 6
 
-    schema_version: Literal["1.0.0"] = "1.0.0"
-    status: Literal["intact", "changed"]
+
+class VerifyReport(FrozenModel):
+    """Resultado de ``bd verificar``: solo lectura, en una instantánea (C1.6)."""
+
+    schema_version: Literal["1.1.0"] = "1.1.0"
+    status: Literal["intact", "changed", "inconclusive"]
+    reason: str | None
     database_schema: str | None
     last_load: str | None
-    content_sha256: str
+    content_sha256: str | None
+    hash_algorithm: str
+    rules_sha256: str | None
+    rules_algorithm: str
     rows: dict[str, int]
     roots_checked: int
     roots_changed: list[RootCheck]
-    regenerated_sha256: str | None
-    regenerated_equal: bool | None
+    reference: ReferenceCheck | None
+    network: NetworkReport | None
     fingerprints_file: str | None
+
+
+class RegenerateReport(FrozenModel):
+    """Resultado de ``bd regenerar``: la base regenerada desde los archivos (QA36)."""
+
+    schema_version: Literal["1.0.0"] = "1.0.0"
+    status: Literal["same", "different", "inconclusive"]
+    reason: str | None
+    content_sha256: str | None
+    regenerated_sha256: str | None
 
 
 def _authorizations(connection: Connection) -> LoadOptions:
@@ -125,44 +187,132 @@ def _last_load(connection: Connection) -> str | None:
     return None if row is None else str(row[0])
 
 
-def verify(
+def _no_reference(source: str, reason: str) -> ReferenceCheck:
+    return ReferenceCheck(source=source, outcome="no_concluyente", reason=reason, differences=[])
+
+
+def _from_git(repository: Path | None) -> tuple[FingerprintFile, str] | ReferenceCheck:
+    """El ``docs/bd/huellas.json`` del último commit que lo cambió."""
+    if repository is None:
+        return _no_reference("git", "no se indicó la carpeta del repositorio")
+    commit = git_output(repository, "log", "-1", "--format=%H", "--", HUELLAS_FILE)
+    if not commit:
+        return _no_reference("git", f"{HUELLAS_FILE} no está en ningún commit del repositorio")
+    source = f"git {commit[:12]}:{HUELLAS_FILE}"
+    text = git_output(repository, "show", f"{commit}:{HUELLAS_FILE}")
+    try:
+        if text is None:
+            return _no_reference(source, "no se pudo leer la referencia de git")
+        return read_fingerprints(text), source
+    except ValueError:
+        return _no_reference(source, "la referencia de git no es un archivo de huellas válido")
+
+
+def _reference(
+    repository: Path | None, reference: Path | None
+) -> tuple[FingerprintFile, str] | ReferenceCheck:
+    """La huella de referencia: la indicada, o la del último commit de ``docs/bd/huellas.json``."""
+    if reference is None:
+        return _from_git(repository)
+    try:
+        return read_fingerprints(reference.read_text(encoding="utf-8")), "archivo indicado"
+    except (OSError, ValueError) as error:
+        return _no_reference(
+            "archivo indicado",
+            f"no se puede leer la referencia indicada ({type(error).__name__})",
+        )
+
+
+def _verify_status(
+    change: str | None, changed: list[RootCheck], check: ReferenceCheck | None
+) -> tuple[Literal["intact", "changed", "inconclusive"], str | None]:
+    if change is not None:
+        return "inconclusive", change
+    if changed:
+        return "changed", f"{len(changed)} archivos raíz ya no coinciden con la base"
+    if check is not None and check.outcome == "difiere":
+        return "changed", f"{len(check.differences)} diferencias con la referencia"
+    if check is not None and check.outcome == "no_concluyente":
+        return "inconclusive", check.reason
+    return "intact", None
+
+
+def _read_hba(hba: Path | None) -> str | None:
+    if hba is None:
+        return None
+    try:
+        return hba.read_text(encoding="utf-8", errors="replace")
+    except OSError as error:
+        raise BdError(
+            ErrorCode.INPUT_SCHEMA,
+            f"no se puede leer el archivo de reglas ({type(error).__name__})",
+            "hba",
+        ) from error
+
+
+def verify(  # noqa: PLR0913  (cada opción es de solo palabra clave)
     workspace: Path,
     repository: Path | None,
     *,
+    reference: Path | None = None,
+    compare: bool = True,
     fingerprints: Path | None = None,
-    regenerate: bool = False,
+    network: bool = False,
+    hba: Path | None = None,
     database: str | None = None,
 ) -> VerifyReport:
-    """``bd verificar``: huella de contenido, archivos raíz y, si se pide, regeneración.
+    """``bd verificar``: huella de contenido, archivos raíz, reglas instaladas y referencia.
+
+    Solo lee: una instantánea de solo lectura con el candado compartido (``instantanea``). No crea
+    ni borra bases (la regeneración está en ``regenerate``).
 
     - recalcula la huella de cada archivo raíz que conoce la base (manifiestos y archivos sueltos)
       y dice cuáles ya no coinciden;
-    - con ``regenerate``, carga los mismos archivos en una base temporal nueva y compara su huella
-      de contenido con la de la base (QA36);
-    - con ``fingerprints``, escribe el archivo de huellas para guardarlo en git (ADR03).
+    - calcula la huella de contenido y la de las reglas instaladas (disparadores, políticas,
+      permisos…) y las compara con la **referencia**: la indicada, o la del último commit de
+      ``docs/bd/huellas.json``. Una referencia de otra versión del esquema da *no concluyente*;
+    - con ``fingerprints``, escribe el archivo de huellas para guardarlo en git (ADR03);
+    - con ``network``, informa dónde escucha el servicio y qué reglas de acceso admiten equipos de
+      fuera de la laptop (C1.9).
     """
-    with connect(CARGA, database=database, autocommit=True) as connection:
-        catalog = Catalog.load(connection)
-        digest, rows = content_hash(connection, catalog)
-        checked, changed = check_roots(connection, workspace, repository)
-        options = _authorizations(connection)
-        last = _last_load(connection)
-        schema = installed_version(connection)
-        roots = root_fingerprints(connection)
-    regenerated: str | None = None
-    if regenerate:
-        with scratch_database() as name:
-            report = load_workspace(
-                workspace,
-                LoadOptions(
-                    preliminary=options.preliminary,
-                    loose_runs=options.loose_runs,
-                    without_metrics=options.without_metrics,
-                    repository=repository,
-                ),
-                database=name,
+    hba_text = _read_hba(hba)
+    try:
+        with lectura_estable(CARGA, database=database) as reading:
+            connection = reading.connection
+            digest, rows = content_hash(connection, Catalog.load(connection))
+            rules, _ = rules_digest(connection)
+            checked, changed = check_roots(connection, workspace, repository)
+            schema = installed_version(connection)
+            roots = root_fingerprints(connection)
+            last = _last_load(connection)
+            net = network_report(connection, hba_text) if network else None
+    except Inconcluso as stopped:
+        return VerifyReport(
+            status="inconclusive",
+            reason=stopped.reason,
+            database_schema=None,
+            last_load=None,
+            content_sha256=None,
+            hash_algorithm=HASH_ALGORITHM,
+            rules_sha256=None,
+            rules_algorithm=RULES_ALGORITHM,
+            rows={},
+            roots_checked=0,
+            roots_changed=[],
+            reference=None,
+            network=None,
+            fingerprints_file=None,
+        )
+    check: ReferenceCheck | None = None
+    if compare:
+        found = _reference(repository, reference)
+        check = (
+            found
+            if isinstance(found, ReferenceCheck)
+            else compare_with_reference(
+                found[0], Measured(schema, digest, rules, rows, roots), found[1]
             )
-            regenerated = report.content_sha256
+        )
     written: str | None = None
     if fingerprints is not None:
         write_fingerprints(
@@ -172,30 +322,108 @@ def verify(
                 carga_id=last,
                 schema_version_db=schema,
                 content_sha256=digest,
+                algoritmo_huella=HASH_ALGORITHM,
+                reglas_sha256=rules,
+                algoritmo_reglas=RULES_ALGORITHM,
                 rows=rows,
                 roots=roots,
             ),
         )
         written = fingerprints.name
-    equal = None if regenerated is None else regenerated == digest
-    intact = not changed and equal is not False
+    status, reason = _verify_status(reading.cambio, changed, check)
     return VerifyReport(
-        status="intact" if intact else "changed",
+        status=status,
+        reason=reason,
         database_schema=schema,
         last_load=last,
         content_sha256=digest,
+        hash_algorithm=HASH_ALGORITHM,
+        rules_sha256=rules,
+        rules_algorithm=RULES_ALGORITHM,
         rows=rows,
         roots_checked=checked,
         roots_changed=changed,
-        regenerated_sha256=regenerated,
-        regenerated_equal=equal,
+        reference=check,
+        network=net,
         fingerprints_file=written,
     )
 
 
 def verify_exit_code(report: VerifyReport) -> int:
-    """0 si todo coincide; 5 si un archivo cambió o la base regenerada no da la misma huella."""
-    return 0 if report.status == "intact" else INTEGRITY_EXIT
+    """0 si todo coincide; 5 si algo cambió; 6 si el resultado no es concluyente."""
+    return {"intact": 0, "changed": INTEGRITY_EXIT, "inconclusive": INCONCLUSIVE_EXIT}[
+        report.status
+    ]
+
+
+@dataclass(frozen=True)
+class _Stable:
+    digest: str
+    load: str | None
+    options: LoadOptions
+
+
+def _stable(database: str | None) -> _Stable:
+    with lectura_estable(CARGA, database=database) as reading:
+        connection = reading.connection
+        digest, _ = content_hash(connection, Catalog.load(connection))
+        return _Stable(digest, _last_load(connection), _authorizations(connection))
+
+
+def regenerate(
+    workspace: Path, repository: Path | None, *, database: str | None = None
+) -> RegenerateReport:
+    """``bd regenerar`` (QA36): carga los mismos archivos en una base temporal y compara huellas.
+
+    La lectura de la base es estable (instantánea y candado compartido) y se repite al final: si
+    la base cambió mientras se regeneraba, el resultado no es concluyente.
+    """
+    try:
+        before = _stable(database)
+    except Inconcluso as stopped:
+        return RegenerateReport(
+            status="inconclusive",
+            reason=stopped.reason,
+            content_sha256=None,
+            regenerated_sha256=None,
+        )
+    options = LoadOptions(
+        preliminary=before.options.preliminary,
+        loose_runs=before.options.loose_runs,
+        without_metrics=before.options.without_metrics,
+        repository=repository,
+    )
+    with scratch_database() as name:
+        regenerated = load_workspace(workspace, options, database=name).content_sha256
+    try:
+        after = _stable(database)
+    except Inconcluso as stopped:
+        return RegenerateReport(
+            status="inconclusive",
+            reason=stopped.reason,
+            content_sha256=before.digest,
+            regenerated_sha256=regenerated,
+        )
+    if (after.load, after.digest) != (before.load, before.digest):
+        return RegenerateReport(
+            status="inconclusive",
+            reason="la base cambió mientras se regeneraba",
+            content_sha256=before.digest,
+            regenerated_sha256=regenerated,
+        )
+    return RegenerateReport(
+        status="same" if regenerated == before.digest else "different",
+        reason=None,
+        content_sha256=before.digest,
+        regenerated_sha256=regenerated,
+    )
+
+
+def regenerate_exit_code(report: RegenerateReport) -> int:
+    """0 si la base regenerada da la misma huella; 5 si no; 6 si no es concluyente."""
+    return {"same": 0, "different": INTEGRITY_EXIT, "inconclusive": INCONCLUSIVE_EXIT}[
+        report.status
+    ]
 
 
 # --- hitos -----------------------------------------------------------------------------------
@@ -376,5 +604,111 @@ def reconcile_database(
 
 
 def reconcile_exit_code(report: ReconcileReport) -> int:
-    """0 si la base coincide con los archivos; 5 si hay alguna diferencia."""
+    """0 si coincide; 5 si difiere o está incompleta; 6 si el resultado no es concluyente."""
+    if report.status == "inconclusive":
+        return INCONCLUSIVE_EXIT
     return 0 if report.status == "equal" else INTEGRITY_EXIT
+
+
+def load_options_of(database: str | None = None) -> LoadOptions:
+    """Las autorizaciones que usaron las cargas completas de ``database`` (para repetirlas)."""
+    return _stable(database).options
+
+
+# --- decisiones sobre archivos excluidos (C1.5) -----------------------------------------------
+
+
+def register_decision(  # noqa: PLR0913  (cada dato de la decisión es de solo palabra clave)
+    workspace: Path,
+    repository: Path,
+    *,
+    path: str,
+    decision: DecisionKind,
+    reason: str,
+    acta: str,
+    responsible: str,
+    database: str | None = None,
+) -> tuple[str, LoadReport]:
+    """``bd decidir``: publica la decisión sobre un archivo excluido y la carga.
+
+    La identidad de la decisión es la **ruta y la huella** del archivo tal como está hoy en
+    ``datos/``: debe haber un conflicto pendiente de esa ruta y esa huella. Si el archivo cambió
+    desde que se excluyó, no hay conflicto con la huella nueva hasta la próxima carga, y la
+    decisión de la versión vieja no la cubre.
+
+    Raises:
+        BdError: si el archivo no existe, no hay conflicto pendiente de esa ruta y esa huella, ya
+            hay una decisión para ellas o el acta no está confirmada en git.
+    """
+    try:
+        relative = check_relative_path(path)
+        acta_relative = check_relative_path(acta)
+    except ValueError as error:
+        raise BdError(ErrorCode.PATH_NOT_ALLOWED, str(error), "ruta") from error
+    target = workspace / relative
+    if target.is_symlink() or not target.is_file():
+        raise BdError(ErrorCode.INPUT_SCHEMA, "el archivo no existe en datos/", relative)
+    digest = sha256_file(target)
+    commit = _committed_minutes(repository, acta_relative)
+    acta_record, _ = read_file(repository, REPOSITORY_ROOT, acta_relative, "minutes")
+    with connect(CARGA, database=database, autocommit=True) as connection:
+        rows = connection.execute(
+            "SELECT decision FROM control.conflictos WHERE artefacto_id = %s AND huella_nueva = %s",
+            (artifact_id(DATA_ROOT, relative), digest),
+        ).fetchall()
+    if not rows:
+        raise BdError(
+            ErrorCode.INPUT_SCHEMA,
+            "no hay un conflicto de esa ruta y esa huella: ¿el archivo cambió después de la "
+            "última carga?",
+            relative,
+        )
+    if all(row[0] is not None for row in rows):
+        raise BdError(
+            ErrorCode.RUN_EXISTS, "ese archivo y esa huella ya tienen una decisión", relative
+        )
+    for source in discover(workspace).of("decision"):
+        try:
+            published, _ = read_decision(workspace, source.folder)
+        except (DomainError, CargaError):
+            continue
+        if (published.ruta, published.huella) == (relative, digest):
+            raise BdError(
+                ErrorCode.RUN_EXISTS,
+                f"ya hay una decisión publicada para esa ruta y esa huella "
+                f"({published.decision_id})",
+                relative,
+            )
+    moment = utc_now()
+    made = Decision(
+        decision_id=f"decision-{moment:%Y%m%dT%H%M%SZ}-{secrets.token_hex(4)}",
+        decision=decision,
+        ruta=relative,
+        huella=digest,
+        motivo=reason,
+        acta=acta_relative,
+        acta_sha256=acta_record.sha256,
+        commit_codigo=commit,
+        responsable=responsible,
+        decidido_en=moment,
+    )
+    publish_decision(workspace, made)
+    report = load_workspace(
+        workspace,
+        LoadOptions(kinds=frozenset({"decision"}), repository=repository),
+        database=database,
+    )
+    return made.decision_id, report
+
+
+# --- fichas y pruebas de respaldos (C1.8) -----------------------------------------------------
+
+
+def backup_card(dump: Path) -> Ficha:
+    """``bd ficha``: escribe la ficha de un respaldo que ya existe (campo por campo)."""
+    return ficha_de_archivo(dump)
+
+
+def test_backup(dump: Path) -> BackupTest:
+    """``bd probar-respaldo``: restaura el respaldo en una base temporal y compara su huella."""
+    return probar_respaldo(dump)

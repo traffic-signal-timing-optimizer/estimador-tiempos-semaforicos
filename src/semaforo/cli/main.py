@@ -32,33 +32,15 @@ Comandos:
   publicada (DEV12). Códigos de salida: 0 correcto; 2 argumentos, conjunto, política o partición
   inválidos (se listan todos los problemas); 5 enlace, algo alterado o el conjunto ya tiene su
   partición.
-- `bd iniciar`, `bd cargar`, `bd verificar`, `bd hito` y `bd respaldar`: la base de datos de
-  consulta en PostgreSQL (DEV31). Códigos de salida: 0 correcto; 3 sin conexión con PostgreSQL;
-  5 conflictos de carga, archivos que cambiaron o una base regenerada con otra huella. Una carga
-  con unidades pendientes o no cargables termina en 0: hay que leer `counts` del JSON.
+- `bd ...`: la base de datos de consulta en PostgreSQL (DEV31); sus comandos y códigos de salida
+  están en `semaforo.cli.bd_comandos`.
 """
 
 import argparse
 import json
-import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from semaforo.app.bd_commands import (
-    LoadReport,
-    MetricsReport,
-    ReconcileReport,
-    backup_database,
-    initialize,
-    load,
-    load_exit_code,
-    publish_metrics,
-    reconcile_database,
-    reconcile_exit_code,
-    register_milestone,
-    verify,
-    verify_exit_code,
-)
 from semaforo.app.comparison import compare_receptions
 from semaforo.app.exit_codes import INTERNAL_ERROR_EXIT, exit_code_for
 from semaforo.app.integrity import (
@@ -80,7 +62,11 @@ from semaforo.app.report_commands import report_case, report_data
 from semaforo.app.scenario_commands import MAX_SEED, generate_scenario_set
 from semaforo.app.simulate import RunReport, run_prepared
 from semaforo.app.split_commands import create_split_set, validate_split_set
+from semaforo.cli.bd_comandos import add_database_commands, run_database
 from semaforo.cli.doctor import configure_doctor, run_doctor, summary
+from semaforo.cli.salida import emit as _emit
+from semaforo.cli.salida import say as _say
+from semaforo.cli.salida import with_exit as _with_exit
 
 
 def _positive_seconds(text: str) -> float:
@@ -158,98 +144,6 @@ def _add_experiment_commands(
     check.add_argument("--split", type=Path, required=True, help="carpeta de la partición")
     check.add_argument("--scenarios", type=Path, required=True, help="carpeta del conjunto")
     return [generate, create, check]
-
-
-MILESTONE_KINDS = ("protocol_frozen", "split_frozen", "model_frozen", "test_opened")
-
-
-def _add_database_commands(
-    add_group: Callable[..., argparse.ArgumentParser],
-) -> list[argparse.ArgumentParser]:
-    """El grupo ``bd`` (DEV31 F3); devuelve sus comandos."""
-    database = add_group("bd", help="base de datos de consulta en PostgreSQL (DEV31)")
-    actions = database.add_subparsers(dest="action", required=True)
-    start = actions.add_parser(
-        "iniciar", help="crea el espacio de tablas, los usuarios, la base y su esquema (una vez)"
-    )
-    start.add_argument(
-        "--carpeta-datos",
-        type=Path,
-        required=True,
-        help="carpeta vacía donde PostgreSQL guarda la base (por ejemplo D:\\pgdata\\semaforo)",
-    )
-    start.add_argument(
-        "--superusuario",
-        default="postgres",
-        help="administrador del servicio (por defecto postgres)",
-    )
-    load = actions.add_parser("cargar", help="carga los archivos publicados de datos/ en la base")
-    load.add_argument(
-        "--preliminar",
-        action="store_true",
-        help="carga escenarios sin partición congelada, marcados como preliminares",
-    )
-    load.add_argument(
-        "--sueltas",
-        action="store_true",
-        help="carga como diagnóstico las corridas que ninguna búsqueda publicada usa",
-    )
-    load.add_argument(
-        "--sin-metricas",
-        action="store_true",
-        help="carga las corridas exitosas sin métricas publicadas (sus métricas quedan vacías)",
-    )
-    check = actions.add_parser(
-        "verificar", help="huella de contenido, archivos raíz y, si se pide, regeneración"
-    )
-    check.add_argument("--huellas", type=Path, default=None, help="escribe el archivo de huellas")
-    check.add_argument(
-        "--regenerar",
-        action="store_true",
-        help="regenera la base en una temporal y compara su huella (QA36)",
-    )
-    milestone = actions.add_parser("hito", help="registra un hito del procedimiento con su acta")
-    milestone.add_argument("--tipo", choices=MILESTONE_KINDS, required=True, help="tipo de hito")
-    milestone.add_argument(
-        "--objeto", required=True, help="protocolo, partición, modelo o experimento del hito"
-    )
-    milestone.add_argument("--particion", default=None, help="partición (al abrir la prueba)")
-    milestone.add_argument(
-        "--acta", required=True, help="acta en el repositorio (ruta relativa, confirmada en git)"
-    )
-    milestone.add_argument("--responsable", required=True, help="quién registra el hito")
-    milestone.add_argument("--notas", default=None, help="aclaraciones del acta")
-    backup = actions.add_parser("respaldar", help="respaldo de la base con pg_dump")
-    backup.add_argument("--carpeta", type=Path, required=True, help="carpeta de los respaldos")
-    metrics = actions.add_parser(
-        "metricas",
-        help="calcula y publica las métricas que faltan, en carpetas nuevas de solo lectura",
-    )
-    metrics.add_argument(
-        "--protocolo",
-        default=None,
-        help="protocolo con que medir las corridas sueltas cuya zona calza con varios",
-    )
-    reconcile = actions.add_parser(
-        "conciliar", help="compara la base con los archivos: conteos y demora recalculada (QA33)"
-    )
-    reconcile.add_argument(
-        "--sin-recalcular",
-        action="store_true",
-        help="no vuelve a calcular las métricas (solo archivos y conteos)",
-    )
-    for command in (load, check, milestone, backup, reconcile):
-        command.add_argument(
-            "--base", default=None, help="base de datos (por defecto, la del servicio: semaforo)"
-        )
-    for command in (load, check, milestone, reconcile):
-        command.add_argument(
-            "--repositorio",
-            type=Path,
-            default=Path(),
-            help="carpeta del repositorio, para las actas de los hitos (por defecto, la actual)",
-        )
-    return [start, load, check, milestone, backup, metrics, reconcile]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -346,7 +240,7 @@ def build_parser() -> argparse.ArgumentParser:
         case_report,
         data_report,
         *_add_experiment_commands(groups.add_parser),
-        *_add_database_commands(groups.add_parser),
+        *add_database_commands(groups.add_parser),
     ):
         command.add_argument(
             "--workspace",
@@ -358,17 +252,6 @@ def build_parser() -> argparse.ArgumentParser:
             "--debug", action="store_true", help="muestra la traza de un error interno"
         )
     return parser
-
-
-def _emit(text: str) -> None:
-    """Escribe ``text`` en la salida estándar en UTF-8, sea cual sea la consola."""
-    sys.stdout.buffer.write(text.encode("utf-8") + b"\n")
-    sys.stdout.flush()
-
-
-def _say(text: str) -> None:
-    sys.stderr.buffer.write(text.encode("utf-8") + b"\n")
-    sys.stderr.flush()
 
 
 def _error(code: str, message: str, field: str | None) -> str:
@@ -384,10 +267,6 @@ def _run_summary(report: RunReport) -> str:
     if report.recovered_interrupted:
         lines.append(f"Corridas caídas apartadas: {', '.join(report.recovered_interrupted)}")
     return "\n".join(lines)
-
-
-def _with_exit(data: dict[str, object], code: int) -> str:
-    return json.dumps({**data, "exit_code": code}, ensure_ascii=False, indent=2)
 
 
 def _workspace_summary(report: WorkspaceReport) -> str:
@@ -523,160 +402,12 @@ def _case(arguments: argparse.Namespace, workspace: Path) -> int:
     return 0
 
 
-VERIFY_WORDS = {"intact": "íntegra", "changed": "con cambios"}
-STATUS_WORDS = {
-    "loaded": "cargadas",
-    "already": "ya estaban",
-    "pending": "pendientes",
-    "rejected": "rechazadas",
-    "not_loadable": "no cargables",
-}
-
-
-def _load_summary(report: LoadReport) -> str:
-    counts = ", ".join(f"{report.counts[k]} {word}" for k, word in STATUS_WORDS.items())
-    lines = [f"Carga {report.carga_id}: {report.status}. Unidades: {counts}."]
-    if report.content_sha256:
-        lines.append(f"Huella de contenido: {report.content_sha256}")
-    reasons: dict[str, int] = {}
-    for unit in report.units:
-        if unit.status in ("pending", "rejected", "not_loadable"):
-            reason = f"{STATUS_WORDS[unit.status]}: {unit.detail}"
-            reasons[reason] = reasons.get(reason, 0) + 1
-    lines += [f"- {count} {reason}" for reason, count in sorted(reasons.items())]
-    lines += [f"Nota: {note}" for note in report.notes]
-    return "\n".join(lines)
-
-
-METRIC_WORDS = {
-    "published": "publicadas",
-    "already": "ya estaban",
-    "skipped": "sin medir",
-    "failed": "con error",
-}
-
-
-def _metrics_summary(report: MetricsReport) -> str:
-    counts = ", ".join(f"{report.counts[k]} {word}" for k, word in METRIC_WORDS.items())
-    lines = [f"Métricas de las corridas: {counts}."]
-    reasons: dict[str, int] = {}
-    for run in report.runs:
-        if run.status in ("skipped", "failed"):
-            reason = f"{METRIC_WORDS[run.status]}: {run.detail}"
-            reasons[reason] = reasons.get(reason, 0) + 1
-    lines += [f"- {count} {reason}" for reason, count in sorted(reasons.items())]
-    return "\n".join(lines)
-
-
-def _reconcile_summary(report: ReconcileReport) -> str:
-    verdict = "coincide con los archivos" if report.status == "equal" else "NO coincide"
-    lines = [
-        f"La base {verdict}: {report.files_checked} archivos, {report.runs_checked} corridas "
-        f"({report.runs_recomputed} recalculadas), {report.differences_total} diferencias."
-    ]
-    lines += [
-        f"- {d.where}: {d.item}: base {d.database}, archivos {d.files}"
-        for d in report.differences[:20]
-    ]
-    return "\n".join(lines)
-
-
-def _database_checks(arguments: argparse.Namespace, workspace: Path) -> int:
-    """``bd metricas`` y ``bd conciliar`` (F4)."""
-    if arguments.action == "metricas":
-        published = publish_metrics(
-            workspace, protocol_id=None if arguments.protocolo is None else str(arguments.protocolo)
-        )
-        code = 4 if published.counts["failed"] else 0
-        _emit(_with_exit(published.model_dump(mode="json"), code))
-        _say(_metrics_summary(published))
-        return code
-    compared = reconcile_database(
-        workspace,
-        repository=Path(arguments.repositorio),
-        recompute=not arguments.sin_recalcular,
-        database=arguments.base,
-    )
-    code = reconcile_exit_code(compared)
-    _emit(_with_exit(compared.model_dump(mode="json"), code))
-    _say(_reconcile_summary(compared))
-    return code
-
-
-def _database(arguments: argparse.Namespace, workspace: Path) -> int:
-    action = arguments.action
-    if action == "iniciar":
-        installed = initialize(Path(arguments.carpeta_datos), str(arguments.superusuario))
-        _emit(_with_exit(installed.model_dump(mode="json"), 0))
-        _say(
-            f"PostgreSQL {installed.server_version} listo: base {installed.database}, "
-            f"esquema {installed.schema_version_installed}"
-        )
-        return 0
-    if action == "cargar":
-        report = load(
-            workspace,
-            preliminary=bool(arguments.preliminar),
-            loose_runs=bool(arguments.sueltas),
-            without_metrics=bool(arguments.sin_metricas),
-            repository=Path(arguments.repositorio),
-            database=arguments.base,
-        )
-        code = load_exit_code(report)
-        _emit(_with_exit(report.model_dump(mode="json"), code))
-        _say(_load_summary(report))
-        return code
-    if action == "verificar":
-        verified = verify(
-            workspace,
-            Path(arguments.repositorio),
-            fingerprints=None if arguments.huellas is None else Path(arguments.huellas),
-            regenerate=bool(arguments.regenerar),
-            database=arguments.base,
-        )
-        code = verify_exit_code(verified)
-        _emit(_with_exit(verified.model_dump(mode="json"), code))
-        _say(
-            f"Base {VERIFY_WORDS[verified.status]}: huella {verified.content_sha256}; "
-            f"{verified.roots_checked} archivos raíz revisados, "
-            f"{len(verified.roots_changed)} cambiaron"
-            + (
-                ""
-                if verified.regenerated_equal is None
-                else f"; regenerada {'igual' if verified.regenerated_equal else 'DISTINTA'}"
-            )
-        )
-        return code
-    if action == "hito":
-        hito_id, report = register_milestone(
-            workspace,
-            Path(arguments.repositorio),
-            kind=arguments.tipo,
-            target=str(arguments.objeto),
-            acta=str(arguments.acta),
-            responsible=str(arguments.responsable),
-            partition=None if arguments.particion is None else str(arguments.particion),
-            notes=None if arguments.notas is None else str(arguments.notas),
-            database=arguments.base,
-        )
-        code = load_exit_code(report)
-        _emit(_with_exit({"hito_id": hito_id, "carga": report.model_dump(mode="json")}, code))
-        _say(f"Hito {hito_id} registrado.\n{_load_summary(report)}")
-        return code
-    if action in ("metricas", "conciliar"):
-        return _database_checks(arguments, workspace)
-    saved = backup_database(Path(arguments.carpeta), database=arguments.base)
-    _emit(_with_exit(saved.model_dump(mode="json"), 0))
-    _say(f"Respaldo {saved.file} ({saved.size_bytes} bytes), huella {saved.sha256}")
-    return 0
-
-
 COMMAND_GROUPS = {
     "report": _report,
     "scenarios": _scenarios,
     "splits": _splits,
     "runs": _runs,
-    "bd": _database,
+    "bd": run_database,
 }
 
 

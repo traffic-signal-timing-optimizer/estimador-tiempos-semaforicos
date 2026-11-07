@@ -12,7 +12,7 @@ import psycopg
 import pytest
 
 from bd_tools import Loadable, copy_workspace, insert, rows_of, scalar
-from semaforo.app.bd_commands import register_milestone, verify
+from semaforo.app.bd_commands import regenerate, register_milestone, verify
 from semaforo.bd.carga.motor import LoadOptions, LoadReport, load_workspace
 from semaforo.bd.conexion import ADMIN, CARGA, BdError
 from semaforo.bd.respaldo import backup, restore
@@ -109,8 +109,10 @@ def test_qa36_a_new_database_from_the_same_files_has_the_same_content_hash(
     cargable: Loadable, base: str
 ) -> None:
     load_workspace(cargable.workspace, PRELIMINARY, database=base)
-    report = verify(cargable.workspace, None, regenerate=True, database=base)
-    assert report.regenerated_equal is True
+    regenerated = regenerate(cargable.workspace, None, database=base)
+    assert regenerated.status == "same"
+    assert regenerated.regenerated_sha256 == regenerated.content_sha256
+    report = verify(cargable.workspace, None, compare=False, database=base)
     assert report.status == "intact"
     assert report.roots_changed == []
     assert report.roots_checked >= 8
@@ -158,7 +160,7 @@ def test_a_file_changed_after_loading_is_a_conflict_and_nothing_else_is_written(
     case_file.write_bytes(
         case_file.read_bytes().replace(b'"description": "', b'"description": "X', 1)
     )
-    checked = verify(workspace, None, database=base)
+    checked = verify(workspace, None, compare=False, database=base)
     assert checked.status == "changed"
     assert [c.artefacto_id for c in checked.roots_changed] == [
         f"datos:casos/{cargable.case_id}/case.json"
@@ -251,8 +253,7 @@ def test_a_milestone_is_checked_published_loaded_and_regenerated(
             database=base,
         )
     assert len(list((workspace / "derivados" / "hitos").iterdir())) == 1
-    regenerated = verify(workspace, repository, regenerate=True, database=base)
-    assert regenerated.regenerated_equal is True
+    assert regenerate(workspace, repository, database=base).status == "same"
 
 
 def test_a_milestone_needs_its_minutes_committed(
@@ -281,7 +282,7 @@ def test_qa36_a_backup_restored_elsewhere_has_the_same_content(
     restored = create_database(schema=False)
     try:
         restore(tmp_path / "respaldos" / saved.file, restored)
-        again = verify(cargable.workspace, None, database=restored)
+        again = verify(cargable.workspace, None, compare=False, database=restored)
         assert again.content_sha256 == report.content_sha256
     finally:
         drop_database(restored)

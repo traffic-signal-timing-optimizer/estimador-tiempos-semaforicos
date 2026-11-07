@@ -19,9 +19,10 @@ Los guiones de solo datos (`MUTATIONS` y `TESTS`) se corren con el ejecutor com�
 .venv\Scripts\python.exe scripts\mutaciones\mutar.py scripts\mutaciones\dev14_f1.py
 ```
 
-Los demás traen su propio ejecutor:
+Los demás traen su propio ejecutor (`dev31_f3`, `dev31_f4` y `dev31_c1` aceptan, como argumentos, partes del nombre de un daño para correr solo esos):
 
 ```
+.venv\Scripts\python.exe scripts\mutaciones\dev31_c1.py
 .venv\Scripts\python.exe scripts\mutaciones\dev15_f3.py
 .venv\Scripts\python.exe scripts\mutaciones\dev14_a01.py [nombre de un daño]
 ```
@@ -39,6 +40,11 @@ Los demás traen su propio ejecutor:
 | `dev15_f1.py`, `dev15_f2.py`, `dev15_f3.py` | `referencias/baselines.py` | `test_baselines.py` | DEV15 F1 a F3 |
 | `dev15_f4.py` | `comparators.py`, `search.py` | `test_comparators.py`, `test_search_candidates.py` | DEV15 F4 |
 | `dev15_f5.py` (`mutar.py`) | `comparators.py`, `baselines.py` | `test_comparators.py`, `security/test_dev15.py` | DEV15 F5 |
+| `dev31_esquema.py` | una copia del esquema (`esquema.toml`) | `scripts/bd_esquema.py` | DEV31 F1 |
+| `dev31_f2.py` | `src/semaforo/` (lectura de salidas y métricas) | `tests/unit` | DEV31 F2 |
+| `dev31_f3.py` | cargador y SQL de la base (`bd/`) | pruebas de la base, de seguridad y de cegado (usa PostgreSQL y SUMO) | DEV31 F3 |
+| `dev31_f4.py` | conciliación y métricas (`bd/`) | `test_bd_conciliacion_sumo.py`, `test_bd_metricas.py` | DEV31 F4 |
+| `dev31_c1.py` | candado, lectura estable, huellas, cobertura, decisiones, fichas y cambio de base | pruebas de controles, cobertura, respaldos, reconstrucción y fuentes | DEV31 F4c, etapa C1 |
 
 Los resultados de cada ensayo están en el acta de la fase. **Esta carpeta no guarda resultados**: cada corrida imprime cuántos daños se aplicaron, cuáles se detectaron y cuáles sobrevivieron.
 

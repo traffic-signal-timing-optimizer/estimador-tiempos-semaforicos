@@ -15,6 +15,7 @@
 
 import hashlib
 import json
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -29,15 +30,24 @@ from semaforo.trazabilidad.hashing import sha256_file
 
 __all__ = [
     "EXCLUDED_TABLES",
+    "HASH_ALGORITHM",
     "Fingerprint",
     "FingerprintFile",
+    "Measured",
+    "ReferenceCheck",
+    "ReferenceDifference",
     "RootCheck",
     "check_roots",
+    "compare_with_reference",
     "content_hash",
+    "read_fingerprints",
     "root_fingerprints",
     "write_fingerprints",
 ]
 
+# Versión del algoritmo de la huella de contenido (D13): cambia si cambia qué tablas, columnas,
+# orden o formato entran en ella. Una referencia con otro algoritmo no se puede comparar.
+HASH_ALGORITHM = "contenido-1"
 EXCLUDED_TABLES = frozenset({"control.cargas", "control.conflictos"})
 EXCLUDED_COLUMNS = frozenset({"carga_id"})
 VOLATILE = {"control.artefactos": frozenset({"registrado_en"})}
@@ -100,15 +110,126 @@ class Fingerprint(FrozenModel):
 
 
 class FingerprintFile(FrozenModel):
-    """El archivo de huellas que se guarda en git (ADR03)."""
+    """El archivo de huellas que se guarda en git (ADR03).
 
-    schema_version: Literal["1.0.0"] = "1.0.0"
+    La versión 1.1.0 agrega la versión del algoritmo de la huella de contenido (D13), la huella de
+    las reglas instaladas y la versión de su algoritmo. Un archivo 1.0.0 (sin esos campos) se lee
+    igual: su algoritmo es el de siempre (``contenido-1``) y no tiene huella de reglas.
+    """
+
+    schema_version: Literal["1.0.0", "1.1.0"] = "1.1.0"
     generated_at: datetime
     carga_id: str | None
     schema_version_db: str | None
     content_sha256: str
+    algoritmo_huella: str | None = None
+    reglas_sha256: str | None = None
+    algoritmo_reglas: str | None = None
     rows: dict[str, int]
     roots: list[Fingerprint]
+
+
+class ReferenceDifference(FrozenModel):
+    """Una cosa que cambió respecto de la referencia: qué, y los dos valores."""
+
+    item: str
+    reference: str
+    database: str
+
+
+class ReferenceCheck(FrozenModel):
+    """El resultado de comparar la base con una huella de referencia (C1.6)."""
+
+    source: str
+    outcome: Literal["coincide", "difiere", "no_concluyente"]
+    reason: str | None
+    differences: list[ReferenceDifference]
+
+
+@dataclass(frozen=True)
+class Measured:
+    """Lo que midió la verificación en la base."""
+
+    schema_version: str | None
+    content_sha256: str
+    rules_sha256: str
+    rows: dict[str, int]
+    roots: list[Fingerprint]
+
+
+def compare_with_reference(
+    reference: FingerprintFile, measured: Measured, source: str
+) -> ReferenceCheck:
+    """Compara lo medido con la referencia. Una referencia de otra versión no es comparable.
+
+    - otra versión del esquema, o del algoritmo de la huella: *no concluyente* (no es una
+      diferencia: no se puede decir si algo cambió);
+    - igual versión: *difiere* si cambia la huella de contenido, alguna tabla, algún archivo raíz
+      o la huella de las reglas; si no, *coincide*. Una referencia sin huella de reglas (1.0.0) no
+      dice nada de las reglas.
+    """
+    if reference.schema_version_db != measured.schema_version:
+        return ReferenceCheck(
+            source=source,
+            outcome="no_concluyente",
+            reason=(
+                f"la referencia es de otra versión del esquema ({reference.schema_version_db}); "
+                f"la base tiene {measured.schema_version}"
+            ),
+            differences=[],
+        )
+    algorithm = reference.algoritmo_huella or HASH_ALGORITHM
+    if algorithm != HASH_ALGORITHM:
+        return ReferenceCheck(
+            source=source,
+            outcome="no_concluyente",
+            reason=(
+                f"contenido no comprobado: algoritmo distinto ({algorithm}; ahora {HASH_ALGORITHM})"
+            ),
+            differences=[],
+        )
+    found: list[ReferenceDifference] = []
+    if reference.content_sha256 != measured.content_sha256:
+        found.append(
+            ReferenceDifference(
+                item="huella de contenido",
+                reference=reference.content_sha256,
+                database=measured.content_sha256,
+            )
+        )
+    for table in sorted(set(reference.rows) | set(measured.rows)):
+        before, now = reference.rows.get(table), measured.rows.get(table)
+        if before != now:
+            found.append(
+                ReferenceDifference(
+                    item=f"filas de {table}", reference=str(before), database=str(now)
+                )
+            )
+    expected = {root.artefacto_id: root.sha256 for root in reference.roots}
+    current = {root.artefacto_id: root.sha256 for root in measured.roots}
+    for identifier in sorted(set(expected) | set(current)):
+        if expected.get(identifier) != current.get(identifier):
+            found.append(
+                ReferenceDifference(
+                    item=f"archivo raíz {identifier}",
+                    reference=str(expected.get(identifier)),
+                    database=str(current.get(identifier)),
+                )
+            )
+    if reference.reglas_sha256 is not None and reference.reglas_sha256 != measured.rules_sha256:
+        found.append(
+            ReferenceDifference(
+                item="reglas instaladas",
+                reference=reference.reglas_sha256,
+                database=measured.rules_sha256,
+            )
+        )
+    return ReferenceCheck(
+        source=source,
+        outcome="difiere" if found else "coincide",
+        reason=None,
+        differences=found,
+    )
 
 
 def root_fingerprints(connection: Connection) -> list[Fingerprint]:
@@ -135,6 +256,15 @@ def _render(document: FingerprintFile) -> bytes:
     lines.append(",\n".join(roots))
     lines.append("  ]\n}\n")
     return "\n".join(lines).encode("utf-8")
+
+
+def read_fingerprints(text: str) -> FingerprintFile:
+    """El archivo de huellas a partir de su texto (por ejemplo, el que está en git).
+
+    Raises:
+        ValueError: si el texto no es un archivo de huellas válido.
+    """
+    return FingerprintFile.model_validate_json(text)
 
 
 def write_fingerprints(path: Path, document: FingerprintFile) -> None:

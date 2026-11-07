@@ -18,7 +18,7 @@ la huella de contenido de la base (QA36). Solo puede haber una carga a la vez.
 
 import importlib.metadata
 import secrets
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -28,20 +28,28 @@ import psycopg
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
-from semaforo.aprendizaje.split_store import SPLITS, StoredSplit, read_split
+from semaforo.aprendizaje.split_store import StoredSplit, read_split
+from semaforo.bd.candado import try_exclusive
 from semaforo.bd.carga.caso import (
-    CASES,
-    PROTOCOLS,
-    SCENARIOS,
     case_unit,
     protocol_unit,
     scenario_set_unit,
     scenario_unit,
 )
 from semaforo.bd.carga.corridas import PROGRAMS, SearchRun, run_unit
-from semaforo.bd.carga.hitos import MILESTONES, milestone_unit
+from semaforo.bd.carga.decisiones import Decision, DecisionIndex, apply_decision, decision_unit
+from semaforo.bd.carga.fuentes import Source, Sources, children, discover, relative
+from semaforo.bd.carga.hitos import milestone_unit
 from semaforo.bd.carga.insercion import Catalog, KeyConflict, write_rows
-from semaforo.bd.carga.modelo import DATA_ROOT, CargaError, Pending, Row, Unit, read_file
+from semaforo.bd.carga.modelo import (
+    DATA_ROOT,
+    CargaError,
+    Pending,
+    Row,
+    Unit,
+    artifact_id,
+    read_file,
+)
 from semaforo.bd.carga.referencias import (
     Trace,
     comparators_unit,
@@ -52,26 +60,20 @@ from semaforo.bd.carga.referencias import (
 from semaforo.bd.conexion import CARGA, BdError, Connection, connect
 from semaforo.bd.esquema import installed_version, schema_version
 from semaforo.bd.verificacion import content_hash
-from semaforo.datos.scenario_set import SCENARIO_SETS, read_scenario_set
+from semaforo.datos.scenario_set import read_scenario_set
 from semaforo.dominio.base_model import FrozenModel
 from semaforo.dominio.case import Case
 from semaforo.dominio.errors import DomainError, ErrorCode
-from semaforo.evaluacion.published_metrics import MANIFEST_FILE as METRICS_MANIFEST
-from semaforo.evaluacion.published_metrics import METRICS, RUNS
-from semaforo.referencias.comparators import COMPARATORS
-from semaforo.referencias.label import LABELS
 from semaforo.simulacion.environment import capture_environment
-from semaforo.trazabilidad.fs import INCOMPLETE_DIR, TEMP_PREFIX, is_plain_folder
 from semaforo.trazabilidad.hashing import sha256_file
-from semaforo.trazabilidad.store import MANIFEST, utc_now
+from semaforo.trazabilidad.store import utc_now
 
 __all__ = ["LoadOptions", "LoadReport", "UnitOutcome", "artifact_rows", "load_workspace"]
 
-LOCK_KEY = 31_031_031  # candado de sesión: una sola carga a la vez
 CONFLICT_TABLES = {"control.artefactos": "hash_mismatch"}
 PRELIMINARY_TO_TEST = "SM003"
 
-Status = Literal["loaded", "already", "pending", "rejected", "not_loadable"]
+Status = Literal["loaded", "already", "pending", "rejected", "not_loadable", "excluded"]
 
 
 class UnitOutcome(FrozenModel):
@@ -126,7 +128,9 @@ class LoadOptions:
 # Unidades que, una vez cargadas, no pueden cambiar: si su archivo principal ya está en la base
 # con la misma huella, se saltan sin volver a leer la carpeta. Un conjunto de escenarios no entra:
 # su partición puede publicarse después.
-FAST_SKIP = frozenset({"protocol", "scenario", "run", "search", "comparators", "milestone"})
+FAST_SKIP = frozenset(
+    {"protocol", "scenario", "run", "search", "comparators", "milestone", "decision"}
+)
 
 
 @dataclass
@@ -154,30 +158,7 @@ class _Tally:
 
 
 # --- descubrimiento --------------------------------------------------------------------------
-
-
-def _children(folder: Path) -> list[Path]:
-    """Subcarpetas publicadas de ``folder`` (sin temporales, incompletas ni ocultas)."""
-    if not is_plain_folder(folder):
-        return []
-    return [
-        child
-        for child in sorted(folder.iterdir())
-        if is_plain_folder(child)
-        and not child.name.startswith((".", TEMP_PREFIX))
-        and child.name != INCOMPLETE_DIR
-    ]
-
-
-def _relative(workspace: Path, path: Path) -> str:
-    return path.relative_to(workspace).as_posix()
-
-
-def _grouped(workspace: Path, family: str) -> Iterator[str]:
-    """``datos/<family>/<caso>/<carpeta>``, en orden."""
-    for group in _children(workspace / family):
-        for folder in _children(group):
-            yield _relative(workspace, folder)
+# El recorrido de ``datos/`` vive en ``fuentes`` (catálogo único, C1.1).
 
 
 class _Programs:
@@ -190,10 +171,10 @@ class _Programs:
     def __call__(self, case_id: str, manifest_sha: str) -> str | None:
         if case_id not in self.index:
             found: dict[str, str] = {}
-            for folder in _children(self.workspace / PROGRAMS / case_id):
+            for folder in children(self.workspace / PROGRAMS / case_id):
                 manifest = folder / "manifiesto.json"
                 if manifest.is_file() and not manifest.is_symlink():
-                    found[sha256_file(manifest)] = _relative(self.workspace, folder)
+                    found[sha256_file(manifest)] = relative(self.workspace, folder)
             self.index[case_id] = found
         return self.index[case_id].get(manifest_sha)
 
@@ -244,21 +225,28 @@ def _record_conflict(  # noqa: PLR0913  (cada dato del conflicto es de solo pala
     loaded_sha: str | None = None,
     new_sha: str | None = None,
     artifact_id: str,
+    decided: Decision | None = None,
 ) -> None:
-    """Agrega un conflicto, salvo que el mismo ya esté registrado (cargar dos veces no duplica)."""
+    """Agrega un conflicto, salvo que el mismo ya esté registrado (cargar dos veces no duplica).
+
+    El mismo conflicto es el de igual tipo, tabla, clave, huella nueva y archivo, **haya sido
+    decidido o no**: un conflicto ya decidido no vuelve a abrirse en la carga siguiente. Si hay una
+    decisión publicada para ese archivo y esa huella, el conflicto nace ya decidido.
+    """
     with connection.transaction():
         exists = connection.execute(
             "SELECT 1 FROM control.conflictos WHERE tipo = %s AND tabla_destino IS NOT DISTINCT "
             "FROM %s AND clave IS NOT DISTINCT FROM %s AND huella_nueva IS NOT DISTINCT FROM %s "
-            "AND artefacto_id = %s AND decision IS NULL",
+            "AND artefacto_id = %s",
             (kind, table, key, new_sha, artifact_id),
         ).fetchone()
         if exists is not None:
             return
         connection.execute(
             "INSERT INTO control.conflictos (conflicto_id, tipo, tabla_destino, clave, "
-            "huella_cargada, huella_nueva, detalle, detectado_en, carga_id, artefacto_id) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            "huella_cargada, huella_nueva, detalle, detectado_en, decision, decidido_en, "
+            "decidido_por, carga_id, artefacto_id) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             (
                 f"conflicto-{utc_now():%Y%m%dT%H%M%SZ}-{secrets.token_hex(4)}",
                 kind,
@@ -268,6 +256,9 @@ def _record_conflict(  # noqa: PLR0913  (cada dato del conflicto es de solo pala
                 new_sha,
                 detail,
                 utc_now(),
+                None if decided is None else decided.decision,
+                None if decided is None else decided.decidido_en,
+                None if decided is None else decided.responsable,
                 carga_id,
                 artifact_id,
             ),
@@ -383,12 +374,20 @@ def _not_loadable(  # noqa: PLR0913, PLR0917  (todo describe el archivo no carga
     workspace: Path,
     relative: str,
     reason: str,
-) -> None:
-    """Registra el archivo de una carpeta no cargable (una sola vez) y su conflicto."""
+    decisions: DecisionIndex,
+) -> Decision | None:
+    """Registra el archivo de una carpeta no cargable (una sola vez) y su conflicto.
+
+    Devuelve la decisión publicada que cubre ese archivo con esa huella, si la hay: el conflicto
+    nace ya decidido y la unidad queda «excluida con decisión». Si el archivo ya estaba
+    registrado con **otra** huella (cambió después), se registra un conflicto nuevo para la
+    versión nueva: la decisión de la versión vieja no la cubre.
+    """
     path = workspace / relative
     if not path.is_file():
-        return
+        return None
     record, _ = read_file(workspace, DATA_ROOT, relative, "manifest")
+    covering = decisions.covering(relative, record.sha256)
     unit = Unit(key=relative, kind="not_loadable", files=[record])
     rows = artifact_rows(unit, status="not_loadable", reason=reason)
     with connection.transaction():
@@ -401,7 +400,22 @@ def _not_loadable(  # noqa: PLR0913, PLR0917  (todo describe el archivo no carga
             detail=reason,
             new_sha=record.sha256,
             artifact_id=record.artifact_id,
+            decided=covering,
         )
+    elif result.conflicts:
+        known = _known_sha(connection, record.artifact_id)
+        if known != record.sha256:
+            _record_conflict(
+                connection,
+                carga_id,
+                kind="not_loadable",
+                detail=f"{reason} (versión nueva del archivo)",
+                loaded_sha=known,
+                new_sha=record.sha256,
+                artifact_id=record.artifact_id,
+                decided=covering,
+            )
+    return covering
 
 
 @dataclass
@@ -414,32 +428,60 @@ class _Run:
     workspace: Path
     options: LoadOptions
     tally: _Tally
+    sources: Sources
     cases: dict[tuple[str, str], Case] = field(default_factory=dict[tuple[str, str], Case])
+    decisions: DecisionIndex = field(default_factory=lambda: DecisionIndex({}))
 
     def wanted(self, kind: str) -> bool:
         return self.options.kinds is None or kind in self.options.kinds
 
-    def _known(self, mains: tuple[str, ...]) -> tuple[Status, str | None] | None:
-        """Si todos los archivos principales ya están en la base con su huella, el resultado."""
-        found: list[tuple[str, str | None]] = []
-        for relative in mains:
-            path = self.workspace / relative
+    def _known(self, mains: tuple[str, ...]) -> tuple[Status, str | None, str] | None:
+        """Si todos los archivos principales ya están en la base con su huella, el resultado.
+
+        El tercer valor es la huella del primer archivo principal (la de la unidad).
+        """
+        found: list[tuple[str, str | None, str]] = []
+        for relative_path in mains:
+            path = self.workspace / relative_path
             if path.is_symlink() or not path.is_file():
                 return None
+            digest = sha256_file(path)
             row = self.connection.execute(
                 "SELECT sha256, estado, motivo FROM control.artefactos WHERE artefacto_id = %s",
-                (f"{DATA_ROOT}:{relative}",),
+                (f"{DATA_ROOT}:{relative_path}",),
             ).fetchone()
-            if row is None or row[0] != sha256_file(path):
+            if row is None or row[0] != digest:
                 return None
-            found.append((str(row[1]), None if row[2] is None else str(row[2])))
+            found.append((str(row[1]), None if row[2] is None else str(row[2]), digest))
         if not found:
             return None
-        if all(state == "intact" for state, _ in found):
-            return "already", None
+        if all(state == "intact" for state, _, _ in found):
+            return "already", None, found[0][2]
         if found[0][0] == "not_loadable":
-            return "not_loadable", found[0][1]
+            return "not_loadable", found[0][1], found[0][2]
         return None
+
+    def _excluded(self, main: str, sha256: str, reason: str | None) -> tuple[Status, str | None]:
+        """«No cargable», o «excluida con decisión» si una decisión publicada cubre ese archivo."""
+        covering = self.decisions.covering(main, sha256)
+        if covering is None:
+            return "not_loadable", reason
+        return "excluded", f"{reason} · decisión {covering.decision_id}: {covering.decision}"
+
+    def exclude(self, main: str, reason: str) -> tuple[Status, str]:
+        """Registra el archivo principal de una unidad no cargable y dice cómo queda."""
+        covering = _not_loadable(
+            self.connection,
+            self.catalog,
+            self.carga_id,
+            self.workspace,
+            main,
+            reason,
+            self.decisions,
+        )
+        if covering is None:
+            return "not_loadable", reason
+        return "excluded", f"{reason} · decisión {covering.decision_id}: {covering.decision}"
 
     def unit(
         self,
@@ -454,7 +496,9 @@ class _Run:
         if kind in FAST_SKIP:
             known = self._known((main,) if mains is None else mains)
             if known is not None:
-                status, detail = known
+                status, detail, digest = known
+                if status == "not_loadable":
+                    status, detail = self._excluded(main, digest, detail)
                 self.tally.add(
                     UnitOutcome(key=key, kind=kind, status=status, detail=detail, rows={})
                 )
@@ -467,13 +511,8 @@ class _Run:
             )
             return None
         except (DomainError, CargaError) as error:
-            reason = f"{error.code.value}: {error.message}"
-            _not_loadable(
-                self.connection, self.catalog, self.carga_id, self.workspace, main, reason
-            )
-            self.tally.add(
-                UnitOutcome(key=key, kind=kind, status="not_loadable", detail=reason, rows={})
-            )
+            status, detail = self.exclude(main, f"{error.code.value}: {error.message}")
+            self.tally.add(UnitOutcome(key=key, kind=kind, status=status, detail=detail, rows={}))
             return None
         if unit is None:
             return None
@@ -501,18 +540,15 @@ class _Run:
 
 
 def _cases(run: _Run) -> None:
-    for folder in _children(run.workspace / CASES):
-        relative = f"{CASES}/{folder.name}/case.json"
-        if not (folder / "case.json").is_file():
-            continue
+    for source in run.sources.of("case"):
         found: dict[str, Case] = {}
 
-        def build(name: str = folder.name, keep: dict[str, Case] = found) -> Unit:
+        def build(name: str = source.name, keep: dict[str, Case] = found) -> Unit:
             unit, case = case_unit(run.workspace, name)
             keep["case"] = case
             return unit
 
-        unit = run.unit("case", f"caso:{folder.name}", relative, build)
+        unit = run.unit("case", source.key, source.main, build)
         case = found.get("case")
         if case is not None and unit is not None and _loaded_or_same(run, unit.key):
             run.cases[(case.case_id, case.case_version)] = case
@@ -524,40 +560,28 @@ def _loaded_or_same(run: _Run, key: str) -> bool:
 
 
 def _protocols(run: _Run) -> None:
-    for group in _children(run.workspace / PROTOCOLS):
-        for path in sorted(group.glob("*.json")):
-            relative = _relative(run.workspace, path)
-            run.unit(
-                "protocol",
-                f"protocolo:{relative}",
-                relative,
-                lambda r=relative: protocol_unit(run.workspace, r)[0],
-            )
+    for source in run.sources.of("protocol"):
+        run.unit(
+            "protocol",
+            source.key,
+            source.main,
+            lambda r=source.main: protocol_unit(run.workspace, r)[0],
+        )
 
 
 def _splits(run: _Run) -> dict[str, tuple[str, StoredSplit]]:
     """Particiones publicadas por la huella de contenido de su conjunto de escenarios."""
     found: dict[str, tuple[str, StoredSplit]] = {}
-    for folder in _grouped(run.workspace, SPLITS):
+    for folder in (source.folder for source in run.sources.of("split")):
         try:
             stored = read_split(run.workspace / folder)
         except DomainError as error:
-            reason = f"{error.code.value}: {error.message}"
-            _not_loadable(
-                run.connection,
-                run.catalog,
-                run.carga_id,
-                run.workspace,
-                f"{folder}/manifiesto.json",
-                reason,
+            status, detail = run.exclude(
+                f"{folder}/manifiesto.json", f"{error.code.value}: {error.message}"
             )
             run.tally.add(
                 UnitOutcome(
-                    key=f"particion:{folder}",
-                    kind="split",
-                    status="not_loadable",
-                    detail=reason,
-                    rows={},
+                    key=f"particion:{folder}", kind="split", status=status, detail=detail, rows={}
                 )
             )
             continue
@@ -567,9 +591,9 @@ def _splits(run: _Run) -> dict[str, tuple[str, StoredSplit]]:
 
 def _scenario_sets(run: _Run) -> None:
     splits = _splits(run)
-    for folder in _grouped(run.workspace, SCENARIO_SETS):
+    for source in run.sources.of("scenario_set"):
 
-        def build(folder: str = folder) -> Unit:
+        def build(folder: str = source.folder) -> Unit:
             scenario_set = read_scenario_set(run.workspace / folder)
             manifest = scenario_set.manifest
             case = run.cases.get((manifest.case_id, manifest.case_version))
@@ -590,52 +614,40 @@ def _scenario_sets(run: _Run) -> None:
                 preliminary=run.options.preliminary,
             )
 
-        run.unit("scenario_set", f"conjunto:{folder}", f"{folder}/manifiesto.json", build)
+        run.unit("scenario_set", source.key, source.main, build)
 
 
 def _hand_scenarios(run: _Run) -> None:
-    for group in _children(run.workspace / SCENARIOS):
-        for path in sorted(group.glob("*.json")):
-            relative = _relative(run.workspace, path)
+    for source in run.sources.of("scenario"):
 
-            def build(relative: str = relative) -> Unit | None:
-                built = scenario_unit(run.workspace, relative, run.cases)
-                if built is None:
-                    return None
-                if not run.options.preliminary:
-                    raise Pending(
-                        "un escenario escrito a mano no tiene partición: solo se carga como "
-                        "preliminar (--preliminar)"
-                    )
-                return built[0]
+        def build(relative: str = source.main) -> Unit | None:
+            built = scenario_unit(run.workspace, relative, run.cases)
+            if built is None:
+                return None
+            if not run.options.preliminary:
+                raise Pending(
+                    "un escenario escrito a mano no tiene partición: solo se carga como "
+                    "preliminar (--preliminar)"
+                )
+            return built[0]
 
-            run.unit("scenario", f"escenario:{relative}", relative, build)
+        run.unit("scenario", source.key, source.main, build)
 
 
 def _traces(run: _Run) -> tuple[list[Trace], dict[str, SearchRun]]:
     traces: list[Trace] = []
     runs: dict[str, SearchRun] = {}
-    for folder in _grouped(run.workspace, LABELS):
+    for folder in (source.folder for source in run.sources.of("search")):
         try:
             trace = read_trace(run.workspace, folder)
             found = trace_runs(trace)
         except DomainError as error:
-            reason = f"{error.code.value}: {error.message}"
-            _not_loadable(
-                run.connection,
-                run.catalog,
-                run.carga_id,
-                run.workspace,
-                f"{folder}/manifiesto.json",
-                reason,
+            status, detail = run.exclude(
+                f"{folder}/manifiesto.json", f"{error.code.value}: {error.message}"
             )
             run.tally.add(
                 UnitOutcome(
-                    key=f"busqueda:{folder}",
-                    kind="search",
-                    status="not_loadable",
-                    detail=reason,
-                    rows={},
+                    key=f"busqueda:{folder}", kind="search", status=status, detail=detail, rows={}
                 )
             )
             continue
@@ -648,26 +660,14 @@ def _traces(run: _Run) -> tuple[list[Trace], dict[str, SearchRun]]:
     return traces, runs
 
 
-def _metrics_manifest(workspace: Path, run_id: str) -> str | None:
-    """El manifiesto de las métricas publicadas de la corrida, si las tiene."""
-    for group in _children(workspace / METRICS):
-        path = group / run_id / METRICS_MANIFEST
-        if path.is_file():
-            return _relative(workspace, path)
-    return None
-
-
 def _runs(run: _Run, searches: dict[str, SearchRun]) -> None:
     programs = _Programs(run.workspace)
-    for folder in _children(run.workspace / RUNS):
-        run_id = folder.name
-        main = f"{RUNS}/{run_id}/{MANIFEST}"
-        metrics = _metrics_manifest(run.workspace, run_id)
+    for source in run.sources.of("run"):
         run.unit(
             "run",
-            f"corrida:{run_id}",
-            main,
-            lambda r=run_id: run_unit(
+            source.key,
+            source.main,
+            lambda r=source.name: run_unit(
                 run.workspace,
                 r,
                 run.cases,
@@ -676,7 +676,7 @@ def _runs(run: _Run, searches: dict[str, SearchRun]) -> None:
                 diagnostics=run.options.loose_runs,
                 require_metrics=not run.options.without_metrics,
             ),
-            mains=(main,) if metrics is None else (main, metrics),
+            mains=source.mains,
         )
 
 
@@ -691,27 +691,95 @@ def _searches(run: _Run, traces: list[Trace]) -> None:
 
 
 def _comparators(run: _Run) -> None:
-    for folder in _grouped(run.workspace, COMPARATORS):
+    for source in run.sources.of("comparators"):
         run.unit(
             "comparators",
-            f"comparadores:{folder}",
-            f"{folder}/manifiesto.json",
-            lambda f=folder: comparators_unit(run.workspace, f, run.cases),
+            source.key,
+            source.main,
+            lambda f=source.folder: comparators_unit(run.workspace, f, run.cases),
         )
 
 
 def _milestones(run: _Run) -> None:
-    for folder in _children(run.workspace / MILESTONES):
-        relative = _relative(run.workspace, folder)
+    for source in run.sources.of("milestone"):
         run.unit(
             "milestone",
-            f"hito:{folder.name}",
-            f"{relative}/manifiesto.json",
-            lambda r=relative: milestone_unit(run.workspace, run.options.repository, r),
+            source.key,
+            source.main,
+            lambda r=source.folder: milestone_unit(run.workspace, run.options.repository, r),
         )
 
 
+@dataclass(frozen=True)
+class _ReadDecision:
+    source: Source
+    decision: Decision
+    unit: Unit
+
+
+def _decisions_read(
+    run: _Run,
+) -> tuple[list[_ReadDecision], dict[str, tuple[ErrorCode, str]]]:
+    """Lee las decisiones publicadas y arma el índice de las válidas (``run.decisions``).
+
+    De dos decisiones sobre la misma ruta y la misma huella vale la primera (por nombre de
+    carpeta); la otra se rechaza. Se leen siempre, aunque la carga sea de otra clase, porque
+    deciden cómo queda cada archivo excluido.
+    """
+    valid: list[_ReadDecision] = []
+    invalid: dict[str, tuple[ErrorCode, str]] = {}
+    by_file: dict[tuple[str, str], Decision] = {}
+    for source in run.sources.of("decision"):
+        try:
+            decision, unit = decision_unit(run.workspace, run.options.repository, source.folder)
+        except (DomainError, CargaError) as error:
+            invalid[source.key] = (error.code, error.message)
+            continue
+        identity = (artifact_id(DATA_ROOT, decision.ruta), decision.huella)
+        first = by_file.get(identity)
+        if first is not None:
+            invalid[source.key] = (
+                ErrorCode.INPUT_SCHEMA,
+                f"ya hay una decisión de esa ruta y esa huella ({first.decision_id})",
+            )
+            continue
+        by_file[identity] = decision
+        valid.append(_ReadDecision(source, decision, unit))
+    run.decisions = DecisionIndex(by_file)
+    return valid, invalid
+
+
+def _refuse(code: ErrorCode, message: str) -> Unit:
+    raise CargaError(code, message)
+
+
+def _decisions_apply(
+    run: _Run, valid: list[_ReadDecision], invalid: dict[str, tuple[ErrorCode, str]]
+) -> None:
+    """Registra las decisiones como unidades y aplica cada una a su conflicto pendiente."""
+    ready = {entry.source.key: entry for entry in valid}
+    for source in run.sources.of("decision"):
+        refused = invalid.get(source.key)
+        if refused is not None:
+            run.unit(
+                "decision",
+                source.key,
+                source.main,
+                lambda r=refused: _refuse(r[0], r[1]),
+            )
+            continue
+        entry = ready[source.key]
+        run.unit("decision", source.key, source.main, lambda u=entry.unit: u)
+        applied = apply_decision(run.connection, entry.decision)
+        if applied:
+            run.tally.note(
+                f"decisión {entry.decision.decision_id}: aplicada a {applied} conflicto(s) de "
+                f"{entry.decision.ruta}"
+            )
+
+
 def _steps(run: _Run) -> None:
+    decisions, refused = _decisions_read(run)
     _cases(run)
     if run.wanted("protocol"):
         _protocols(run)
@@ -728,6 +796,8 @@ def _steps(run: _Run) -> None:
         _comparators(run)
     if run.wanted("milestone"):
         _milestones(run)
+    if run.wanted("decision"):
+        _decisions_apply(run, decisions, refused)
 
 
 # --- la carga --------------------------------------------------------------------------------
@@ -814,15 +884,18 @@ def load_workspace(
     chosen = options or LoadOptions()
     # Sin transacción implícita: cada unidad abre y cierra la suya (todo o nada).
     with connector(CARGA, database=database, autocommit=True) as connection:
-        locked = connection.execute("SELECT pg_try_advisory_lock(%s)", (LOCK_KEY,)).fetchone()
-        if locked is None or not locked[0]:
-            raise BdError(ErrorCode.INPUT_SCHEMA, "ya hay otra carga en curso", "carga")
+        if not try_exclusive(connection):
+            raise BdError(
+                ErrorCode.INPUT_SCHEMA,
+                "ya hay otra carga o una verificación en curso (candado ocupado)",
+                "carga",
+            )
         catalog = Catalog.load(connection)
         started = utc_now()
         carga_id = f"{started:%Y%m%dT%H%M%SZ}_{secrets.token_hex(4)}"
         version = _start(connection, chosen, carga_id, started)
         tally = _Tally()
-        run = _Run(connection, catalog, carga_id, workspace, chosen, tally)
+        run = _Run(connection, catalog, carga_id, workspace, chosen, tally, discover(workspace))
         status: Literal["completed", "interrupted"] = "interrupted"
         content: str | None = None
         try:
@@ -841,7 +914,7 @@ def load_workspace(
             )
         counts = {
             name: sum(1 for o in tally.outcomes if o.status == name)
-            for name in ("loaded", "already", "pending", "rejected", "not_loadable")
+            for name in ("loaded", "already", "pending", "rejected", "not_loadable", "excluded")
         }
         return LoadReport(
             carga_id=carga_id,

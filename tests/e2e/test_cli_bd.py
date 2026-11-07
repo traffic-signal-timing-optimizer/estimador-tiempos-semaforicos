@@ -17,6 +17,12 @@ def _run(capsys: pytest.CaptureFixture[str], *arguments: str) -> tuple[int, dict
     return code, json.loads(out)
 
 
+def _outcome(report: dict[str, object]) -> object:
+    reference = report["reference"]
+    assert isinstance(reference, dict)
+    return reference["outcome"]  # pyright: ignore[reportUnknownVariableType]
+
+
 def test_load_then_verify_with_fingerprints_from_the_command_line(
     cargable: Loadable, base: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -28,12 +34,24 @@ def test_load_then_verify_with_fingerprints_from_the_command_line(
     assert isinstance(counts, dict)
     assert counts["loaded"] == 8
     fingerprints = tmp_path / "huellas.json"
-    code, checked = _run(capsys, "bd", "verificar", *where, "--huellas", str(fingerprints))
+    code, checked = _run(
+        capsys, "bd", "verificar", *where, "--sin-referencia", "--huellas", str(fingerprints)
+    )
     assert (code, checked["status"]) == (0, "intact")
     written = json.loads(fingerprints.read_text(encoding="utf-8"))
     assert written["content_sha256"] == report["content_sha256"]
     assert len(written["roots"]) == checked["roots_checked"]
     assert all(str(r["artefacto_id"]).startswith("datos:") for r in written["roots"])
+    assert written["algoritmo_huella"] and written["reglas_sha256"]
+    # Con ese archivo como referencia la base coincide; con otra versión del esquema, no concluye.
+    code, same = _run(capsys, "bd", "verificar", *where, "--referencia", str(fingerprints))
+    assert (code, same["status"]) == (0, "intact")
+    assert _outcome(same) == "coincide"
+    written["schema_version_db"] = "sql-otra-version"
+    fingerprints.write_text(json.dumps(written), encoding="utf-8")
+    code, other = _run(capsys, "bd", "verificar", *where, "--referencia", str(fingerprints))
+    assert (code, other["status"]) == (6, "inconclusive")
+    assert _outcome(other) == "no_concluyente"
 
 
 def test_qa34_reports_carry_no_machine_paths(

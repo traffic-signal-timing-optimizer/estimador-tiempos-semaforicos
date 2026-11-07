@@ -1,9 +1,12 @@
 {
-  "schema_version": "1.0.0",
-  "generated_at": "2026-11-07T13:31:14.025852Z",
+  "schema_version": "1.1.0",
+  "generated_at": "2026-11-07T22:55:48.750638Z",
   "carga_id": "20261107T132435Z_8605bee2",
   "schema_version_db": "sql-d405569d4d1daf46",
   "content_sha256": "545063407b83f6d365647ecba9c14d32844be383de454d75877ae856fcb7d5a7",
+  "algoritmo_huella": "contenido-1",
+  "reglas_sha256": "6e0eed086f3025847af5ae487be0cbc7b8e4b930dfc3fc6aadf16f0a0d76e257",
+  "algoritmo_reglas": "reglas-1",
   "rows": {
     "aprendizaje.conjunto_etiquetas": 0,
     "aprendizaje.conjuntos": 0,

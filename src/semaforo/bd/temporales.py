@@ -1,6 +1,7 @@
 """Bases temporales: para las pruebas y para regenerar la base y comparar su huella (DEV31 F3).
 
-Se llaman siempre ``semaforo_pruebas_<…>`` y solo se borran bases con ese prefijo: nunca la base
+Se llaman ``semaforo_pruebas_<…>`` (pruebas y regeneración) o ``semaforo_candidata_<…>`` (la base
+candidata de ``bd reconstruir``) y solo se borran bases con esos prefijos: nunca la base
 ``semaforo`` ni las de otros proyectos del mismo servicio. Las crea ``semaforo_admin`` (que tiene
 permiso para crear bases) en el espacio de tablas del proyecto, con el esquema ya aplicado.
 """
@@ -19,22 +20,30 @@ from semaforo.bd.esquema import apply_schema
 from semaforo.bd.instalacion import TABLESPACE, prepare_database
 from semaforo.dominio.errors import ErrorCode
 
-__all__ = ["PREFIX", "create_database", "drop_database", "scratch_database"]
+__all__ = ["CANDIDATE_PREFIX", "PREFIX", "create_database", "drop_database", "scratch_database"]
 
 PREFIX = "semaforo_pruebas_"
+CANDIDATE_PREFIX = "semaforo_candidata_"
 DROP_PAUSE_S = 0.2
 WAIT_S = 15.0
 
 
 def _checked(name: str) -> sql.Identifier:
-    if not name.startswith(PREFIX) or not name.replace("_", "").isalnum():
+    prefixed = name.startswith((PREFIX, CANDIDATE_PREFIX))
+    if not prefixed or not name.replace("_", "").isalnum() or name != name.lower():
         raise BdError(ErrorCode.PATH_NOT_ALLOWED, "solo se manejan bases temporales", name)
     return sql.Identifier(name)
 
 
-def create_database(*, template: str | None = None, schema: bool = True) -> str:
-    """Crea una base temporal vacía (o copia de ``template``) y devuelve su nombre."""
-    name = f"{PREFIX}{os.getpid()}_{secrets.token_hex(4)}"
+def create_database(
+    *, template: str | None = None, schema: bool = True, name: str | None = None
+) -> str:
+    """Crea una base temporal vacía (o copia de ``template``) y devuelve su nombre.
+
+    ``name`` es opcional: sin él, se elige uno ``semaforo_pruebas_<…>``. Con él, debe empezar con
+    uno de los dos prefijos temporales.
+    """
+    name = name or f"{PREFIX}{os.getpid()}_{secrets.token_hex(4)}"
     source = sql.SQL("template0") if template is None else _checked(template)
     query = sql.SQL("CREATE DATABASE {} OWNER {} TABLESPACE {} ENCODING 'UTF8' TEMPLATE {}").format(
         _checked(name), sql.Identifier(ADMIN), sql.Identifier(TABLESPACE), source
