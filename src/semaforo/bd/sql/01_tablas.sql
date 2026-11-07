@@ -1100,6 +1100,8 @@ CREATE TABLE simulacion.resultados_corrida (
     detenciones_media double precision,
     cota_inf_detenciones double precision,
     pasos_fcd integer,
+    pasos_cola_s jsonb,
+    pasos_en_ventana jsonb,
     carga_id text NOT NULL,
     artefacto_id text NOT NULL,
     CONSTRAINT resultados_corrida_pk PRIMARY KEY (run_id),
@@ -1190,6 +1192,8 @@ COMMENT ON COLUMN simulacion.resultados_corrida.detenciones_total IS 'Detencione
 COMMENT ON COLUMN simulacion.resultados_corrida.detenciones_media IS 'Detenciones por vehículo.';
 COMMENT ON COLUMN simulacion.resultados_corrida.cota_inf_detenciones IS 'Cota inferior de detenciones por vehículo.';
 COMMENT ON COLUMN simulacion.resultados_corrida.pasos_fcd IS 'Pasos leídos del archivo de posiciones.';
+COMMENT ON COLUMN simulacion.resultados_corrida.pasos_cola_s IS 'Momento de cada paso de la serie de cola, en orden (la misma para todos los accesos de la corrida). Vacío sin zona. Unidad: s.';
+COMMENT ON COLUMN simulacion.resultados_corrida.pasos_en_ventana IS 'Si cada paso cuenta para la cola del resumen (intervalo de medición y momento de muestreo), en el mismo orden que pasos_cola_s. Los demás pasos (calentamiento, vaciado) se guardan, pero no entran en las medias. Vacío sin zona.';
 COMMENT ON COLUMN simulacion.resultados_corrida.carga_id IS 'Carga que escribió la fila.';
 COMMENT ON COLUMN simulacion.resultados_corrida.artefacto_id IS 'Archivo de datos/ (o acta del repositorio) del que sale la fila.';
 
@@ -1397,26 +1401,20 @@ COMMENT ON COLUMN simulacion.eventos.texto IS 'Línea original, guardada tal cua
 COMMENT ON COLUMN simulacion.eventos.carga_id IS 'Carga que escribió la fila.';
 COMMENT ON COLUMN simulacion.eventos.artefacto_id IS 'Archivo de datos/ (o acta del repositorio) del que sale la fila.';
 
-CREATE TABLE simulacion.cola_segundo (
+CREATE TABLE simulacion.cola_por_acceso (
     run_id text NOT NULL,
     acceso text NOT NULL,
-    tiempo_s double precision NOT NULL,
-    vehiculos_en_cola integer NOT NULL,
-    en_ventana boolean NOT NULL,
+    vehiculos_en_cola jsonb NOT NULL,
     carga_id text NOT NULL,
     artefacto_id text NOT NULL,
-    CONSTRAINT cola_segundo_pk PRIMARY KEY (run_id, acceso, tiempo_s),
-    CONSTRAINT cola_segundo_tiempo_s_regla CHECK (tiempo_s >= 0),
-    CONSTRAINT cola_segundo_vehiculos_en_cola_regla CHECK (vehiculos_en_cola >= 0)
+    CONSTRAINT cola_por_acceso_pk PRIMARY KEY (run_id, acceso)
 );
-COMMENT ON TABLE simulacion.cola_segundo IS 'Vehículos detenidos en cada acceso, en cada paso de la FCD (un paso por segundo con la simulación actual), con la marca de los que cuentan para la cola del resumen.';
-COMMENT ON COLUMN simulacion.cola_segundo.run_id IS 'Corrida.';
-COMMENT ON COLUMN simulacion.cola_segundo.acceso IS 'Acceso: una clave de zone.queue_series.vehicles_by_access.';
-COMMENT ON COLUMN simulacion.cola_segundo.tiempo_s IS 'Momento del paso de la FCD. Un paso que la FCD no trae no tiene fila: no se rellena con cero. Unidad: s.';
-COMMENT ON COLUMN simulacion.cola_segundo.vehiculos_en_cola IS 'Vehículos del acceso con velocidad menor o igual que el umbral de cola, en los carriles de la zona. Unidad: veh.';
-COMMENT ON COLUMN simulacion.cola_segundo.en_ventana IS 'Si el paso cuenta para la cola del resumen: está dentro del intervalo de medición y en un momento de muestreo. Los demás pasos (calentamiento, vaciado) se guardan para verlos, pero no entran en las medias.';
-COMMENT ON COLUMN simulacion.cola_segundo.carga_id IS 'Carga que escribió la fila.';
-COMMENT ON COLUMN simulacion.cola_segundo.artefacto_id IS 'Archivo de datos/ (o acta del repositorio) del que sale la fila.';
+COMMENT ON TABLE simulacion.cola_por_acceso IS 'Cola de cada acceso de la zona, paso a paso, como un arreglo por acceso. Los momentos de los pasos y cuáles cuentan para la cola del resumen están una sola vez por corrida, en resultados_corrida (pasos_cola_s y pasos_en_ventana). La vista vistas.cola_por_segundo muestra una fila por corrida, acceso y paso, como antes.';
+COMMENT ON COLUMN simulacion.cola_por_acceso.run_id IS 'Corrida.';
+COMMENT ON COLUMN simulacion.cola_por_acceso.acceso IS 'Acceso: una clave de zone.queue_series.vehicles_by_access.';
+COMMENT ON COLUMN simulacion.cola_por_acceso.vehiculos_en_cola IS 'Vehículos del acceso con velocidad menor o igual que el umbral de cola, en los carriles de la zona, en cada paso (un número por paso, en el orden de pasos_cola_s de la corrida). Un paso que la FCD no trae no tiene valor: no se rellena con cero. Unidad: veh.';
+COMMENT ON COLUMN simulacion.cola_por_acceso.carga_id IS 'Carga que escribió la fila.';
+COMMENT ON COLUMN simulacion.cola_por_acceso.artefacto_id IS 'Archivo de datos/ (o acta del repositorio) del que sale la fila.';
 
 CREATE TABLE simulacion.busquedas (
     busqueda_id text NOT NULL,
@@ -2358,9 +2356,10 @@ ALTER TABLE simulacion.vehiculos ADD CONSTRAINT vehiculos_fk_5 FOREIGN KEY (arte
 ALTER TABLE simulacion.eventos ADD CONSTRAINT eventos_fk_1 FOREIGN KEY (run_id) REFERENCES simulacion.corridas (run_id);
 ALTER TABLE simulacion.eventos ADD CONSTRAINT eventos_fk_2 FOREIGN KEY (carga_id) REFERENCES control.cargas (carga_id);
 ALTER TABLE simulacion.eventos ADD CONSTRAINT eventos_fk_3 FOREIGN KEY (artefacto_id) REFERENCES control.artefactos (artefacto_id);
-ALTER TABLE simulacion.cola_segundo ADD CONSTRAINT cola_segundo_fk_1 FOREIGN KEY (run_id) REFERENCES simulacion.corridas (run_id);
-ALTER TABLE simulacion.cola_segundo ADD CONSTRAINT cola_segundo_fk_2 FOREIGN KEY (carga_id) REFERENCES control.cargas (carga_id);
-ALTER TABLE simulacion.cola_segundo ADD CONSTRAINT cola_segundo_fk_3 FOREIGN KEY (artefacto_id) REFERENCES control.artefactos (artefacto_id);
+ALTER TABLE simulacion.cola_por_acceso ADD CONSTRAINT cola_por_acceso_fk_1 FOREIGN KEY (run_id) REFERENCES simulacion.corridas (run_id);
+ALTER TABLE simulacion.cola_por_acceso ADD CONSTRAINT cola_por_acceso_fk_2 FOREIGN KEY (run_id) REFERENCES simulacion.resultados_corrida (run_id);
+ALTER TABLE simulacion.cola_por_acceso ADD CONSTRAINT cola_por_acceso_fk_3 FOREIGN KEY (carga_id) REFERENCES control.cargas (carga_id);
+ALTER TABLE simulacion.cola_por_acceso ADD CONSTRAINT cola_por_acceso_fk_4 FOREIGN KEY (artefacto_id) REFERENCES control.artefactos (artefacto_id);
 ALTER TABLE simulacion.busquedas ADD CONSTRAINT busquedas_fk_1 FOREIGN KEY (escenario_id) REFERENCES experimento.escenarios (escenario_id);
 ALTER TABLE simulacion.busquedas ADD CONSTRAINT busquedas_fk_2 FOREIGN KEY (caso_id, caso_version) REFERENCES caso.casos (caso_id, caso_version);
 ALTER TABLE simulacion.busquedas ADD CONSTRAINT busquedas_fk_3 FOREIGN KEY (protocolo_id) REFERENCES experimento.protocolos (protocolo_id);

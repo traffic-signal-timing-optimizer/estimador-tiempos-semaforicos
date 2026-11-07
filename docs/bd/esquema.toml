@@ -103,6 +103,11 @@ clase = "disparador"
 descripcion = "La etapa «final» solo en escenarios asignados a «test»; la semilla debe pertenecer a la etapa del protocolo."
 
 [[funciones]]
+nombre = "simulacion.validar_cola()"
+clase = "disparador"
+descripcion = "Cada acceso de la cola tiene un valor por paso de la serie de su corrida (las tres listas con la misma longitud); si no, se rechaza con SM006."
+
+[[funciones]]
 nombre = "aprendizaje.validar_conjunto_etiqueta()"
 clase = "disparador"
 descripcion = "Una etiqueta entra a un conjunto solo si su escenario está asignado a «train» o «validation» en la misma partición; nunca a «test»."
@@ -134,8 +139,8 @@ fuentes = ["simulacion.vehiculos"]
 
 [[vistas]]
 nombre = "vistas.cola_por_segundo"
-descripcion = "Cola por acceso y segundo. El panel y las consultas leen esta vista, nunca la tabla, para poder cambiar cómo se guarda."
-fuentes = ["simulacion.cola_segundo"]
+descripcion = "Cola por corrida, acceso y paso (una fila por paso, como antes del cambio a arreglo por acceso). El panel y las consultas leen esta vista, nunca la tabla, para poder cambiar cómo se guarda."
+fuentes = ["simulacion.cola_por_acceso", "simulacion.resultados_corrida"]
 
 [[vistas]]
 nombre = "vistas.busquedas_resumen"
@@ -1120,6 +1125,8 @@ columnas = [
   { nombre = "detenciones_media", tipo = "double precision", nulo = true, descripcion = "Detenciones por vehículo.", origen = "metricas.json: zone.stops.mean_stops" },
   { nombre = "cota_inf_detenciones", tipo = "double precision", nulo = true, descripcion = "Cota inferior de detenciones por vehículo.", origen = "metricas.json: zone.stops.lower_bound_mean_stops" },
   { nombre = "pasos_fcd", tipo = "integer", nulo = true, descripcion = "Pasos leídos del archivo de posiciones.", origen = "metricas.json: zone.fcd_steps" },
+  { nombre = "pasos_cola_s", tipo = "jsonb", nulo = true, unidad = "s", descripcion = "Momento de cada paso de la serie de cola, en orden (la misma para todos los accesos de la corrida). Vacío sin zona.", origen = "metricas.json: zone.queue_series.times_s" },
+  { nombre = "pasos_en_ventana", tipo = "jsonb", nulo = true, descripcion = "Si cada paso cuenta para la cola del resumen (intervalo de medición y momento de muestreo), en el mismo orden que pasos_cola_s. Los demás pasos (calentamiento, vaciado) se guardan, pero no entran en las medias. Vacío sin zona.", origen = "metricas.json: zone.queue_series.in_window" },
 ]
 claves_foraneas = [
   { columnas = ["run_id"], referencia = "simulacion.corridas", referidas = ["run_id"], uno_a_uno = true },
@@ -1284,23 +1291,25 @@ claves_foraneas = [
 
 [[tablas]]
 esquema = "simulacion"
-nombre = "cola_segundo"
-descripcion = "Vehículos detenidos en cada acceso, en cada paso de la FCD (un paso por segundo con la simulación actual), con la marca de los que cuentan para la cola del resumen."
-grano = "Una fila por corrida, acceso y paso"
-origen = "metricas.json: zone.queue_series (times_s, in_window y vehicles_by_access), con la misma regla de DEV19"
-fuente = "existe desde DEV31 F2 (metricas.json de las corridas nuevas; las 133 anteriores se calculan al cargarlas, F4)"
-filas_dev16 = "unos 69 millones"
+nombre = "cola_por_acceso"
+descripcion = "Cola de cada acceso de la zona, paso a paso, como un arreglo por acceso. Los momentos de los pasos y cuáles cuentan para la cola del resumen están una sola vez por corrida, en resultados_corrida (pasos_cola_s y pasos_en_ventana). La vista vistas.cola_por_segundo muestra una fila por corrida, acceso y paso, como antes."
+grano = "Una fila por corrida y acceso; cada arreglo tiene un valor por paso de la FCD"
+origen = "metricas.json: zone.queue_series.vehicles_by_access, con la misma regla de DEV19"
+fuente = "existe desde DEV31 F2 (metricas.json de las corridas nuevas; las 133 anteriores se calculan al cargarlas, F4). Cambio aprobado por el PO en DEV31 F4: antes era una fila por corrida, acceso y paso (cola_segundo)"
+filas_dev16 = "unas 33 mil (4 692 corridas por unos 7 accesos)"
 cegado = "padre:simulacion.corridas(run_id)"
-clave_primaria = ["run_id", "acceso", "tiempo_s"]
+clave_primaria = ["run_id", "acceso"]
 columnas = [
   { nombre = "run_id", tipo = "text", descripcion = "Corrida.", origen = "metricas.json: run_id" },
   { nombre = "acceso", tipo = "text", descripcion = "Acceso: una clave de zone.queue_series.vehicles_by_access.", origen = "metricas.json: zone.queue_series.vehicles_by_access (clave)" },
-  { nombre = "tiempo_s", tipo = "double precision", unidad = "s", descripcion = "Momento del paso de la FCD. Un paso que la FCD no trae no tiene fila: no se rellena con cero.", origen = "metricas.json: zone.queue_series.times_s", regla = "tiempo_s >= 0" },
-  { nombre = "vehiculos_en_cola", tipo = "integer", unidad = "veh", descripcion = "Vehículos del acceso con velocidad menor o igual que el umbral de cola, en los carriles de la zona.", origen = "metricas.json: zone.queue_series.vehicles_by_access[acceso]", regla = "vehiculos_en_cola >= 0" },
-  { nombre = "en_ventana", tipo = "boolean", descripcion = "Si el paso cuenta para la cola del resumen: está dentro del intervalo de medición y en un momento de muestreo. Los demás pasos (calentamiento, vaciado) se guardan para verlos, pero no entran en las medias.", origen = "metricas.json: zone.queue_series.in_window" },
+  { nombre = "vehiculos_en_cola", tipo = "jsonb", unidad = "veh", descripcion = "Vehículos del acceso con velocidad menor o igual que el umbral de cola, en los carriles de la zona, en cada paso (un número por paso, en el orden de pasos_cola_s de la corrida). Un paso que la FCD no trae no tiene valor: no se rellena con cero.", origen = "metricas.json: zone.queue_series.vehicles_by_access[acceso]" },
 ]
 claves_foraneas = [
   { columnas = ["run_id"], referencia = "simulacion.corridas", referidas = ["run_id"] },
+  { columnas = ["run_id"], referencia = "simulacion.resultados_corrida", referidas = ["run_id"] },
+]
+reglas = [
+  { nombre = "un_valor_por_paso", sql = "", descripcion = "Disparador simulacion.validar_cola(): el arreglo tiene un valor por cada paso de la serie de su corrida." },
 ]
 
 [[tablas]]

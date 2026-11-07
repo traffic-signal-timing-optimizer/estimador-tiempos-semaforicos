@@ -1,9 +1,9 @@
 {
   "schema_version": "1.0.0",
-  "generated_at": "2026-11-06T23:14:14.190223Z",
-  "carga_id": "20261106T230144Z_02dff26e",
-  "schema_version_db": "sql-903e4137442d4fe7",
-  "content_sha256": "05caa0be0f563fdab1356f5eb9c167bddf2c1756c086b5420e965f4f43363e3f",
+  "generated_at": "2026-11-07T13:31:14.025852Z",
+  "carga_id": "20261107T132435Z_8605bee2",
+  "schema_version_db": "sql-d405569d4d1daf46",
+  "content_sha256": "545063407b83f6d365647ecba9c14d32844be383de454d75877ae856fcb7d5a7",
   "rows": {
     "aprendizaje.conjunto_etiquetas": 0,
     "aprendizaje.conjuntos": 0,
@@ -48,7 +48,7 @@
     "simulacion.busquedas": 1,
     "simulacion.candidato_semillas": 102,
     "simulacion.candidatos": 21,
-    "simulacion.cola_segundo": 1911000,
+    "simulacion.cola_por_acceso": 910,
     "simulacion.comparadores": 1,
     "simulacion.corridas": 130,
     "simulacion.etiquetas": 1,

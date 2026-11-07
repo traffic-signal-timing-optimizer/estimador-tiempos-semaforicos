@@ -159,11 +159,20 @@ def _recompute(context: ProtocolContext, row: Row, stored: Row, found: _Found) -
 
 def _check_series(connection: Connection, workspace: Path, runs: list[Row], found: _Found) -> None:
     """Filas de cola, de accesos y de movimientos contra ``metricas.json`` de cada corrida."""
-    queue = _by_run(connection, "SELECT run_id, count(*) FROM simulacion.cola_segundo GROUP BY 1")
+    # Un valor por paso en cada arreglo por acceso: los pasos cuentan igual que antes (una fila por
+    # paso). Se cuenta en las tablas porque esta conexión (la de carga) no lee las vistas.
+    queue = _by_run(
+        connection,
+        "SELECT run_id, sum(jsonb_array_length(vehiculos_en_cola)) "
+        "FROM simulacion.cola_por_acceso GROUP BY 1",
+    )
     window = _by_run(
         connection,
-        "SELECT run_id, sum(vehiculos_en_cola) FROM simulacion.cola_segundo "
-        "WHERE en_ventana GROUP BY 1",
+        "SELECT q.run_id, sum(s.v::integer) FROM simulacion.cola_por_acceso AS q "
+        "JOIN simulacion.resultados_corrida AS r ON r.run_id = q.run_id "
+        "CROSS JOIN LATERAL ROWS FROM (jsonb_array_elements_text(q.vehiculos_en_cola), "
+        "jsonb_array_elements_text(r.pasos_en_ventana)) AS s(v, w) "
+        "WHERE s.w::boolean GROUP BY 1",
     )
     accesses = _by_run(
         connection, "SELECT run_id, count(*) FROM simulacion.resultados_acceso GROUP BY 1"

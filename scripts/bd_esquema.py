@@ -40,8 +40,14 @@ SECURITY_FILE = SQL_FOLDER / "03_seguridad.sql"
 ACTA_F0 = ROOT / "docs" / "actas" / "2026-11-05-dev31-f0-planificacion-y-diseno.md"
 
 
+# Nombres de tabla del acta F0 que cambiaron después, con su aprobación del PO. El acta no se
+# reescribe: el cambio queda aquí y en su propia acta. cola_segundo pasó a cola_por_acceso (un
+# arreglo por acceso en vez de una fila por segundo; DEV31 F4, aprobado el 2026-11-07).
+RENAMED_SINCE_F0 = {"cola_segundo": "cola_por_acceso"}
+
+
 def catalog_names(path: Path = ACTA_F0) -> set[str]:
-    """Nombres de tabla del catálogo (sección 5.4) del acta de DEV31 F0."""
+    """Nombres de tabla del catálogo (sección 5.4) del acta de DEV31 F0, con sus cambios."""
     lines = path.read_text(encoding="utf-8").splitlines()
     start = next(i for i, line in enumerate(lines) if line.startswith("### 5.4"))
     end = next(i for i, line in enumerate(lines) if line.startswith("### 5.5"))
@@ -49,7 +55,7 @@ def catalog_names(path: Path = ACTA_F0) -> set[str]:
     for line in lines[start:end]:
         if line.startswith("| `"):
             names.update(re.findall(r"`([a-z_]+)`", line.split("|")[1]))
-    return names
+    return {RENAMED_SINCE_F0.get(name, name) for name in names}
 
 
 # ---------------------------------------------------------------------------------------------

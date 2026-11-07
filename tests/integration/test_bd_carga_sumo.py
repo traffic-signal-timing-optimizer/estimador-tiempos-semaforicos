@@ -8,9 +8,10 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import psycopg
 import pytest
 
-from bd_tools import Loadable, copy_workspace, rows_of, scalar
+from bd_tools import Loadable, copy_workspace, insert, rows_of, scalar
 from semaforo.app.bd_commands import register_milestone, verify
 from semaforo.bd.carga.motor import LoadOptions, LoadReport, load_workspace
 from semaforo.bd.conexion import ADMIN, CARGA, BdError
@@ -42,7 +43,13 @@ def test_qa32_everything_published_is_loaded_with_its_rows(cargable: Loadable, b
     assert count("simulacion.corridas") == 4
     assert count("simulacion.vehiculos") == 4 * cargable.vehicles_per_run
     assert count("simulacion.resultados_corrida WHERE artefacto_metricas_id IS NOT NULL") == 4
-    assert count("simulacion.cola_segundo") > 0
+    assert count("simulacion.cola_por_acceso") > 0
+    # La vista muestra un paso por fila: cada valor de cada arreglo sale una vez.
+    steps = scalar(
+        base, "SELECT sum(jsonb_array_length(vehiculos_en_cola)) FROM simulacion.cola_por_acceso"
+    )
+    shown = scalar(base, "SELECT count(*) FROM vistas.cola_por_segundo", role=ADMIN)
+    assert int(str(shown)) == int(str(steps)) > 0
     assert count("simulacion.resultados_acceso") > 0
     assert count("simulacion.busquedas") == count("simulacion.etiquetas") == 1
     assert count("simulacion.candidato_semillas") == 4
@@ -62,6 +69,29 @@ def test_qa32_everything_published_is_loaded_with_its_rows(cargable: Loadable, b
         base, "SELECT estado || ':' || huella_contenido FROM control.cargas", role=ADMIN
     )
     assert closed == f"completed:{report.content_sha256}"
+
+
+def test_the_queue_of_an_access_has_one_value_per_step_or_it_is_refused(
+    cargable: Loadable, base: str
+) -> None:
+    load_workspace(cargable.workspace, PRELIMINARY, database=base)
+    run_id, steps = rows_of(
+        base,
+        "SELECT run_id, jsonb_array_length(pasos_cola_s) FROM simulacion.resultados_corrida "
+        "WHERE pasos_cola_s IS NOT NULL ORDER BY run_id LIMIT 1",
+        role=ADMIN,
+    )[0]
+    artifact = scalar(base, "SELECT artefacto_id FROM control.artefactos LIMIT 1", role=ADMIN)
+    # Un valor menos que los pasos de su corrida: el disparador (SM006) no lo deja entrar.
+    short = {
+        "run_id": run_id,
+        "acceso": "ACCESO-PRUEBA",
+        "vehiculos_en_cola": [0] * (int(str(steps)) - 1),
+        "artefacto_id": artifact,
+    }
+    with pytest.raises(psycopg.Error) as refused:
+        insert(base, {"simulacion.cola_por_acceso": [short]})
+    assert refused.value.sqlstate == "SM006"
 
 
 def test_qa32_loading_again_writes_nothing_and_keeps_the_content_hash(

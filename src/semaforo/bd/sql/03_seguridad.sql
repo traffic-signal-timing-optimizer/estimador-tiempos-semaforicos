@@ -70,8 +70,8 @@ CREATE TRIGGER solo_agregar BEFORE UPDATE OR DELETE ON simulacion.vehiculos FOR 
 CREATE TRIGGER solo_agregar_vaciado BEFORE TRUNCATE ON simulacion.vehiculos FOR EACH STATEMENT EXECUTE FUNCTION control.bloquear_cambios();
 CREATE TRIGGER solo_agregar BEFORE UPDATE OR DELETE ON simulacion.eventos FOR EACH ROW EXECUTE FUNCTION control.bloquear_cambios();
 CREATE TRIGGER solo_agregar_vaciado BEFORE TRUNCATE ON simulacion.eventos FOR EACH STATEMENT EXECUTE FUNCTION control.bloquear_cambios();
-CREATE TRIGGER solo_agregar BEFORE UPDATE OR DELETE ON simulacion.cola_segundo FOR EACH ROW EXECUTE FUNCTION control.bloquear_cambios();
-CREATE TRIGGER solo_agregar_vaciado BEFORE TRUNCATE ON simulacion.cola_segundo FOR EACH STATEMENT EXECUTE FUNCTION control.bloquear_cambios();
+CREATE TRIGGER solo_agregar BEFORE UPDATE OR DELETE ON simulacion.cola_por_acceso FOR EACH ROW EXECUTE FUNCTION control.bloquear_cambios();
+CREATE TRIGGER solo_agregar_vaciado BEFORE TRUNCATE ON simulacion.cola_por_acceso FOR EACH STATEMENT EXECUTE FUNCTION control.bloquear_cambios();
 CREATE TRIGGER solo_agregar BEFORE UPDATE OR DELETE ON simulacion.busquedas FOR EACH ROW EXECUTE FUNCTION control.bloquear_cambios();
 CREATE TRIGGER solo_agregar_vaciado BEFORE TRUNCATE ON simulacion.busquedas FOR EACH STATEMENT EXECUTE FUNCTION control.bloquear_cambios();
 CREATE TRIGGER solo_agregar BEFORE UPDATE OR DELETE ON simulacion.candidatos FOR EACH ROW EXECUTE FUNCTION control.bloquear_cambios();
@@ -140,9 +140,9 @@ CREATE POLICY lectura_cegada ON simulacion.vehiculos FOR SELECT TO semaforo_lect
 ALTER TABLE simulacion.eventos ENABLE ROW LEVEL SECURITY;
 CREATE POLICY carga_ve_todo ON simulacion.eventos TO semaforo_carga USING (true) WITH CHECK (true);
 CREATE POLICY lectura_cegada ON simulacion.eventos FOR SELECT TO semaforo_lectura USING (EXISTS (SELECT 1 FROM simulacion.corridas AS padre WHERE padre.run_id = eventos.run_id));
-ALTER TABLE simulacion.cola_segundo ENABLE ROW LEVEL SECURITY;
-CREATE POLICY carga_ve_todo ON simulacion.cola_segundo TO semaforo_carga USING (true) WITH CHECK (true);
-CREATE POLICY lectura_cegada ON simulacion.cola_segundo FOR SELECT TO semaforo_lectura USING (EXISTS (SELECT 1 FROM simulacion.corridas AS padre WHERE padre.run_id = cola_segundo.run_id));
+ALTER TABLE simulacion.cola_por_acceso ENABLE ROW LEVEL SECURITY;
+CREATE POLICY carga_ve_todo ON simulacion.cola_por_acceso TO semaforo_carga USING (true) WITH CHECK (true);
+CREATE POLICY lectura_cegada ON simulacion.cola_por_acceso FOR SELECT TO semaforo_lectura USING (EXISTS (SELECT 1 FROM simulacion.corridas AS padre WHERE padre.run_id = cola_por_acceso.run_id));
 ALTER TABLE simulacion.busquedas ENABLE ROW LEVEL SECURITY;
 CREATE POLICY carga_ve_todo ON simulacion.busquedas TO semaforo_carga USING (true) WITH CHECK (true);
 CREATE POLICY lectura_cegada ON simulacion.busquedas FOR SELECT TO semaforo_lectura USING (NOT EXISTS (SELECT 1 FROM control.escenarios_cegados AS cegado WHERE cegado.escenario_id = busquedas.escenario_id));

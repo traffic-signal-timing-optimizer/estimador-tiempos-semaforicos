@@ -6,7 +6,7 @@ Versión 1.0.0-borrador del 2026-11-05. Motor: PostgreSQL 17.9. Estado: propuest
 
 **Archivo generado** por `scripts/bd_esquema.py` desde `docs/bd/esquema.toml`. No se edita a mano: se cambia el esquema y se vuelve a generar.
 
-**56 tablas aprobadas en F0** y **0 propuestas** de F1, con **871 columnas** en total y **112 relaciones** entre tablas. Cada tabla lleva además `carga_id` y `artefacto_id`, que la unen con la carga que la escribió y con su archivo original.
+**56 tablas aprobadas en F0** y **0 propuestas** de F1, con **871 columnas** en total y **113 relaciones** entre tablas. Cada tabla lleva además `carga_id` y `artefacto_id`, que la unen con la carga que la escribió y con su archivo original.
 
 ## Resumen por esquema
 
@@ -64,6 +64,7 @@ La zona (desarrollo o prueba) no se guarda en cada fila: se deduce de la partici
 | control.validar_hito() | disparador | Exige el orden de los hitos: protocolo y partición congelados antes que el modelo; modelo congelado antes de abrir la prueba. |
 | experimento.validar_asignacion() | disparador | Una familia completa va a una sola partición y asignación; un escenario cargado como preliminar no puede pasar a «test». |
 | simulacion.validar_corrida() | disparador | La etapa «final» solo en escenarios asignados a «test»; la semilla debe pertenecer a la etapa del protocolo. |
+| simulacion.validar_cola() | disparador | Cada acceso de la cola tiene un valor por paso de la serie de su corrida (las tres listas con la misma longitud); si no, se rechaza con SM006. |
 | aprendizaje.validar_conjunto_etiqueta() | disparador | Una etiqueta entra a un conjunto solo si su escenario está asignado a «train» o «validation» en la misma partición; nunca a «test». |
 
 | Vista | Qué muestra | Lee de |
@@ -73,7 +74,7 @@ La zona (desarrollo o prueba) no se guarda en cada fila: se deduce de la partici
 | `vistas.estado_cargas` | Cargas, artefactos cargados y rechazados, y conflictos pendientes. | `control.cargas`, `control.artefactos`, `control.conflictos` |
 | `vistas.corridas_resumen` | Una fila por corrida con su escenario, familia, plan, etapa, estado y resultados principales. | `simulacion.corridas`, `simulacion.resultados_corrida`, `experimento.escenarios`, `simulacion.planes` |
 | `vistas.vehiculos_cohorte` | Vehículos de la cohorte con su demora (pérdida de tiempo más espera de salida, según la definición del protocolo). | `simulacion.vehiculos` |
-| `vistas.cola_por_segundo` | Cola por acceso y segundo. El panel y las consultas leen esta vista, nunca la tabla, para poder cambiar cómo se guarda. | `simulacion.cola_segundo` |
+| `vistas.cola_por_segundo` | Cola por corrida, acceso y paso (una fila por paso, como antes del cambio a arreglo por acceso). El panel y las consultas leen esta vista, nunca la tabla, para poder cambiar cómo se guarda. | `simulacion.cola_por_acceso`, `simulacion.resultados_corrida` |
 | `vistas.busquedas_resumen` | Una fila por búsqueda con su etiqueta, sus candidatos elegibles y sus motivos de descarte. | `simulacion.busquedas`, `simulacion.candidatos`, `simulacion.etiquetas` |
 | `vistas.etiquetas_entrenamiento` | Etiquetas con referencia y la asignación de su escenario (solo train y validation). | `simulacion.etiquetas`, `experimento.asignaciones` |
 | `vistas.metricas_modelos` | Métricas de cada entrenamiento por partición, en columnas, para comparar la mediana con XGBoost. | `aprendizaje.metricas_modelo`, `aprendizaje.entrenamientos` |
@@ -224,10 +225,9 @@ erDiagram
     text run_id PK
     integer orden PK
   }
-  cola_segundo {
+  cola_por_acceso {
     text run_id PK
     text acceso PK
-    double_precision tiempo_s PK
   }
   busquedas {
     text busqueda_id PK
@@ -359,7 +359,8 @@ erDiagram
   movimientos ||--o{ vehiculos : "caso_id, caso_version, movimiento_id"
   tipos_vehiculo ||--o{ vehiculos : "caso_id, caso_version, clase_id"
   corridas ||--o{ eventos : "run_id"
-  corridas ||--o{ cola_segundo : "run_id"
+  corridas ||--o{ cola_por_acceso : "run_id"
+  resultados_corrida ||--o{ cola_por_acceso : "run_id"
   escenarios ||--o{ busquedas : "escenario_id"
   casos ||--o{ busquedas : "caso_id, caso_version"
   protocolos ||--o{ busquedas : "protocolo_id"
@@ -1754,6 +1755,8 @@ erDiagram
     double_precision detenciones_media
     double_precision cota_inf_detenciones
     integer pasos_fcd
+    jsonb pasos_cola_s
+    jsonb pasos_en_ventana
     text carga_id
     text artefacto_id
   }
@@ -1852,12 +1855,10 @@ erDiagram
     text carga_id
     text artefacto_id
   }
-  cola_segundo {
+  cola_por_acceso {
     text run_id PK, FK
     text acceso PK
-    double_precision tiempo_s PK
-    integer vehiculos_en_cola
-    boolean en_ventana
+    jsonb vehiculos_en_cola
     text carga_id
     text artefacto_id
   }
@@ -2014,7 +2015,8 @@ erDiagram
   movimientos ||--o{ vehiculos : "caso_id, caso_version, movimiento_id"
   tipos_vehiculo ||--o{ vehiculos : "caso_id, caso_version, clase_id"
   corridas ||--o{ eventos : "run_id"
-  corridas ||--o{ cola_segundo : "run_id"
+  corridas ||--o{ cola_por_acceso : "run_id"
+  resultados_corrida ||--o{ cola_por_acceso : "run_id"
   escenarios ||--o{ busquedas : "escenario_id"
   casos ||--o{ busquedas : "caso_id, caso_version"
   protocolos ||--o{ busquedas : "protocolo_id"
@@ -2219,8 +2221,10 @@ erDiagram
 | 60 | `detenciones_media` | double precision | sí |  |  | Detenciones por vehículo. | metricas.json: zone.stops.mean_stops |  |
 | 61 | `cota_inf_detenciones` | double precision | sí |  |  | Cota inferior de detenciones por vehículo. | metricas.json: zone.stops.lower_bound_mean_stops |  |
 | 62 | `pasos_fcd` | integer | sí |  |  | Pasos leídos del archivo de posiciones. | metricas.json: zone.fcd_steps |  |
-| 63 | `carga_id` | text | no |  | FK → `control.cargas` | Carga que escribió la fila. (columna común) | cargador |  |
-| 64 | `artefacto_id` | text | no |  | FK → `control.artefactos` | Archivo de datos/ (o acta del repositorio) del que sale la fila. (columna común) | cargador |  |
+| 63 | `pasos_cola_s` | jsonb | sí | s |  | Momento de cada paso de la serie de cola, en orden (la misma para todos los accesos de la corrida). Vacío sin zona. | metricas.json: zone.queue_series.times_s |  |
+| 64 | `pasos_en_ventana` | jsonb | sí |  |  | Si cada paso cuenta para la cola del resumen (intervalo de medición y momento de muestreo), en el mismo orden que pasos_cola_s. Los demás pasos (calentamiento, vaciado) se guardan, pero no entran en las medias. Vacío sin zona. | metricas.json: zone.queue_series.in_window |  |
+| 65 | `carga_id` | text | no |  | FK → `control.cargas` | Carga que escribió la fila. (columna común) | cargador |  |
+| 66 | `artefacto_id` | text | no |  | FK → `control.artefactos` | Archivo de datos/ (o acta del repositorio) del que sale la fila. (columna común) | cargador |  |
 
 - Clave primaria: `run_id`.
 - Regla «demora_completa»: Con cohorte completa hay demora media. `CHECK (estado_demora IS DISTINCT FROM 'complete' OR demora_media_s IS NOT NULL)`
@@ -2376,27 +2380,26 @@ erDiagram
 
 - Clave primaria: `run_id, orden`.
 
-#### `simulacion.cola_segundo`
+#### `simulacion.cola_por_acceso`
 
-- **Qué guarda:** Vehículos detenidos en cada acceso, en cada paso de la FCD (un paso por segundo con la simulación actual), con la marca de los que cuentan para la cola del resumen.
-- **Grano:** Una fila por corrida, acceso y paso
-- **Origen:** metricas.json: zone.queue_series (times_s, in_window y vehicles_by_access), con la misma regla de DEV19
-- **Estado de la fuente:** existe desde DEV31 F2 (metricas.json de las corridas nuevas; las 133 anteriores se calculan al cargarlas, F4)
-- **Filas estimadas en DEV16:** unos 69 millones
+- **Qué guarda:** Cola de cada acceso de la zona, paso a paso, como un arreglo por acceso. Los momentos de los pasos y cuáles cuentan para la cola del resumen están una sola vez por corrida, en resultados_corrida (pasos_cola_s y pasos_en_ventana). La vista vistas.cola_por_segundo muestra una fila por corrida, acceso y paso, como antes.
+- **Grano:** Una fila por corrida y acceso; cada arreglo tiene un valor por paso de la FCD
+- **Origen:** metricas.json: zone.queue_series.vehicles_by_access, con la misma regla de DEV19
+- **Estado de la fuente:** existe desde DEV31 F2 (metricas.json de las corridas nuevas; las 133 anteriores se calculan al cargarlas, F4). Cambio aprobado por el PO en DEV31 F4: antes era una fila por corrida, acceso y paso (cola_segundo)
+- **Filas estimadas en DEV16:** unas 33 mil (4 692 corridas por unos 7 accesos)
 - **Cegado de la prueba:** Sí. Hereda la visibilidad de `simulacion.corridas(run_id)`.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
 |---|---|---|---|---|---|---|---|---|
-| 1 | `run_id` | text | no |  | PK; FK → `simulacion.corridas` | Corrida. | metricas.json: run_id |  |
+| 1 | `run_id` | text | no |  | PK; FK → `simulacion.corridas`; FK → `simulacion.resultados_corrida` | Corrida. | metricas.json: run_id |  |
 | 2 | `acceso` | text | no |  | PK | Acceso: una clave de zone.queue_series.vehicles_by_access. | metricas.json: zone.queue_series.vehicles_by_access (clave) |  |
-| 3 | `tiempo_s` | double precision | no | s | PK | Momento del paso de la FCD. Un paso que la FCD no trae no tiene fila: no se rellena con cero. | metricas.json: zone.queue_series.times_s | `tiempo_s >= 0` |
-| 4 | `vehiculos_en_cola` | integer | no | veh |  | Vehículos del acceso con velocidad menor o igual que el umbral de cola, en los carriles de la zona. | metricas.json: zone.queue_series.vehicles_by_access[acceso] | `vehiculos_en_cola >= 0` |
-| 5 | `en_ventana` | boolean | no |  |  | Si el paso cuenta para la cola del resumen: está dentro del intervalo de medición y en un momento de muestreo. Los demás pasos (calentamiento, vaciado) se guardan para verlos, pero no entran en las medias. | metricas.json: zone.queue_series.in_window |  |
-| 6 | `carga_id` | text | no |  | FK → `control.cargas` | Carga que escribió la fila. (columna común) | cargador |  |
-| 7 | `artefacto_id` | text | no |  | FK → `control.artefactos` | Archivo de datos/ (o acta del repositorio) del que sale la fila. (columna común) | cargador |  |
+| 3 | `vehiculos_en_cola` | jsonb | no | veh |  | Vehículos del acceso con velocidad menor o igual que el umbral de cola, en los carriles de la zona, en cada paso (un número por paso, en el orden de pasos_cola_s de la corrida). Un paso que la FCD no trae no tiene valor: no se rellena con cero. | metricas.json: zone.queue_series.vehicles_by_access[acceso] |  |
+| 4 | `carga_id` | text | no |  | FK → `control.cargas` | Carga que escribió la fila. (columna común) | cargador |  |
+| 5 | `artefacto_id` | text | no |  | FK → `control.artefactos` | Archivo de datos/ (o acta del repositorio) del que sale la fila. (columna común) | cargador |  |
 
-- Clave primaria: `run_id, acceso, tiempo_s`.
+- Clave primaria: `run_id, acceso`.
+- Regla «un_valor_por_paso»: Disparador simulacion.validar_cola(): el arreglo tiene un valor por cada paso de la serie de su corrida.
 
 #### `simulacion.busquedas`
 
@@ -3411,7 +3414,8 @@ Además de estas, cada tabla se relaciona con `control.cargas` por `carga_id` y 
 | `simulacion.vehiculos` | `caso_id, caso_version, movimiento_id` | `caso.movimientos` | `caso_id, caso_version, movimiento_id` | 1 a N |
 | `simulacion.vehiculos` | `caso_id, caso_version, clase_id` | `caso.tipos_vehiculo` | `caso_id, caso_version, clase_id` | 1 a N |
 | `simulacion.eventos` | `run_id` | `simulacion.corridas` | `run_id` | 1 a N |
-| `simulacion.cola_segundo` | `run_id` | `simulacion.corridas` | `run_id` | 1 a N |
+| `simulacion.cola_por_acceso` | `run_id` | `simulacion.corridas` | `run_id` | 1 a N |
+| `simulacion.cola_por_acceso` | `run_id` | `simulacion.resultados_corrida` | `run_id` | 1 a N |
 | `simulacion.busquedas` | `escenario_id` | `experimento.escenarios` | `escenario_id` | 1 a N |
 | `simulacion.busquedas` | `caso_id, caso_version` | `caso.casos` | `caso_id, caso_version` | 1 a N |
 | `simulacion.busquedas` | `protocolo_id` | `experimento.protocolos` | `protocolo_id` | 1 a N |

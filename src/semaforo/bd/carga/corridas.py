@@ -3,7 +3,9 @@
 De ``datos/ejecuciones/<run_id>/`` y de sus métricas publicadas
 (``datos/derivados/metricas/<caso>/<run_id>/``, DEV31 F2) salen ``simulacion.corridas``,
 ``resultados_corrida``, ``resultados_acceso``, ``resultados_movimiento``, ``vehiculos``,
-``eventos`` y ``cola_segundo``, más su entorno (``control.entornos``) y su plan.
+``eventos`` y ``cola_por_acceso``, más su entorno (``control.entornos``) y su plan. La serie de
+cola va en arreglos: los pasos y su marca de ventana en ``resultados_corrida``, y un arreglo de
+vehículos por acceso en ``cola_por_acceso`` (cambio de DEV31 F4, aprobado por el PO).
 
 - La carpeta se lee con su lector oficial (``read_run``: exactamente los archivos del manifiesto,
   cada uno con su huella) y cada archivo que da filas se vuelve a comprobar con los bytes que se
@@ -414,6 +416,8 @@ METRIC_COLUMNS = (
     *QUEUE_COLUMNS,
     *STOPS_COLUMNS,
     "pasos_fcd",
+    "pasos_cola_s",
+    "pasos_en_ventana",
 )
 
 
@@ -424,6 +428,7 @@ def metric_columns(metrics: RunMetrics | None) -> Row:
     total = metrics.cohort.total
     zone = metrics.zone
     settings = None if zone is None else zone.settings
+    series = None if zone is None else zone.queue_series
     return {
         "version_metricas": metrics.schema_version,
         "protocolo_metricas_id": metrics.protocol_id,
@@ -456,6 +461,8 @@ def metric_columns(metrics: RunMetrics | None) -> Row:
         **_queue(None if zone is None else zone.queue),
         **_stops(None if zone is None else zone.stops),
         "pasos_fcd": None if zone is None else zone.fcd_steps,
+        "pasos_cola_s": None if series is None else list(series.times_s),
+        "pasos_en_ventana": None if series is None else list(series.in_window),
     }
 
 
@@ -480,7 +487,7 @@ def _metric_rows(unit: Unit, run_id: str, metrics: RunMetrics, source: FileRecor
     if extra:
         unit.notes.append(
             f"accesos de la zona sin vehículos de la cohorte ({', '.join(extra)}): su cola va "
-            "en cola_segundo pero no en resultados_acceso"
+            "en cola_por_acceso pero no en resultados_acceso"
         )
     for movement, summary in sorted(metrics.cohort.by_movement.items()):
         unit.add(
@@ -497,19 +504,23 @@ def _metric_rows(unit: Unit, run_id: str, metrics: RunMetrics, source: FileRecor
     series = None if zone is None else zone.queue_series
     if series is None:
         return
+    steps = len(series.times_s)
+    if len(series.in_window) != steps:
+        raise CargaError(
+            ErrorCode.INPUT_SCHEMA, "la ventana de la cola no tiene un valor por paso", METRICS_FILE
+        )
     for access, counts in sorted(series.vehicles_by_access.items()):
-        for moment, inside, count in zip(series.times_s, series.in_window, counts, strict=True):
-            unit.add(
-                "simulacion.cola_segundo",
-                {
-                    "run_id": run_id,
-                    "acceso": access,
-                    "tiempo_s": moment,
-                    "vehiculos_en_cola": count,
-                    "en_ventana": inside,
-                },
-                source,
+        if len(counts) != steps:
+            raise CargaError(
+                ErrorCode.INPUT_SCHEMA,
+                f"la cola del acceso {access} no tiene un valor por paso",
+                METRICS_FILE,
             )
+        unit.add(
+            "simulacion.cola_por_acceso",
+            {"run_id": run_id, "acceso": access, "vehiculos_en_cola": list(counts)},
+            source,
+        )
 
 
 # --- la carpeta ------------------------------------------------------------------------------

@@ -45,7 +45,8 @@ def test_every_table_and_column_of_the_design_is_created(design: Design) -> None
 def test_every_relation_of_the_design_is_a_foreign_key(design: Design) -> None:
     text = ddl.tables_sql(design)
     keys = sum(len(t.claves_foraneas) for t in design.tablas)
-    assert text.count(" FOREIGN KEY (") == keys == 221
+    # 222: la cola por acceso tiene dos (a corridas y a resultados_corrida, DEV31 F4).
+    assert text.count(" FOREIGN KEY (") == keys == 222
 
 
 def test_only_the_partition_link_is_deferred(design: Design) -> None:

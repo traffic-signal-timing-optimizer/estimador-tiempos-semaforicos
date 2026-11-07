@@ -5,7 +5,7 @@
 -- Códigos de error propios (SQLSTATE) para que el cargador los distinga:
 --   SM001 orden de los hitos; SM002 asignación de una familia; SM003 escenario preliminar a prueba;
 --   SM004 corrida final o semilla fuera de su etapa; SM005 etiqueta fuera de su partición;
---   SM009 solo agregar.
+--   SM006 cola con un valor que no corresponde a un paso de su corrida; SM009 solo agregar.
 
 -- ---------------------------------------------------------------------------------------------
 -- Cegado de la prueba: la zona se deduce de las asignaciones y de los hitos (acta de F1).
@@ -195,6 +195,31 @@ COMMENT ON FUNCTION simulacion.validar_corrida() IS
 CREATE TRIGGER validar_corrida BEFORE INSERT ON simulacion.corridas
     FOR EACH ROW EXECUTE FUNCTION simulacion.validar_corrida();
 
+-- La cola de cada acceso tiene un valor por paso de la serie de su corrida (DEV31 F4, arreglo por
+-- acceso). La clave foránea hace que la corrida ya esté escrita (resultados_corrida va primero).
+CREATE FUNCTION simulacion.validar_cola() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_pasos jsonb;
+    v_ventana jsonb;
+BEGIN
+    SELECT r.pasos_cola_s, r.pasos_en_ventana INTO v_pasos, v_ventana
+    FROM simulacion.resultados_corrida AS r
+    WHERE r.run_id = NEW.run_id;
+    IF v_pasos IS NULL OR v_ventana IS NULL
+        OR jsonb_array_length(NEW.vehiculos_en_cola) <> jsonb_array_length(v_pasos)
+        OR jsonb_array_length(v_pasos) <> jsonb_array_length(v_ventana) THEN
+        RAISE EXCEPTION 'la cola del acceso % de la corrida % no tiene un valor por paso',
+            NEW.acceso, NEW.run_id USING ERRCODE = 'SM006';
+    END IF;
+    RETURN NEW;
+END
+$$;
+COMMENT ON FUNCTION simulacion.validar_cola() IS
+    'Cada acceso tiene un valor de cola por cada paso de la serie de su corrida.';
+CREATE TRIGGER validar_cola BEFORE INSERT ON simulacion.cola_por_acceso
+    FOR EACH ROW EXECUTE FUNCTION simulacion.validar_cola();
+
 -- ---------------------------------------------------------------------------------------------
 -- Conjuntos de entrenamiento: una etiqueta entra con la asignación que su escenario tiene en la
 -- partición del conjunto (nunca test, que además impide la regla de la columna).
@@ -288,11 +313,22 @@ CREATE VIEW vistas.vehiculos_cohorte WITH (security_invoker = true) AS
 COMMENT ON VIEW vistas.vehiculos_cohorte IS
     'Vehículos de la cohorte con su demora (pérdida de tiempo más espera de salida, según la definición del protocolo).';
 
+-- Una fila por corrida, acceso y paso, como antes del arreglo por acceso. ROWS FROM recorre los
+-- tres arreglos a la vez (el disparador validar_cola() garantiza que tienen la misma longitud).
 CREATE VIEW vistas.cola_por_segundo WITH (security_invoker = true) AS
-    SELECT q.run_id, q.acceso, q.tiempo_s, q.vehiculos_en_cola, q.en_ventana
-    FROM simulacion.cola_segundo AS q;
+    SELECT q.run_id, q.acceso,
+        s.tiempo_txt::double precision AS tiempo_s,
+        s.veh_txt::integer AS vehiculos_en_cola,
+        s.ventana_txt::boolean AS en_ventana
+    FROM simulacion.cola_por_acceso AS q
+    JOIN simulacion.resultados_corrida AS r ON r.run_id = q.run_id
+    CROSS JOIN LATERAL ROWS FROM (
+        jsonb_array_elements_text(r.pasos_cola_s),
+        jsonb_array_elements_text(q.vehiculos_en_cola),
+        jsonb_array_elements_text(r.pasos_en_ventana)
+    ) AS s(tiempo_txt, veh_txt, ventana_txt);
 COMMENT ON VIEW vistas.cola_por_segundo IS
-    'Cola por acceso y segundo. El panel y las consultas leen esta vista, nunca la tabla.';
+    'Cola por corrida, acceso y paso. El panel y las consultas leen esta vista, nunca la tabla.';
 
 CREATE VIEW vistas.busquedas_resumen WITH (security_invoker = true) AS
     SELECT
