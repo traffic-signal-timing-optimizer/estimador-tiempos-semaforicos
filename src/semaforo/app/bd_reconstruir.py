@@ -353,6 +353,7 @@ def switch_database(  # noqa: PLR0913  (opciones de solo palabra clave)
             f"la candidata no coincide con lo aprobado en la {mismatch}",
         )
     process.ok("P7", "aprobación", f"esquema, contenido y reglas: {approved.content_sha256}")
+    after = measured
     with connect(ADMIN, database="postgres", autocommit=True) as admin:
         if _connections(admin, [current, name]):
             return _switch_stopped(
@@ -360,18 +361,39 @@ def switch_database(  # noqa: PLR0913  (opciones de solo palabra clave)
             )
         _swap(admin, current, name, old, rename)
         process.ok("P8", "cambio de nombre", f"la vigente quedó como {old}")
-        after = verify(workspace, repository, compare=False, database=current)
-        mismatch = _mismatch(after, approved)
-        if mismatch is not None:
-            _swap(admin, current, old, name, rename)  # la vigente vuelve a su lugar
+        try:
+            after = verify(workspace, repository, compare=False, database=current)
+            mismatch = _mismatch(after, approved)
+            failure = (
+                f"la base nueva no coincide con lo aprobado en la {mismatch}"
+                if mismatch is not None
+                else None
+            )
+        except Exception as error:
+            detail = error.message if isinstance(error, BdError) else type(error).__name__
+            failure = f"falló la verificación: {detail}"
+        if failure is not None:
+            try:
+                _swap(admin, current, old, name, rename)  # la vigente vuelve a su lugar
+            except Exception as rollback_error:
+                detail = (
+                    rollback_error.message
+                    if isinstance(rollback_error, BdError)
+                    else type(rollback_error).__name__
+                )
+                raise BdError(
+                    ErrorCode.OUTPUT_INVALID,
+                    f"P9: {failure}; falló la reversión: {detail}; estado de las bases por "
+                    f"comprobar ({current}, {name}, {old})",
+                    "P9",
+                ) from rollback_error
             return _switch_stopped(
                 process,
                 current,
                 name,
                 "P9",
                 "verificación de la base nueva",
-                f"la base nueva no coincide con lo aprobado en la {mismatch}: "
-                "se revirtió el cambio",
+                f"{failure}; se revirtió el cambio",
             )
     process.ok("P9", "verificación de la base nueva", "las tres huellas coinciden")
     written: str | None = None

@@ -13,7 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from semaforo.app.bd_commands import verify
+import semaforo.app.bd_reconstruir as reconstruir
+from semaforo.app.bd_commands import VerifyReport, verify
 from semaforo.app.bd_reconstruir import (
     Approval,
     Preparation,
@@ -309,3 +310,53 @@ def test_rules_that_change_while_the_names_are_swapped_are_reverted_at_P9(
     assert "huella de reglas" in str(stopped.reason)
     assert _has_marker(rebuild.current)  # la vigente volvió a su lugar
     assert _exists(rebuild.candidate) and not _exists(rebuild.previous)
+
+
+def test_an_error_while_verifying_P9_restores_the_previous_base(
+    rebuild: Rebuild, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prepared = _prepare(rebuild)
+    original_verify = reconstruir.verify
+
+    def fail_after_swap(
+        workspace: Path, repository: Path | None, *, compare: bool, database: str
+    ) -> VerifyReport:
+        if database == rebuild.current:
+            raise BdError(ErrorCode.OUTPUT_INVALID, "falló la verificación", "P9")
+        return original_verify(workspace, repository, compare=compare, database=database)
+
+    monkeypatch.setattr(reconstruir, "verify", fail_after_swap)
+    stopped = _switch(rebuild, _approval(prepared))
+
+    assert (stopped.status, stopped.steps[-1].paso) == ("detenida", "P9")
+    assert "falló la verificación" in str(stopped.reason)
+    assert "se revirtió" in str(stopped.reason)
+    assert _has_marker(rebuild.current)
+    assert _exists(rebuild.candidate) and not _exists(rebuild.previous)
+
+
+def test_a_failed_P9_rollback_reports_the_uncertain_state(
+    rebuild: Rebuild, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prepared = _prepare(rebuild)
+    original_verify = reconstruir.verify
+
+    def fail_after_swap(
+        workspace: Path, repository: Path | None, *, compare: bool, database: str
+    ) -> VerifyReport:
+        if database == rebuild.current:
+            raise BdError(ErrorCode.OUTPUT_INVALID, "falló la verificación", "P9")
+        return original_verify(workspace, repository, compare=compare, database=database)
+
+    def fail_rollback(admin: Connection, old: str, new: str) -> None:
+        if old == rebuild.current and new == rebuild.candidate:
+            raise BdError(ErrorCode.OUTPUT_INVALID, "falló la reversión", "P9")
+        _rename(admin, old, new)
+
+    monkeypatch.setattr(reconstruir, "verify", fail_after_swap)
+    with pytest.raises(BdError, match="estado de las bases por comprobar") as failure:
+        _switch(rebuild, _approval(prepared), rename=fail_rollback)
+
+    assert rebuild.current in failure.value.message
+    assert rebuild.candidate in failure.value.message
+    assert rebuild.previous in failure.value.message
