@@ -11,7 +11,7 @@
 -- Cegado de la prueba: la zona se deduce de las asignaciones y de los hitos (acta de F1).
 
 CREATE FUNCTION control.prueba_abierta(p_particion text) RETURNS boolean
-LANGUAGE sql STABLE AS $$
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, control AS $$
     SELECT EXISTS (
         SELECT 1 FROM control.hitos
         WHERE tipo = 'test_opened' AND particion_id = p_particion
@@ -26,6 +26,42 @@ CREATE VIEW control.escenarios_cegados WITH (security_invoker = true) AS
     WHERE a.asignacion = 'test' AND NOT control.prueba_abierta(a.particion_id);
 COMMENT ON VIEW control.escenarios_cegados IS
     'Escenarios asignados a test en una partición cuya prueba no tiene hito de apertura. Es la base del cegado.';
+
+CREATE FUNCTION control.escenario_visible(p_escenario text) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, control AS $$
+    SELECT NOT EXISTS (
+        SELECT 1 FROM control.escenarios_cegados
+        WHERE escenario_id = p_escenario
+    )
+$$;
+COMMENT ON FUNCTION control.escenario_visible(text) IS
+    'Filtro explícito de las vistas del panel, que se evalúan con permisos de su dueño.';
+
+CREATE FUNCTION control.archivo_visible(p_artefacto text) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, control AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM control.artefactos AS archivo
+        WHERE archivo.artefacto_id = p_artefacto
+          AND (
+              archivo.alcance = 'global'
+              OR (
+                  archivo.alcance = 'escenarios'
+                  AND EXISTS (
+                      SELECT 1 FROM control.archivo_escenarios AS enlace
+                      WHERE enlace.artefacto_id = archivo.artefacto_id
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM control.archivo_escenarios AS enlace
+                      JOIN control.escenarios_cegados AS cegado
+                        ON cegado.escenario_id = enlace.escenario_id
+                      WHERE enlace.artefacto_id = archivo.artefacto_id
+                  )
+              )
+          )
+    )
+$$;
+COMMENT ON FUNCTION control.archivo_visible(text) IS
+    'La misma regla de cegado se usa en control.artefactos y control.archivo_escenarios.';
 
 -- ---------------------------------------------------------------------------------------------
 -- Solo agregar (B2), con las dos excepciones declaradas: cerrar una carga y decidir un conflicto.
@@ -83,6 +119,9 @@ DECLARE
     v_particion text;
     v_protocolo text;
     v_modelo text;
+    v_seleccion text;
+    v_huella_seleccion text;
+    v_fecha_seleccion timestamptz;
 BEGIN
     IF NEW.tipo = 'protocol_frozen' THEN
         IF NOT EXISTS (
@@ -93,30 +132,63 @@ BEGIN
                 USING ERRCODE = 'SM001';
         END IF;
     ELSIF NEW.tipo = 'model_frozen' THEN
-        SELECT particion_id INTO v_particion FROM aprendizaje.modelos WHERE modelo_id = NEW.modelo_id;
+        SELECT m.particion_id, s.protocolo_id, s.seleccion_id, s.huella_seleccion, s.decidido_en
+        INTO v_particion, v_protocolo, v_seleccion, v_huella_seleccion, v_fecha_seleccion
+        FROM aprendizaje.modelos AS m
+        JOIN aprendizaje.seleccion AS s ON s.modelo_ganador_id = m.modelo_id
+        WHERE m.modelo_id = NEW.modelo_id;
+        IF v_seleccion IS NULL OR v_seleccion IS DISTINCT FROM NEW.seleccion_id
+            OR v_huella_seleccion IS DISTINCT FROM NEW.huella_seleccion
+            OR NOT EXISTS (
+                SELECT 1 FROM aprendizaje.seleccion
+                WHERE seleccion_id = v_seleccion AND particion_id = v_particion
+            ) OR v_fecha_seleccion > NEW.registrado_en
+        THEN
+            RAISE EXCEPTION 'la selección del modelo % no coincide con la selección fijada antes del hito',
+                NEW.modelo_id USING ERRCODE = 'SM001';
+        END IF;
         IF NOT EXISTS (
             SELECT 1 FROM control.hitos WHERE tipo = 'split_frozen' AND particion_id = v_particion
+                AND registrado_en < NEW.registrado_en
         ) THEN
             RAISE EXCEPTION 'antes de congelar el modelo % hay que congelar su partición %',
                 NEW.modelo_id, v_particion USING ERRCODE = 'SM001';
         END IF;
-        IF NOT EXISTS (SELECT 1 FROM control.hitos WHERE tipo = 'protocol_frozen') THEN
-            RAISE EXCEPTION 'antes de congelar el modelo % hay que congelar un protocolo', NEW.modelo_id
+        IF NOT EXISTS (
+            SELECT 1 FROM control.hitos WHERE tipo = 'protocol_frozen'
+                AND protocolo_id = v_protocolo AND registrado_en < NEW.registrado_en
+        ) THEN
+            RAISE EXCEPTION 'antes de congelar el modelo % hay que congelar el protocolo % de su selección',
+                NEW.modelo_id, v_protocolo
                 USING ERRCODE = 'SM001';
         END IF;
     ELSIF NEW.tipo = 'test_opened' THEN
-        SELECT particion_id, protocolo_id, modelo_id INTO v_particion, v_protocolo, v_modelo
+        SELECT particion_id, protocolo_id, modelo_id, seleccion_id
+        INTO v_particion, v_protocolo, v_modelo, v_seleccion
         FROM evaluacion.experimentos WHERE experimento_id = NEW.experimento_id;
         IF v_particion IS DISTINCT FROM NEW.particion_id THEN
             RAISE EXCEPTION 'la partición % no es la del experimento %', NEW.particion_id,
                 NEW.experimento_id USING ERRCODE = 'SM001';
         END IF;
-        IF NOT EXISTS (SELECT 1 FROM control.hitos WHERE tipo = 'model_frozen' AND modelo_id = v_modelo)
-            OR NOT EXISTS (
-                SELECT 1 FROM control.hitos WHERE tipo = 'protocol_frozen' AND protocolo_id = v_protocolo
+        IF NOT EXISTS (
+                SELECT 1 FROM control.hitos AS h
+                JOIN aprendizaje.seleccion AS s ON s.seleccion_id = h.seleccion_id
+                JOIN aprendizaje.modelos AS m ON m.modelo_id = h.modelo_id
+                WHERE h.tipo = 'model_frozen' AND h.modelo_id = v_modelo
+                    AND h.seleccion_id = v_seleccion
+                    AND h.huella_seleccion = s.huella_seleccion
+                    AND s.modelo_ganador_id = v_modelo
+                    AND s.particion_id = v_particion AND m.particion_id = v_particion
+                    AND s.protocolo_id = v_protocolo
+                    AND h.registrado_en < NEW.registrado_en
             )
             OR NOT EXISTS (
-                SELECT 1 FROM control.hitos WHERE tipo = 'split_frozen' AND particion_id = v_particion
+                SELECT 1 FROM control.hitos WHERE tipo = 'protocol_frozen'
+                    AND protocolo_id = v_protocolo AND registrado_en < NEW.registrado_en
+            )
+            OR NOT EXISTS (
+                SELECT 1 FROM control.hitos WHERE tipo = 'split_frozen'
+                    AND particion_id = v_particion AND registrado_en < NEW.registrado_en
             )
         THEN
             RAISE EXCEPTION 'la prueba del experimento % solo se abre con su protocolo, su partición y su modelo congelados antes',
@@ -200,15 +272,19 @@ CREATE TRIGGER validar_corrida BEFORE INSERT ON simulacion.corridas
 CREATE FUNCTION simulacion.validar_cola() RETURNS trigger
 LANGUAGE plpgsql AS $$
 DECLARE
-    v_pasos jsonb;
-    v_ventana jsonb;
+    v_pasos double precision[];
+    v_ventana boolean[];
 BEGIN
     SELECT r.pasos_cola_s, r.pasos_en_ventana INTO v_pasos, v_ventana
     FROM simulacion.resultados_corrida AS r
     WHERE r.run_id = NEW.run_id;
     IF v_pasos IS NULL OR v_ventana IS NULL
-        OR jsonb_array_length(NEW.vehiculos_en_cola) <> jsonb_array_length(v_pasos)
-        OR jsonb_array_length(v_pasos) <> jsonb_array_length(v_ventana) THEN
+        OR cardinality(NEW.vehiculos_en_cola) <> cardinality(v_pasos)
+        OR cardinality(v_pasos) <> cardinality(v_ventana)
+        OR EXISTS (
+            SELECT 1 FROM generate_subscripts(v_pasos, 1) AS s(i)
+            WHERE s.i > 1 AND v_pasos[s.i] <= v_pasos[s.i - 1]
+        ) THEN
         RAISE EXCEPTION 'la cola del acceso % de la corrida % no tiene un valor por paso',
             NEW.acceso, NEW.run_id USING ERRCODE = 'SM006';
     END IF;
@@ -216,7 +292,7 @@ BEGIN
 END
 $$;
 COMMENT ON FUNCTION simulacion.validar_cola() IS
-    'Cada acceso tiene un valor de cola por cada paso de la serie de su corrida.';
+    'Cada acceso tiene un valor por paso; los tiempos son estrictamente crecientes.';
 CREATE TRIGGER validar_cola BEFORE INSERT ON simulacion.cola_por_acceso
     FOR EACH ROW EXECUTE FUNCTION simulacion.validar_cola();
 
@@ -248,8 +324,8 @@ CREATE TRIGGER validar_conjunto_etiqueta BEFORE INSERT ON aprendizaje.conjunto_e
     FOR EACH ROW EXECUTE FUNCTION aprendizaje.validar_conjunto_etiqueta();
 
 -- ---------------------------------------------------------------------------------------------
--- Vistas (B12): el panel y las consultas guardadas leen siempre vistas. «security_invoker» hace
--- que el cegado se aplique a quien consulta: el usuario de lectura no ve la prueba cerrada.
+-- Vistas (B12): las aprobadas para el panel tienen filtros explícitos, pues el panel carece de
+-- permisos de tabla y las lee con permisos del dueño. La vista de cargas no se concede al panel.
 
 CREATE VIEW vistas.zona_escenario WITH (security_invoker = true) AS
     SELECT
@@ -259,7 +335,8 @@ CREATE VIEW vistas.zona_escenario WITH (security_invoker = true) AS
         CASE WHEN a.asignacion = 'test' THEN control.prueba_abierta(a.particion_id) END
             AS prueba_abierta
     FROM experimento.escenarios AS e
-    LEFT JOIN experimento.asignaciones AS a ON a.escenario_id = e.escenario_id;
+    LEFT JOIN experimento.asignaciones AS a ON a.escenario_id = e.escenario_id
+    WHERE control.escenario_visible(e.escenario_id);
 COMMENT ON VIEW vistas.zona_escenario IS
     'Cada escenario con su partición, su asignación, su zona (desarrollo o prueba) y si su prueba ya se abrió.';
 
@@ -297,7 +374,8 @@ CREATE VIEW vistas.corridas_resumen WITH (security_invoker = true) AS
     FROM simulacion.corridas AS c
     JOIN experimento.escenarios AS e ON e.escenario_id = c.escenario_id
     LEFT JOIN simulacion.planes AS p ON p.plan_id = c.plan_id
-    LEFT JOIN simulacion.resultados_corrida AS r ON r.run_id = c.run_id;
+    LEFT JOIN simulacion.resultados_corrida AS r ON r.run_id = c.run_id
+    WHERE control.escenario_visible(c.escenario_id);
 COMMENT ON VIEW vistas.corridas_resumen IS
     'Una fila por corrida con su escenario, familia, plan, etapa, estado y resultados principales.';
 
@@ -309,24 +387,25 @@ CREATE VIEW vistas.vehiculos_cohorte WITH (security_invoker = true) AS
         v.perdida_tiempo_cohorte_s + v.demora_salida_cohorte_s AS demora_s,
         v.fuente_demora_salida, v.detenciones
     FROM simulacion.vehiculos AS v
-    WHERE v.en_cohorte;
+    JOIN simulacion.corridas AS c ON c.run_id = v.run_id
+    WHERE v.en_cohorte AND control.escenario_visible(c.escenario_id);
 COMMENT ON VIEW vistas.vehiculos_cohorte IS
     'Vehículos de la cohorte con su demora (pérdida de tiempo más espera de salida, según la definición del protocolo).';
 
--- Una fila por corrida, acceso y paso, como antes del arreglo por acceso. ROWS FROM recorre los
--- tres arreglos a la vez (el disparador validar_cola() garantiza que tienen la misma longitud).
+-- Una fila por corrida, acceso y paso. ROWS FROM recorre los tres arreglos nativos a la vez;
+-- validar_cola() garantiza que tienen la misma longitud.
 CREATE VIEW vistas.cola_por_segundo WITH (security_invoker = true) AS
     SELECT q.run_id, q.acceso,
-        s.tiempo_txt::double precision AS tiempo_s,
-        s.veh_txt::integer AS vehiculos_en_cola,
-        s.ventana_txt::boolean AS en_ventana
+        s.tiempo_s, s.vehiculos_en_cola, s.en_ventana
     FROM simulacion.cola_por_acceso AS q
     JOIN simulacion.resultados_corrida AS r ON r.run_id = q.run_id
+    JOIN simulacion.corridas AS c ON c.run_id = q.run_id
     CROSS JOIN LATERAL ROWS FROM (
-        jsonb_array_elements_text(r.pasos_cola_s),
-        jsonb_array_elements_text(q.vehiculos_en_cola),
-        jsonb_array_elements_text(r.pasos_en_ventana)
-    ) AS s(tiempo_txt, veh_txt, ventana_txt);
+        unnest(r.pasos_cola_s),
+        unnest(q.vehiculos_en_cola),
+        unnest(r.pasos_en_ventana)
+    ) AS s(tiempo_s, vehiculos_en_cola, en_ventana)
+    WHERE control.escenario_visible(c.escenario_id);
 COMMENT ON VIEW vistas.cola_por_segundo IS
     'Cola por corrida, acceso y paso. El panel y las consultas leen esta vista, nunca la tabla.';
 
@@ -346,7 +425,8 @@ CREATE VIEW vistas.busquedas_resumen WITH (security_invoker = true) AS
             WHERE c.busqueda_id = b.busqueda_id AND c.elegible_finalistas) AS elegibles_finalistas,
         b.cobertura AS motivos_descarte
     FROM simulacion.busquedas AS b
-    LEFT JOIN simulacion.etiquetas AS t ON t.busqueda_id = b.busqueda_id;
+    LEFT JOIN simulacion.etiquetas AS t ON t.busqueda_id = b.busqueda_id
+    WHERE control.escenario_visible(b.escenario_id);
 COMMENT ON VIEW vistas.busquedas_resumen IS
     'Una fila por búsqueda con su etiqueta, sus candidatos elegibles y sus motivos de descarte.';
 
@@ -356,7 +436,8 @@ CREATE VIEW vistas.etiquetas_entrenamiento WITH (security_invoker = true) AS
         t.verdes_s, a.particion_id, a.asignacion
     FROM simulacion.etiquetas AS t
     JOIN experimento.asignaciones AS a ON a.escenario_id = t.escenario_id
-    WHERE t.estado = 'reference' AND a.asignacion IN ('train', 'validation');
+    WHERE t.estado = 'reference' AND a.asignacion IN ('train', 'validation')
+        AND control.escenario_visible(t.escenario_id);
 COMMENT ON VIEW vistas.etiquetas_entrenamiento IS
     'Etiquetas con referencia y la asignación de su escenario (solo train y validation).';
 
@@ -369,6 +450,7 @@ CREATE VIEW vistas.metricas_modelos WITH (security_invoker = true) AS
         max(m.valor) FILTER (WHERE m.asignacion = 'test') AS valor_prueba
     FROM aprendizaje.metricas_modelo AS m
     JOIN aprendizaje.entrenamientos AS e ON e.entrenamiento_id = m.entrenamiento_id
+    WHERE m.asignacion <> 'test' OR control.prueba_abierta(m.particion_id)
     GROUP BY m.entrenamiento_id, e.algoritmo, e.conjunto_id, m.particion_id, m.metrica,
         m.alcance, m.unidad;
 COMMENT ON VIEW vistas.metricas_modelos IS
@@ -382,7 +464,8 @@ CREATE VIEW vistas.consultas_resumen WITH (security_invoker = true) AS
             WHERE r.request_id = q.request_id) AS reglas_incumplidas,
         (SELECT coalesce(jsonb_agg(r.codigo ORDER BY r.orden), '[]'::jsonb)
             FROM aprendizaje.consulta_reglas AS r WHERE r.request_id = q.request_id) AS codigos
-    FROM aprendizaje.consultas AS q;
+    FROM aprendizaje.consultas AS q
+    WHERE q.escenario_id IS NULL OR control.escenario_visible(q.escenario_id);
 COMMENT ON VIEW vistas.consultas_resumen IS
     'Consultas con su estado, sus tiempos y sus reglas incumplidas.';
 
@@ -393,6 +476,10 @@ CREATE VIEW vistas.indicadores_finales WITH (security_invoker = true) AS
         i.numerador, i.denominador, i.faltantes, i.ic_nivel, i.ic_inferior, i.ic_superior,
         i.remuestreos, i.semilla_remuestreo, i.agregacion, i.version_calculo
     FROM evaluacion.indicadores AS i
-    JOIN evaluacion.experimentos AS x ON x.experimento_id = i.experimento_id;
+    JOIN evaluacion.experimentos AS x ON x.experimento_id = i.experimento_id
+    WHERE EXISTS (
+        SELECT 1 FROM control.hitos AS h
+        WHERE h.tipo = 'test_opened' AND h.experimento_id = i.experimento_id
+    );
 COMMENT ON VIEW vistas.indicadores_finales IS
     'Indicadores I4 a I7 del experimento final con sus intervalos. Vacía hasta la apertura.';

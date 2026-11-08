@@ -288,9 +288,9 @@ Este comando crea, una sola vez:
 2. tres usuarios del proyecto (`semaforo_admin`, `semaforo_carga`, `semaforo_lectura`) con **contraseñas nuevas y aleatorias**;
 3. sus contraseñas, en `%APPDATA%\postgresql\pgpass.conf`, y su configuración de conexión, en `%APPDATA%\postgresql\.pg_service.conf`;
 4. la base `semaforo`, con `semaforo_admin` como dueño;
-5. el esquema de la base (56 tablas).
+5. el esquema de la base (57 tablas en la versión C2 de este repositorio).
 
-El rol `semaforo_panel` se creó por separado en C0.5 en la laptop de origen. `bd iniciar` solo crea los tres usuarios indicados; la configuración de acceso del panel corresponde a C2.6 y aún no se ha ejecutado en otra laptop.
+El rol `semaforo_panel` se creó por separado en C0.5 en la laptop de origen. En otra laptop, el PO debe repetir ese paso D8 **antes** de `bd iniciar`: el esquema C2 le concede acceso solo a las vistas aprobadas y la instalación falla si el rol no existe. `bd iniciar` solo crea los tres usuarios indicados; no crea ni cambia la clave del panel. Consulte `docs/actas/2026-11-07-dev31-plan-correcciones-auditoria.md` (C0.5 y D8). La creación del rol y la instalación C2 en otra laptop están pendientes de verificación.
 
 Necesita la contraseña del usuario **postgres** (la que puso en la sección 2.4). Pásela **solo para este comando**, como variable de la sesión, y bórrela al terminar. En PowerShell, sin que quede escrita en pantalla:
 

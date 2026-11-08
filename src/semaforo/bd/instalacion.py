@@ -310,6 +310,13 @@ def prepare_database(connection: Connection, name: str) -> None:
     connection.execute(
         sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(database, sql.Identifier(LECTURA))
     )
+    panel = connection.execute("SELECT 1 FROM pg_roles WHERE rolname = 'semaforo_panel'").fetchone()
+    if panel is not None:
+        connection.execute(
+            sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(
+                database, sql.Identifier("semaforo_panel")
+            )
+        )
 
 
 def _database(connection: Connection, name: str) -> Step:

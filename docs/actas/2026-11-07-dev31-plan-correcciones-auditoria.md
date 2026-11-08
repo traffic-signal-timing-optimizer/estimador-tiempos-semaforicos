@@ -30,7 +30,7 @@ Escrito para: el Product Owner (decisiones y aprobación) y el equipo técnico y
 
 **Meta para la próxima auditoría:** ninguna observación alta; solo observaciones bajas o riesgos aceptados y escritos.
 
-**Evidencia posterior al plan:** C0 y C1 se cerraron el 2026-11-07. La decisión D7 sobre las tres corridas de DEV00 ya se publicó; la bitácora registró 143 unidades publicadas, 140 cargadas y 3 con decisión. En C1.11 se añadió la comparación de versión del esquema, contenido y reglas, y la reversión cuando P9 encuentra una diferencia o `verify()` lanza una excepción. La puerta completa posterior pasó con 5408 pruebas y 43/43 contratos. Véanse las actas de C1, de las tres huellas y de la corrección P9. Las tablas de diagnóstico de este plan conservan el corte de la auditoría inicial; esta nota registra lo resuelto después.
+**Evidencia posterior al plan:** C0 y C1 se cerraron el 2026-11-07. La decisión D7 sobre las tres corridas de DEV00 ya se publicó; la bitácora registró 143 unidades publicadas, 140 cargadas y 3 con decisión. En C1.11 se añadió la comparación de versión del esquema, contenido y reglas, y la reversión cuando P9 encuentra una diferencia o `verify()` lanza una excepción. La puerta completa posterior pasó con 5408 pruebas y 43/43 contratos. Véanse el acta original de C1, su `2026-11-07-dev31-f4c-c1-actualizacion-posterior.md`, el acta de las tres huellas y la de P9. El acta original se conserva byte a byte porque la base registra su huella. Las tablas de diagnóstico de este plan conservan el corte de la auditoría inicial; esta nota registra lo resuelto después.
 
 ### 1.1 Qué cambió en cada versión
 

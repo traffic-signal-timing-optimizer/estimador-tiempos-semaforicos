@@ -68,7 +68,14 @@ from semaforo.simulacion.environment import capture_environment
 from semaforo.trazabilidad.hashing import sha256_file
 from semaforo.trazabilidad.store import utc_now
 
-__all__ = ["LoadOptions", "LoadReport", "UnitOutcome", "artifact_rows", "load_workspace"]
+__all__ = [
+    "LoadOptions",
+    "LoadReport",
+    "UnitOutcome",
+    "artifact_links",
+    "artifact_rows",
+    "load_workspace",
+]
 
 CONFLICT_TABLES = {"control.artefactos": "hash_mismatch"}
 PRELIMINARY_TO_TEST = "SM003"
@@ -184,6 +191,14 @@ class _Programs:
 
 def artifact_rows(unit: Unit, *, status: str = "intact", reason: str | None = None) -> list[Row]:
     moment = utc_now()
+    scenarios = artifact_scenarios(unit)
+    scope = (
+        "escenarios"
+        if scenarios
+        else "global"
+        if unit.kind in {"case", "protocol", "milestone"}
+        else "desconocido"
+    )
     rows: dict[str, Row] = {}
     for record in unit.files:
         rows[record.artifact_id] = {
@@ -195,10 +210,30 @@ def artifact_rows(unit: Unit, *, status: str = "intact", reason: str | None = No
             "sha256": record.sha256,
             "manifiesto_id": record.manifest,
             "estado": status,
+            "alcance": scope,
             "motivo": reason,
             "registrado_en": moment,
         }
     return list(rows.values())
+
+
+def artifact_scenarios(unit: Unit) -> set[str]:
+    """Escenarios explícitos de las filas producidas por esta misma unidad."""
+    return {
+        str(row["escenario_id"])
+        for rows in unit.rows.values()
+        for row in rows
+        if row.get("escenario_id") is not None
+    }
+
+
+def artifact_links(unit: Unit) -> list[Row]:
+    """Vínculos por archivo: uno mixto queda oculto si cualquier escenario está cegado."""
+    return [
+        {"artefacto_id": record.artifact_id, "escenario_id": scenario}
+        for record in {file.artifact_id: file for file in unit.files}.values()
+        for scenario in sorted(artifact_scenarios(unit))
+    ]
 
 
 def _missing(connection: Connection, catalog: Catalog, unit: Unit) -> str | None:
@@ -310,7 +345,11 @@ def _conflicts(connection: Connection, carga_id: str, unit: Unit, found: list[Ke
 def _write(
     connection: Connection, catalog: Catalog, carga_id: str, unit: Unit
 ) -> tuple[Status, str | None, dict[str, int]]:
-    rows = {"control.artefactos": artifact_rows(unit), **unit.rows}
+    rows = {
+        "control.artefactos": artifact_rows(unit),
+        "control.archivo_escenarios": artifact_links(unit),
+        **unit.rows,
+    }
     try:
         with connection.transaction():
             result = write_rows(connection, catalog, rows, carga_id)

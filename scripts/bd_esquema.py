@@ -44,6 +44,7 @@ ACTA_F0 = ROOT / "docs" / "actas" / "2026-11-05-dev31-f0-planificacion-y-diseno.
 # reescribe: el cambio queda aquí y en su propia acta. cola_segundo pasó a cola_por_acceso (un
 # arreglo por acceso en vez de una fila por segundo; DEV31 F4, aprobado el 2026-11-07).
 RENAMED_SINCE_F0 = {"cola_segundo": "cola_por_acceso"}
+ADDED_SINCE_F0 = {"archivo_escenarios"}  # DEV31 C2.6, plan aprobado el 2026-11-07
 
 
 def catalog_names(path: Path = ACTA_F0) -> set[str]:
@@ -55,7 +56,7 @@ def catalog_names(path: Path = ACTA_F0) -> set[str]:
     for line in lines[start:end]:
         if line.startswith("| `"):
             names.update(re.findall(r"`([a-z_]+)`", line.split("|")[1]))
-    return {RENAMED_SINCE_F0.get(name, name) for name in names}
+    return {RENAMED_SINCE_F0.get(name, name) for name in names} | ADDED_SINCE_F0
 
 
 # ---------------------------------------------------------------------------------------------
@@ -75,6 +76,11 @@ def _blinding_text(cegado: str) -> str:
             f"Sí. Las filas de prueba se ocultan hasta abrir la prueba de su partición (`{arg}`)."
         ),
         "apertura_experimento": f"Sí. Se oculta hasta abrir la prueba del experimento (`{arg}`).",
+        "archivo_alcance": "Sí. Global o todos sus escenarios visibles; desconocido queda oculto.",
+        "archivo_enlace": "Sí. El enlace solo se ve si el archivo vinculado es visible.",
+        "uso_plan": "Sí. Solo si una relación de uso visible menciona el plan.",
+        "ambas_corridas": "Sí. Solo cuando las dos corridas son visibles.",
+        "ambas_comparaciones": "Sí. Solo cuando las dos comparaciones son visibles.",
     }
     return texts.get(kind, cegado)
 
@@ -159,6 +165,7 @@ def _table_blocks(table: Table) -> list[Block]:
         ("Estado de la fuente", table.fuente),
         ("Filas estimadas en DEV16", table.filas_dev16),
         ("Cegado de la prueba", _blinding_text(table.cegado)),
+        ("Visible porque", table.visible_porque or "No aplica."),
         ("Solo agregar", table.excepcion or "Sí: no se modifican ni se borran filas."),
     ]
     rows = [
@@ -277,7 +284,7 @@ def build(design: Design) -> list[Block]:
         ),
         (
             "p",
-            f"**{len(approved)} tablas aprobadas en F0** y **{len(proposals)} propuestas** "
+            f"**{len(approved)} tablas aprobadas en F0 y C2** y **{len(proposals)} propuestas** "
             f"de F1, con **{columns} columnas** en total y **{relations} relaciones** entre "
             "tablas. Cada tabla lleva además `carga_id` y `artefacto_id`, que la unen con la "
             "carga que la escribió y con su archivo original.",

@@ -330,9 +330,13 @@ def test_a_new_run_has_a_compressed_fcd_its_environment_and_published_metrics(
         assert float(environment["memory_gb"]) > 0
         assert environment["location"] in {"local", "cloud"}
         assert {"sumo", "python", "os"} <= environment.keys()
-        metrics = evaluate_run(
-            folder, runs, run.manifest.run_id, case, protocol(), scenario=scenario
+        rules = protocol()
+        protocol_folder = workspace / "derivados" / "protocolos" / case.case_id
+        protocol_folder.mkdir(parents=True)
+        (protocol_folder / "protocol.json").write_text(
+            rules.model_dump_json(indent=2), encoding="utf-8"
         )
+        metrics = evaluate_run(folder, runs, run.manifest.run_id, case, rules, scenario=scenario)
         assert metrics.zone is not None
         series = metrics.zone.queue_series
         assert series is not None

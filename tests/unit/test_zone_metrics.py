@@ -497,3 +497,25 @@ def test_the_columns_of_a_series_must_have_the_same_length() -> None:
         QueueSeries(times_s=[0.0, 1.0], in_window=[True], vehicles_by_access={})
     with pytest.raises(ValidationError, match="distinto largo"):
         QueueSeries(times_s=[0.0], in_window=[True], vehicles_by_access={"N": [1, 2]})
+
+
+@pytest.mark.parametrize(
+    ("times", "window", "counts"),
+    [
+        ([0.0, 0.0], [True, True], [0, 1]),
+        ([1.0, 0.0], [True, True], [0, 1]),
+        ([0.0, float("nan")], [True, True], [0, 1]),
+        ([0.0, float("inf")], [True, True], [0, 1]),
+        ([0.0, 1.0], [True, True], [-1, 1]),
+        ([0.0, 1.0], [True, True], [0, "1"]),
+        ([0.0, 1.0], [True, True], [0, None]),
+        ([0.0, 1.0], [True, 1], [0, 1]),
+    ],
+)
+def test_queue_series_rejects_invalid_values(
+    times: list[object], window: list[object], counts: list[object]
+) -> None:
+    with pytest.raises(ValidationError):
+        QueueSeries.model_validate(
+            {"times_s": times, "in_window": window, "vehicles_by_access": {"N": counts}}
+        )

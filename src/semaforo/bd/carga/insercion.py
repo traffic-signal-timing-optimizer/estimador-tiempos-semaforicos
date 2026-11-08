@@ -16,6 +16,7 @@ import math
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from typing import cast
 
 from psycopg import sql
 from psycopg.types.json import Jsonb
@@ -46,6 +47,9 @@ TYPES: dict[str, sql.SQL] = {
     "timestamp with time zone": sql.SQL("timestamptz"),
     "date": sql.SQL("date"),
     "jsonb": sql.SQL("jsonb"),
+    "integer[]": sql.SQL("integer[]"),
+    "double precision[]": sql.SQL("double precision[]"),
+    "boolean[]": sql.SQL("boolean[]"),
     "control.huella": sql.SQL("control.huella"),
 }
 
@@ -197,11 +201,32 @@ def _value(table: str, column: str, kind: str, value: object) -> object:
         return None
     if kind == "jsonb":
         return Jsonb(value)
+    if kind.endswith("[]"):
+        if not isinstance(value, list):
+            raise CargaError(
+                ErrorCode.INPUT_SCHEMA, "el arreglo tiene valores inválidos", f"{table}.{column}"
+            )
+        converted = [_array_item(kind, item) for item in cast("list[object]", value)]
+        if any(item is None for item in converted):
+            raise CargaError(
+                ErrorCode.INPUT_SCHEMA, "el arreglo tiene valores inválidos", f"{table}.{column}"
+            )
+        return converted
     convert, message = _CONVERSIONS.get(kind, (_text, "se esperaba un texto"))
     converted = convert(value)
     if converted is None:
         raise CargaError(ErrorCode.INPUT_SCHEMA, message, f"{table}.{column}")
     return converted
+
+
+def _array_item(kind: str, value: object) -> object | None:
+    if kind == "integer[]":
+        number = _integer(value)
+        return number if isinstance(number, int) and number >= 0 else None
+    if kind == "double precision[]":
+        number = _number(value)
+        return number if isinstance(number, float) and number >= 0 else None
+    return _boolean(value)
 
 
 def _checked(info: TableInfo, rows: Sequence[Row]) -> list[Row]:
@@ -248,6 +273,23 @@ def _stage(connection: Connection, info: TableInfo, rows: list[Row]) -> sql.Iden
     )
     connection.execute(sql.SQL("TRUNCATE {}").format(temporary))
     columns = info.columns
+    if any(info.types[column].endswith("[]") for column in columns):
+        # Cada arreglo es un valor de una fila. No se pasa una matriz a unnest(): series de
+        # distinta longitud deben conservar su propia frontera y su tipo nativo.
+        query = sql.SQL("INSERT INTO {} ({}) VALUES ({})").format(
+            temporary,
+            sql.SQL(", ").join(map(sql.Identifier, columns)),
+            sql.SQL(", ").join(sql.Placeholder() for _ in columns),
+        )
+        values = [
+            tuple(
+                _value(info.full, column, info.types[column], row.get(column)) for column in columns
+            )
+            for row in rows
+        ]
+        with connection.cursor() as cursor:
+            cursor.executemany(query, values)
+        return temporary
     arrays = [
         [_value(info.full, column, info.types[column], row.get(column)) for row in rows]
         for column in columns

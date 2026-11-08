@@ -83,6 +83,23 @@ def test_qa33_the_database_matches_the_files_in_counts_and_in_recalculated_delay
     assert reconcile_exit_code(report) == 0
 
 
+def test_qa33_a_legacy_metrics_manifest_is_read_and_marked(
+    cargable: Loadable, base: str, tmp_path: Path
+) -> None:
+    workspace = copy_workspace(cargable.workspace, tmp_path / "datos")
+    run_id = _first_run(cargable)
+    path = _metrics_folder(workspace, cargable, run_id) / "manifiesto.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest["schema_version"] = "1.0.0"
+    manifest.pop("protocol_sha256")
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    report = load_workspace(workspace, PRELIMINARY, database=base)
+    assert report.status == "completed"
+    compared = reconcile(workspace, database=base)
+    assert compared.status == "equal", compared.differences
+    assert compared.legacy_protocol_manifests == 1
+
+
 def test_qa33_a_changed_file_and_a_changed_count_are_both_reported(
     cargable: Loadable, base: str, tmp_path: Path
 ) -> None:
@@ -115,6 +132,7 @@ def test_qa33_a_metric_that_no_longer_matches_what_is_recalculated_is_reported(
     report = reconcile(workspace, database=base)
     assert report.status == "different"
     moved = {d.item for d in report.differences if d.item.startswith("demora y métricas")}
+    assert any(d.item == "huella del protocolo" for d in report.differences)
     assert "demora y métricas: umbral_cola_mps" in moved
     assert "demora y métricas: cola_media_veh" in moved
     assert "demora y métricas: demora_media_s" not in moved  # la demora no depende del umbral
@@ -197,6 +215,95 @@ def test_qa33_a_metrics_file_republished_with_a_different_queue_is_reported(
     run_id = _first_run(cargable)
     _forged(workspace, cargable, run_id)
     assert (run_id, "filas de cola segundo a segundo") in _items(workspace, base)
+
+
+def test_qa33_swapped_queue_values_are_reported_even_when_counts_match(
+    cargable: Loadable, base: str, tmp_path: Path
+) -> None:
+    workspace = _loaded_copy(cargable, base, tmp_path)
+    run_id = _first_run(cargable)
+    folder = _metrics_folder(workspace, cargable, run_id)
+    metrics = read_run_metrics(folder).metrics
+    zone = metrics.zone
+    assert zone is not None and zone.queue_series is not None
+    series = zone.queue_series
+    access, first, second = next(
+        (access, i, j)
+        for access, values in series.vehicles_by_access.items()
+        for i, left in enumerate(values)
+        for j, right in enumerate(values[i + 1 :], start=i + 1)
+        if left != right
+    )
+    values = list(series.vehicles_by_access[access])
+    values[first], values[second] = values[second], values[first]
+    changed_series = series.model_copy(
+        update={"vehicles_by_access": {**series.vehicles_by_access, access: values}}
+    )
+    changed = metrics.model_copy(
+        update={"zone": zone.model_copy(update={"queue_series": changed_series})}
+    )
+    remove_tree(folder)
+    publish_run_metrics(workspace, changed)
+    report = reconcile(workspace, database=base, recompute=False)
+    items = {
+        d.item
+        for d in report.differences
+        if d.where == f"{run_id}/simulacion.cola_por_acceso/{access}"
+    }
+    assert f"vehiculos_en_cola[{first}]" in items
+    assert f"vehiculos_en_cola[{second}]" in items
+    assert "filas de cola segundo a segundo" not in {d.item for d in report.differences}
+
+
+def test_qa33_access_content_is_compared_even_when_the_row_count_matches(
+    cargable: Loadable, base: str, tmp_path: Path
+) -> None:
+    workspace = _loaded_copy(cargable, base, tmp_path)
+    run_id = _first_run(cargable)
+    folder = _metrics_folder(workspace, cargable, run_id)
+    metrics = read_run_metrics(folder).metrics
+    zone = metrics.zone
+    assert zone is not None
+    access = next(a for a, value in zone.queue_by_access.items() if value.max_vehicles is not None)
+    queue = zone.queue_by_access[access]
+    assert queue.max_vehicles is not None
+    changed = metrics.model_copy(
+        update={
+            "zone": zone.model_copy(
+                update={
+                    "queue_by_access": {
+                        **zone.queue_by_access,
+                        access: queue.model_copy(update={"max_vehicles": queue.max_vehicles + 1}),
+                    }
+                }
+            )
+        }
+    )
+    remove_tree(folder)
+    publish_run_metrics(workspace, changed)
+    report = reconcile(workspace, database=base, recompute=False)
+    assert any(
+        d.where == f"{run_id}/simulacion.resultados_acceso/{access}" and d.item == "cola_maxima_veh"
+        for d in report.differences
+    )
+
+
+def test_qa33_a_changed_vehicle_movement_is_reported_without_a_count_change(
+    cargable: Loadable, base: str, tmp_path: Path
+) -> None:
+    workspace = _loaded_copy(cargable, base, tmp_path)
+    run_id = _first_run(cargable)
+    path = workspace / "ejecuciones" / run_id / "outputs" / "cohorte_conciliada.csv"
+    lines = path.read_text(encoding="utf-8-sig").splitlines()
+    cells = lines[1].split(";")
+    cells[1] = "MOVIMIENTO-ALTERADO"
+    lines[1] = ";".join(cells)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8-sig")
+    report = reconcile(workspace, database=base, recompute=False)
+    assert any(
+        d.item == "movimiento_id" and d.where.startswith(f"{run_id}/simulacion.vehiculos/")
+        for d in report.differences
+    )
 
 
 def test_qa33_a_metrics_folder_that_was_altered_is_reported_instead_of_stopping(

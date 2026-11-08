@@ -51,7 +51,7 @@ MilestoneKind = Literal["protocol_frozen", "split_frozen", "model_frozen", "test
 class Milestone(FrozenModel):
     """Un hito: qué se congeló o abrió, cuándo, con qué huella, con qué acta y quién."""
 
-    schema_version: Literal["1.0.0"] = "1.0.0"
+    schema_version: Literal["1.0.0", "1.1.0"] = "1.1.0"
     hito_id: str
     tipo: MilestoneKind
     registrado_en: datetime
@@ -59,6 +59,8 @@ class Milestone(FrozenModel):
     particion_id: str | None
     modelo_id: str | None
     experimento_id: str | None
+    seleccion_id: str | None = None
+    huella_seleccion: str | None = None
     huella_objeto: str
     acta: str
     acta_sha256: str
@@ -179,6 +181,8 @@ def milestone_row(milestone: Milestone) -> Row:
         "particion_id": milestone.particion_id,
         "modelo_id": milestone.modelo_id,
         "experimento_id": milestone.experimento_id,
+        "seleccion_id": milestone.seleccion_id,
+        "huella_seleccion": milestone.huella_seleccion,
         "huella_objeto": milestone.huella_objeto,
         "commit_codigo": milestone.commit_codigo,
         "responsable": milestone.responsable,

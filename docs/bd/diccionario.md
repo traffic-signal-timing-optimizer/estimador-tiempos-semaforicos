@@ -2,22 +2,22 @@ Escrito para: el Product Owner (revisión del diseño), el asesor y el jurado (q
 
 # Diccionario de datos de la base «semaforo»
 
-Versión 1.0.0-borrador del 2026-11-05. Motor: PostgreSQL 17.9. Estado: propuesto para revisión del PO (DEV31 F1).
+Versión 1.1.0-candidato del 2026-11-07. Motor: PostgreSQL 17.9. Estado: candidato C2; pendiente de aprobar las tres huellas en D11.
 
 **Archivo generado** por `scripts/bd_esquema.py` desde `docs/bd/esquema.toml`. No se edita a mano: se cambia el esquema y se vuelve a generar.
 
-**56 tablas aprobadas en F0** y **0 propuestas** de F1, con **871 columnas** en total y **113 relaciones** entre tablas. Cada tabla lleva además `carga_id` y `artefacto_id`, que la unen con la carga que la escribió y con su archivo original.
+**57 tablas aprobadas en F0 y C2** y **0 propuestas** de F1, con **880 columnas** en total y **117 relaciones** entre tablas. Cada tabla lleva además `carga_id` y `artefacto_id`, que la unen con la carga que la escribió y con su archivo original.
 
 ## Resumen por esquema
 
 | Esquema | Qué guarda | Tablas aprobadas | Propuestas | Columnas |
 |---|---|---|---|---|
-| `control` | Quién cargó qué, con qué huella, los hitos del procedimiento y las incidencias de integridad. | 6 | 0 | 83 |
+| `control` | Quién cargó qué, con qué huella, los hitos del procedimiento y las incidencias de integridad. | 7 | 0 | 89 |
 | `caso` | El cruce: movimientos, clases de vehículo, tramos, grupos de verde, plan vigente, aforos y calibración. | 13 | 0 | 160 |
 | `experimento` | Familias y escenarios de demanda, su reparto en particiones y los protocolos de medición. | 7 | 0 | 85 |
-| `simulacion` | Lo que produce SUMO: planes, corridas, resultados, vehículos, eventos, colas, búsquedas, etiquetas y comparadores. | 14 | 0 | 341 |
-| `aprendizaje` | Conjuntos de entrenamiento, entrenamientos, métricas, modelos, selección y consultas al modelo. | 11 | 0 | 128 |
-| `evaluacion` | Evaluación final: experimentos, comparaciones, diferencias emparejadas, indicadores y costos. | 5 | 0 | 74 |
+| `simulacion` | Lo que produce SUMO: planes, corridas, resultados, vehículos, eventos, colas, búsquedas, etiquetas y comparadores. | 14 | 0 | 342 |
+| `aprendizaje` | Conjuntos de entrenamiento, entrenamientos, métricas, modelos, selección y consultas al modelo. | 11 | 0 | 129 |
+| `evaluacion` | Evaluación final: experimentos, comparaciones, diferencias emparejadas, indicadores y costos. | 5 | 0 | 75 |
 
 ## Cómo leer este diccionario
 
@@ -48,6 +48,7 @@ Versión 1.0.0-borrador del 2026-11-05. Motor: PostgreSQL 17.9. Estado: propuest
 | semaforo_admin | Dueño de los esquemas. Aplica las migraciones y registra los hitos con «bd hito». Solo lo usa el PO. | Todo sobre los siete esquemas. |
 | semaforo_carga | Lo usa el cargador («bd cargar»). | USAGE en los esquemas; SELECT e INSERT en todas las tablas; UPDATE solo en las dos excepciones de «solo agregar». Ve todas las filas, también las de prueba. |
 | semaforo_lectura | Lo usan el panel, las consultas guardadas y el PO para consultar. | USAGE y SELECT en todas las tablas y vistas. La seguridad por filas le oculta lo que esté cegado. |
+| semaforo_panel | Rol exclusivo del panel local; solo consulta las vistas revisadas. | USAGE en vistas y SELECT en las vistas aprobadas; ningún permiso directo sobre tablas. |
 | postgres | Administrador del servicio PostgreSQL de la laptop. | Solo el PO. El proyecto no lo usa. |
 
 ## Cegado de la prueba final
@@ -58,8 +59,10 @@ La zona (desarrollo o prueba) no se guarda en cada fila: se deduce de la partici
 
 | Nombre | Clase | Qué hace |
 |---|---|---|
-| control.escenarios_cegados | vista | Escenarios asignados a «test» en una partición cuya prueba no tiene hito de apertura. Es la base del cegado. |
+| control.escenarios_cegados | vista | Escenarios asignados a «test» en una partición cuya prueba no tiene hito de apertura. ADR07 permite mostrar los identificadores y la asignación para auditar el cegado, sin exponer resultados ni archivos. Es la base del cegado. |
 | control.prueba_abierta(particion_id) | función | Verdadero si existe un hito «test_opened» para esa partición. |
+| control.escenario_visible(escenario_id) | función | Filtro explícito de las vistas del panel: excluye los escenarios de prueba cerrada aun cuando la vista lea con permisos del dueño. |
+| control.archivo_visible(artefacto_id) | función | Un archivo global es visible; uno de escenarios exige enlaces y que todos estén abiertos; uno de alcance desconocido queda oculto. La misma regla ciega el archivo y sus enlaces, para no revelar la ruta por artefacto_id. |
 | control.bloquear_cambios() | disparador | Rechaza UPDATE y DELETE en todas las tablas, salvo las dos excepciones declaradas (cierre de una carga y decisión de un conflicto). |
 | control.validar_hito() | disparador | Exige el orden de los hitos: protocolo y partición congelados antes que el modelo; modelo congelado antes de abrir la prueba. |
 | experimento.validar_asignacion() | disparador | Una familia completa va a una sola partición y asignación; un escenario cargado como preliminar no puede pasar a «test». |
@@ -92,6 +95,10 @@ erDiagram
   }
   artefactos {
     text artefacto_id PK
+  }
+  archivo_escenarios {
+    text artefacto_id PK
+    text escenario_id PK
   }
   entornos {
     huella entorno_id PK
@@ -307,10 +314,13 @@ erDiagram
     text costo_id PK
   }
   artefactos |o--o{ artefactos : "manifiesto_id"
+  artefactos ||--o{ archivo_escenarios : "artefacto_id"
+  escenarios ||--o{ archivo_escenarios : "escenario_id"
   protocolos |o--o{ hitos : "protocolo_id"
   particiones |o--o{ hitos : "particion_id"
   modelos |o--o{ hitos : "modelo_id"
   experimentos |o--o{ hitos : "experimento_id"
+  seleccion |o--o{ hitos : "seleccion_id"
   corridas ||--o{ replicas : "run_id_a"
   corridas ||--o{ replicas : "run_id_b"
   casos ||--o{ movimientos : "caso_id, caso_version"
@@ -394,7 +404,7 @@ erDiagram
   conjuntos ||--o{ modelos : "conjunto_id"
   entrenamientos ||--o{ modelos : "entrenamiento_id"
   particiones ||--o{ seleccion : "particion_id"
-  protocolos |o--o{ seleccion : "protocolo_id"
+  protocolos ||--o{ seleccion : "protocolo_id"
   modelos ||--o{ seleccion : "modelo_ganador_id"
   casos ||--o{ consultas : "caso_id, caso_version"
   modelos |o--o{ consultas : "modelo_id"
@@ -407,6 +417,7 @@ erDiagram
   protocolos ||--o{ experimentos : "protocolo_id"
   particiones ||--o{ experimentos : "particion_id"
   modelos ||--o{ experimentos : "modelo_id"
+  seleccion ||--o{ experimentos : "seleccion_id"
   experimentos ||--o{ comparaciones : "experimento_id"
   escenarios ||--o{ comparaciones : "escenario_id"
   corridas |o--o{ comparaciones : "run_id"
@@ -455,8 +466,14 @@ erDiagram
     huella sha256
     text manifiesto_id FK
     text estado
+    text alcance
     text motivo
     timestamptz registrado_en
+    text carga_id
+  }
+  archivo_escenarios {
+    text artefacto_id PK, FK
+    text escenario_id PK, FK
     text carga_id
   }
   entornos {
@@ -486,6 +503,8 @@ erDiagram
     text particion_id FK
     text modelo_id FK
     text experimento_id FK
+    text seleccion_id FK
+    huella huella_seleccion
     huella huella_objeto
     text commit_codigo
     text responsable
@@ -525,10 +544,13 @@ erDiagram
     text artefacto_id
   }
   artefactos |o--o{ artefactos : "manifiesto_id"
+  artefactos ||--o{ archivo_escenarios : "artefacto_id"
+  escenarios ||--o{ archivo_escenarios : "escenario_id"
   protocolos |o--o{ hitos : "protocolo_id"
   particiones |o--o{ hitos : "particion_id"
   modelos |o--o{ hitos : "modelo_id"
   experimentos |o--o{ hitos : "experimento_id"
+  seleccion |o--o{ hitos : "seleccion_id"
   corridas ||--o{ replicas : "run_id_a"
   corridas ||--o{ replicas : "run_id_b"
 ```
@@ -543,6 +565,7 @@ erDiagram
 - **Estado de la fuente:** existe
 - **Filas estimadas en DEV16:** decenas
 - **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Se permite una sola modificación: cerrar la carga (de running a completed, rejected o interrupted) completando fin, conteos y huella.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -574,7 +597,8 @@ erDiagram
 - **Origen:** Manifiestos de cada carpeta publicada; las actas de los hitos (raíz repositorio).
 - **Estado de la fuente:** existe
 - **Filas estimadas en DEV16:** unas 60 000
-- **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Cegado de la prueba:** Sí. Global o todos sus escenarios visibles; desconocido queda oculto.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -587,13 +611,33 @@ erDiagram
 | 6 | `sha256` | huella | no |  |  | Huella del contenido, recalculada al cargar. | manifiesto: sha256 (verificada) |  |
 | 7 | `manifiesto_id` | text | sí |  | FK opc. → `control.artefactos` | Manifiesto que declara este archivo; vacío si es un manifiesto o un acta. | cargador |  |
 | 8 | `estado` | text | no |  |  | intact (huella coincide), unknown (sin manifiesto reconocido), not_loadable (no se pudo leer) o rejected (rechazado por conflicto). | cargador | `estado IN ('intact','unknown','not_loadable','rejected')` |
-| 9 | `motivo` | text | sí |  |  | Por qué no está intact; vacío si lo está. | cargador |  |
-| 10 | `registrado_en` | timestamptz | no |  |  | Cuándo se registró. | cargador |  |
-| 11 | `carga_id` | text | no |  | FK → `control.cargas` | Carga que escribió la fila. (columna común) | cargador |  |
+| 9 | `alcance` | text | no |  |  | global, escenarios o desconocido. Los desconocidos quedan ocultos hasta clasificarlos. | cargador | `alcance IN ('global','escenarios','desconocido')` |
+| 10 | `motivo` | text | sí |  |  | Por qué no está intact; vacío si lo está. | cargador |  |
+| 11 | `registrado_en` | timestamptz | no |  |  | Cuándo se registró. | cargador |  |
+| 12 | `carga_id` | text | no |  | FK → `control.cargas` | Carga que escribió la fila. (columna común) | cargador |  |
 
 - Clave primaria: `artefacto_id`.
 - Clave única: `raiz, ruta_relativa`.
 - Regla «motivo_si_no_intacto»: Todo lo que no está intacto lleva motivo. `CHECK (estado = 'intact' OR motivo IS NOT NULL)`
+
+#### `control.archivo_escenarios`
+
+- **Qué guarda:** Escenarios a los que corresponde un archivo. Todos deben ser visibles para mostrar el archivo.
+- **Grano:** Una fila por archivo y escenario vinculado
+- **Origen:** Unidades de carga de corridas, búsquedas, escenarios y particiones
+- **Estado de la fuente:** DEV31 C2.6
+- **Filas estimadas en DEV16:** según archivos de corridas y escenarios
+- **Cegado de la prueba:** Sí. El enlace solo se ve si el archivo vinculado es visible.
+- **Visible porque:** No aplica.
+- **Solo agregar:** Sí: no se modifican ni se borran filas.
+
+| # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
+|---|---|---|---|---|---|---|---|---|
+| 1 | `artefacto_id` | text | no |  | PK; FK → `control.artefactos` | Archivo vinculado. | control.artefactos |  |
+| 2 | `escenario_id` | text | no |  | PK; FK → `experimento.escenarios` | Escenario vinculado. | unidad de carga |  |
+| 3 | `carga_id` | text | no |  | FK → `control.cargas` | Carga que escribió la fila. (columna común) | cargador |  |
+
+- Clave primaria: `artefacto_id, escenario_id`.
 
 #### `control.entornos`
 
@@ -603,6 +647,7 @@ erDiagram
 - **Estado de la fuente:** existe
 - **Filas estimadas en DEV16:** pocas
 - **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -637,6 +682,7 @@ erDiagram
 - **Estado de la fuente:** pendiente F3
 - **Filas estimadas en DEV16:** decenas
 - **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Visible porque:** ADR07 hace pública la secuencia de congelamientos y la apertura; no expone resultados de prueba.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -648,15 +694,17 @@ erDiagram
 | 5 | `particion_id` | text | sí |  | FK opc. → `experimento.particiones` | Partición congelada, o cuya prueba se abre. | bd hito |  |
 | 6 | `modelo_id` | text | sí |  | FK opc. → `aprendizaje.modelos` | Modelo congelado (tipo model_frozen). | bd hito |  |
 | 7 | `experimento_id` | text | sí |  | FK opc. → `evaluacion.experimentos` | Experimento cuya prueba se abre (tipo test_opened). | bd hito |  |
-| 8 | `huella_objeto` | huella | no |  |  | Huella del objeto en el momento del hito. | artefacto del objeto |  |
-| 9 | `commit_codigo` | text | sí |  |  | Commit que contiene el acta y la huella; da la fecha externa al subirse a GitHub. | git |  |
-| 10 | `responsable` | text | no |  |  | Quién registró el hito. | bd hito |  |
-| 11 | `notas` | text | sí |  |  | Aclaraciones del acta. | bd hito |  |
-| 12 | `carga_id` | text | no |  | FK → `control.cargas` | Carga que escribió la fila. (columna común) | cargador |  |
-| 13 | `artefacto_id` | text | no |  | FK → `control.artefactos` | Archivo de datos/ (o acta del repositorio) del que sale la fila. (columna común) | cargador |  |
+| 8 | `seleccion_id` | text | sí |  | FK opc. → `aprendizaje.seleccion` | Selección fijada al congelar el modelo; no cambia con selecciones posteriores. | aprendizaje.seleccion al registrar model_frozen |  |
+| 9 | `huella_seleccion` | huella | sí |  |  | Huella de la selección fijada al congelar el modelo. | aprendizaje.seleccion al registrar model_frozen |  |
+| 10 | `huella_objeto` | huella | no |  |  | Huella del objeto en el momento del hito. | artefacto del objeto |  |
+| 11 | `commit_codigo` | text | sí |  |  | Commit que contiene el acta y la huella; da la fecha externa al subirse a GitHub. | git |  |
+| 12 | `responsable` | text | no |  |  | Quién registró el hito. | bd hito |  |
+| 13 | `notas` | text | sí |  |  | Aclaraciones del acta. | bd hito |  |
+| 14 | `carga_id` | text | no |  | FK → `control.cargas` | Carga que escribió la fila. (columna común) | cargador |  |
+| 15 | `artefacto_id` | text | no |  | FK → `control.artefactos` | Archivo de datos/ (o acta del repositorio) del que sale la fila. (columna común) | cargador |  |
 
 - Clave primaria: `hito_id`.
-- Regla «objeto_segun_tipo»: Cada tipo de hito dice sobre qué objeto es. `CHECK ((tipo = 'protocol_frozen' AND protocolo_id IS NOT NULL) OR (tipo = 'split_frozen' AND particion_id IS NOT NULL) OR (tipo = 'model_frozen' AND modelo_id IS NOT NULL) OR (tipo = 'test_opened' AND experimento_id IS NOT NULL AND particion_id IS NOT NULL))`
+- Regla «objeto_segun_tipo»: Cada tipo de hito dice sobre qué objeto es; congelar un modelo fija su selección y huella. `CHECK ((tipo = 'protocol_frozen' AND protocolo_id IS NOT NULL) OR (tipo = 'split_frozen' AND particion_id IS NOT NULL) OR (tipo = 'model_frozen' AND modelo_id IS NOT NULL AND seleccion_id IS NOT NULL AND huella_seleccion IS NOT NULL) OR (tipo = 'test_opened' AND experimento_id IS NOT NULL AND particion_id IS NOT NULL))`
 - Regla «orden_de_hitos»: Disparador control.validar_hito(): no hay apertura sin modelo, protocolo y partición congelados antes.
 - Regla «un_hito_por_objeto»: Índices únicos parciales: un solo protocol_frozen por protocolo, un split_frozen por partición, un model_frozen por modelo y un test_opened por experimento.
 
@@ -668,6 +716,7 @@ erDiagram
 - **Estado de la fuente:** pendiente F3
 - **Filas estimadas en DEV16:** 0 si todo está bien
 - **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Se permite una sola modificación: registrar la decisión (decision, decidido_en y decidido_por) cuando estaba vacía.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -696,7 +745,8 @@ erDiagram
 - **Origen:** replica.json (simulacion/replica.py, DEV14 A06). Solo se carga si las dos corridas están en datos/.
 - **Estado de la fuente:** existe
 - **Filas estimadas en DEV16:** pocas
-- **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Cegado de la prueba:** Sí. Solo cuando las dos corridas son visibles.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -943,6 +993,7 @@ erDiagram
 - **Estado de la fuente:** existe
 - **Filas estimadas en DEV16:** 1
 - **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -975,6 +1026,7 @@ erDiagram
 - **Estado de la fuente:** existe
 - **Filas estimadas en DEV16:** 23
 - **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -1004,6 +1056,7 @@ erDiagram
 - **Estado de la fuente:** existe
 - **Filas estimadas en DEV16:** 4
 - **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -1025,6 +1078,7 @@ erDiagram
 - **Estado de la fuente:** existe
 - **Filas estimadas en DEV16:** 9
 - **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -1052,6 +1106,7 @@ erDiagram
 - **Estado de la fuente:** existe
 - **Filas estimadas en DEV16:** 5
 - **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -1076,6 +1131,7 @@ erDiagram
 - **Estado de la fuente:** existe
 - **Filas estimadas en DEV16:** 8
 - **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -1098,6 +1154,7 @@ erDiagram
 - **Estado de la fuente:** existe
 - **Filas estimadas en DEV16:** 1
 - **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Visible porque:** El plan vigente observado es una referencia pública del caso; su uso hace visible el plan asociado.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -1124,6 +1181,7 @@ erDiagram
 - **Estado de la fuente:** existe el formato (DEV04); aforos de campo pendientes (DEV22)
 - **Filas estimadas en DEV16:** 0 (sin aforos de campo todavía)
 - **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -1153,6 +1211,7 @@ erDiagram
 - **Estado de la fuente:** existe el formato (DEV05); controles de campo pendientes (DEV22)
 - **Filas estimadas en DEV16:** 0
 - **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -1182,6 +1241,7 @@ erDiagram
 - **Estado de la fuente:** existe el formato; reportes de campo pendientes (DEV22)
 - **Filas estimadas en DEV16:** 0
 - **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -1217,6 +1277,7 @@ erDiagram
 - **Estado de la fuente:** existe el formato; reportes de campo pendientes (DEV22)
 - **Filas estimadas en DEV16:** 0
 - **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -1253,6 +1314,7 @@ erDiagram
 - **Estado de la fuente:** pendiente DEV23
 - **Filas estimadas en DEV16:** 0
 - **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -1279,6 +1341,7 @@ erDiagram
 - **Estado de la fuente:** pendiente DEV23
 - **Filas estimadas en DEV16:** 0
 - **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -1427,6 +1490,7 @@ erDiagram
 - **Estado de la fuente:** existe
 - **Filas estimadas en DEV16:** unas 20
 - **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -1451,6 +1515,7 @@ erDiagram
 - **Estado de la fuente:** existe
 - **Filas estimadas en DEV16:** unos 46
 - **Cegado de la prueba:** Sí. Se ocultan las filas cuyo escenario (`escenario_id`) es de una prueba no abierta.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -1490,6 +1555,7 @@ erDiagram
 - **Estado de la fuente:** existe
 - **Filas estimadas en DEV16:** unas 4 200
 - **Cegado de la prueba:** Sí. Se ocultan las filas cuyo escenario (`escenario_id`) es de una prueba no abierta.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -1516,6 +1582,7 @@ erDiagram
 - **Estado de la fuente:** existe el código; ninguna publicada todavía
 - **Filas estimadas en DEV16:** 1
 - **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -1537,6 +1604,7 @@ erDiagram
 - **Estado de la fuente:** existe el código; ninguna publicada todavía
 - **Filas estimadas en DEV16:** unas 46
 - **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Visible porque:** ADR07 permite ver la asignación y el nombre del escenario de prueba; las métricas y archivos siguen cegados.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -1562,6 +1630,7 @@ erDiagram
 - **Estado de la fuente:** existe
 - **Filas estimadas en DEV16:** pocas
 - **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -1605,6 +1674,7 @@ erDiagram
 - **Estado de la fuente:** existe
 - **Filas estimadas en DEV16:** decenas
 - **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -1755,14 +1825,15 @@ erDiagram
     double_precision detenciones_media
     double_precision cota_inf_detenciones
     integer pasos_fcd
-    jsonb pasos_cola_s
-    jsonb pasos_en_ventana
+    double_precision[] pasos_cola_s
+    boolean[] pasos_en_ventana
     text carga_id
     text artefacto_id
   }
   resultados_acceso {
     text run_id PK, FK
     text acceso PK
+    boolean con_cohorte
     integer solicitados
     integer terminados
     integer sin_terminar
@@ -1858,7 +1929,7 @@ erDiagram
   cola_por_acceso {
     text run_id PK, FK
     text acceso PK
-    jsonb vehiculos_en_cola
+    integer[] vehiculos_en_cola
     text carga_id
     text artefacto_id
   }
@@ -2044,7 +2115,8 @@ erDiagram
 - **Origen:** traza.json (candidatos), label.json, comparadores.json, respuestas del modelo y programas de las corridas.
 - **Estado de la fuente:** existe
 - **Filas estimadas en DEV16:** unas 1 000
-- **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Cegado de la prueba:** Sí. Solo si una relación de uso visible menciona el plan.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -2066,7 +2138,8 @@ erDiagram
 - **Origen:** Las mismas fuentes que planes.
 - **Estado de la fuente:** existe
 - **Filas estimadas en DEV16:** unas 9 000
-- **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Cegado de la prueba:** Sí. Hereda la visibilidad de `simulacion.planes(plan_id)`.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -2089,6 +2162,7 @@ erDiagram
 - **Estado de la fuente:** existe
 - **Filas estimadas en DEV16:** unas 4 700
 - **Cegado de la prueba:** Sí. Se ocultan las filas cuyo escenario (`escenario_id`) es de una prueba no abierta.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -2155,6 +2229,7 @@ erDiagram
 - **Estado de la fuente:** existe (summary.json y, desde DEV31 F2, metricas.json en las corridas nuevas; las 133 anteriores se calculan al cargarlas, F4)
 - **Filas estimadas en DEV16:** unas 4 700
 - **Cegado de la prueba:** Sí. Hereda la visibilidad de `simulacion.corridas(run_id)`.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -2221,8 +2296,8 @@ erDiagram
 | 60 | `detenciones_media` | double precision | sí |  |  | Detenciones por vehículo. | metricas.json: zone.stops.mean_stops |  |
 | 61 | `cota_inf_detenciones` | double precision | sí |  |  | Cota inferior de detenciones por vehículo. | metricas.json: zone.stops.lower_bound_mean_stops |  |
 | 62 | `pasos_fcd` | integer | sí |  |  | Pasos leídos del archivo de posiciones. | metricas.json: zone.fcd_steps |  |
-| 63 | `pasos_cola_s` | jsonb | sí | s |  | Momento de cada paso de la serie de cola, en orden (la misma para todos los accesos de la corrida). Vacío sin zona. | metricas.json: zone.queue_series.times_s |  |
-| 64 | `pasos_en_ventana` | jsonb | sí |  |  | Si cada paso cuenta para la cola del resumen (intervalo de medición y momento de muestreo), en el mismo orden que pasos_cola_s. Los demás pasos (calentamiento, vaciado) se guardan, pero no entran en las medias. Vacío sin zona. | metricas.json: zone.queue_series.in_window |  |
+| 63 | `pasos_cola_s` | double precision[] | sí | s |  | Momento finito y no negativo de cada paso de la serie de cola, en orden estricto (la misma para todos los accesos de la corrida). Vacío sin zona. | metricas.json: zone.queue_series.times_s | `array_position(pasos_cola_s, NULL) IS NULL AND 0 <= ALL(pasos_cola_s) AND 'Infinity'::double precision > ALL(pasos_cola_s)` |
+| 64 | `pasos_en_ventana` | boolean[] | sí |  |  | Si cada paso cuenta para la cola del resumen (intervalo de medición y momento de muestreo), en el mismo orden que pasos_cola_s. Los demás pasos (calentamiento, vaciado) se guardan, pero no entran en las medias. Vacío sin zona. | metricas.json: zone.queue_series.in_window | `array_position(pasos_en_ventana, NULL) IS NULL` |
 | 65 | `carga_id` | text | no |  | FK → `control.cargas` | Carga que escribió la fila. (columna común) | cargador |  |
 | 66 | `artefacto_id` | text | no |  | FK → `control.artefactos` | Archivo de datos/ (o acta del repositorio) del que sale la fila. (columna común) | cargador |  |
 
@@ -2239,40 +2314,43 @@ erDiagram
 - **Estado de la fuente:** existe desde DEV31 F2 (metricas.json de las corridas nuevas; las 133 anteriores se calculan al cargarlas, F4)
 - **Filas estimadas en DEV16:** unas 33 000
 - **Cegado de la prueba:** Sí. Hereda la visibilidad de `simulacion.corridas(run_id)`.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
 |---|---|---|---|---|---|---|---|---|
 | 1 | `run_id` | text | no |  | PK; FK → `simulacion.corridas` | Corrida. | metricas.json: run_id |  |
 | 2 | `acceso` | text | no |  | PK | Acceso: approach_id del caso o, para carriles de la zona sin movimiento, su calle. | metricas.json (clave del acceso) |  |
-| 3 | `solicitados` | integer | no | veh |  | Vehículos de la cohorte por este acceso. | by_access: requested |  |
-| 4 | `terminados` | integer | no | veh |  | Terminados. | by_access: finished |  |
-| 5 | `sin_terminar` | integer | no | veh |  | Sin terminar. | by_access: unfinished |  |
-| 6 | `no_insertados` | integer | no | veh |  | No insertados. | by_access: not_inserted |  |
-| 7 | `estado_demora` | text | no |  |  | complete, censored o empty. | by_access: status | `estado_demora IN ('complete','censored','empty')` |
-| 8 | `suma_demora_s` | double precision | no | s |  | Suma de demoras. | by_access: sum_delay_s |  |
-| 9 | `demora_media_s` | double precision | sí | s |  | Demora media; vacía si está censurada. | by_access: mean_delay_s |  |
-| 10 | `perdida_tiempo_media_s` | double precision | sí | s |  | Pérdida de tiempo media. | by_access: mean_time_loss_s |  |
-| 11 | `demora_salida_media_s` | double precision | sí | s |  | Espera de salida media. | by_access: mean_depart_delay_s |  |
-| 12 | `cota_inf_demora_s` | double precision | sí | s |  | Cota inferior de la demora. | by_access: lower_bound_mean_delay_s |  |
-| 13 | `cota_inf_perdida_tiempo_s` | double precision | sí | s |  | Cota inferior de la pérdida de tiempo. | by_access: lower_bound_mean_time_loss_s |  |
-| 14 | `cota_inf_demora_salida_s` | double precision | sí | s |  | Cota inferior de la espera de salida. | by_access: lower_bound_mean_depart_delay_s |  |
-| 15 | `estado_cola` | text | sí |  |  | complete, incomplete o empty; vacío sin zona. | queue_by_access: status | `estado_cola IS NULL OR estado_cola IN ('complete','incomplete','empty')` |
-| 16 | `ticks_esperados` | integer | sí |  |  | Muestras esperadas. | queue_by_access: ticks_expected |  |
-| 17 | `ticks_observados` | integer | sí |  |  | Muestras observadas. | queue_by_access: ticks_observed |  |
-| 18 | `cobertura_cola` | double precision | sí | fracción |  | Cobertura de la cola. | queue_by_access: coverage |  |
-| 19 | `vehiculo_ticks` | bigint | sí |  |  | Suma de vehículos en cola. | queue_by_access: vehicle_ticks |  |
-| 20 | `cola_media_veh` | double precision | sí | veh |  | Cola media. | queue_by_access: mean_vehicles |  |
-| 21 | `cola_maxima_veh` | integer | sí | veh |  | Cola máxima. | queue_by_access: max_vehicles |  |
-| 22 | `estado_detenciones` | text | sí |  |  | complete, censored o empty. | stops_by_access: status | `estado_detenciones IS NULL OR estado_detenciones IN ('complete','censored','empty')` |
-| 23 | `detenciones_solicitados` | integer | sí | veh |  | Vehículos considerados. | stops_by_access: requested |  |
-| 24 | `detenciones_total` | integer | sí |  |  | Detenciones. | stops_by_access: total_stops |  |
-| 25 | `detenciones_media` | double precision | sí |  |  | Detenciones por vehículo. | stops_by_access: mean_stops |  |
-| 26 | `cota_inf_detenciones` | double precision | sí |  |  | Cota inferior de detenciones. | stops_by_access: lower_bound_mean_stops |  |
-| 27 | `carga_id` | text | no |  | FK → `control.cargas` | Carga que escribió la fila. (columna común) | cargador |  |
-| 28 | `artefacto_id` | text | no |  | FK → `control.artefactos` | Archivo de datos/ (o acta del repositorio) del que sale la fila. (columna común) | cargador |  |
+| 3 | `con_cohorte` | boolean | no |  |  | Si el acceso tiene vehículos de la cohorte y por eso datos de demora; si no, solo puede tener cola y detenciones. | presencia en metricas.json: cohort.by_access |  |
+| 4 | `solicitados` | integer | sí | veh |  | Vehículos de la cohorte por este acceso. | by_access: requested |  |
+| 5 | `terminados` | integer | sí | veh |  | Terminados. | by_access: finished |  |
+| 6 | `sin_terminar` | integer | sí | veh |  | Sin terminar. | by_access: unfinished |  |
+| 7 | `no_insertados` | integer | sí | veh |  | No insertados. | by_access: not_inserted |  |
+| 8 | `estado_demora` | text | sí |  |  | complete, censored o empty; vacío sin cohorte. | by_access: status | `estado_demora IS NULL OR estado_demora IN ('complete','censored','empty')` |
+| 9 | `suma_demora_s` | double precision | sí | s |  | Suma de demoras; vacía sin cohorte. | by_access: sum_delay_s |  |
+| 10 | `demora_media_s` | double precision | sí | s |  | Demora media; vacía si está censurada. | by_access: mean_delay_s |  |
+| 11 | `perdida_tiempo_media_s` | double precision | sí | s |  | Pérdida de tiempo media. | by_access: mean_time_loss_s |  |
+| 12 | `demora_salida_media_s` | double precision | sí | s |  | Espera de salida media. | by_access: mean_depart_delay_s |  |
+| 13 | `cota_inf_demora_s` | double precision | sí | s |  | Cota inferior de la demora. | by_access: lower_bound_mean_delay_s |  |
+| 14 | `cota_inf_perdida_tiempo_s` | double precision | sí | s |  | Cota inferior de la pérdida de tiempo. | by_access: lower_bound_mean_time_loss_s |  |
+| 15 | `cota_inf_demora_salida_s` | double precision | sí | s |  | Cota inferior de la espera de salida. | by_access: lower_bound_mean_depart_delay_s |  |
+| 16 | `estado_cola` | text | sí |  |  | complete, incomplete o empty; vacío sin zona. | queue_by_access: status | `estado_cola IS NULL OR estado_cola IN ('complete','incomplete','empty')` |
+| 17 | `ticks_esperados` | integer | sí |  |  | Muestras esperadas. | queue_by_access: ticks_expected |  |
+| 18 | `ticks_observados` | integer | sí |  |  | Muestras observadas. | queue_by_access: ticks_observed |  |
+| 19 | `cobertura_cola` | double precision | sí | fracción |  | Cobertura de la cola. | queue_by_access: coverage |  |
+| 20 | `vehiculo_ticks` | bigint | sí |  |  | Suma de vehículos en cola. | queue_by_access: vehicle_ticks |  |
+| 21 | `cola_media_veh` | double precision | sí | veh |  | Cola media. | queue_by_access: mean_vehicles |  |
+| 22 | `cola_maxima_veh` | integer | sí | veh |  | Cola máxima. | queue_by_access: max_vehicles |  |
+| 23 | `estado_detenciones` | text | sí |  |  | complete, censored o empty. | stops_by_access: status | `estado_detenciones IS NULL OR estado_detenciones IN ('complete','censored','empty')` |
+| 24 | `detenciones_solicitados` | integer | sí | veh |  | Vehículos considerados. | stops_by_access: requested |  |
+| 25 | `detenciones_total` | integer | sí |  |  | Detenciones. | stops_by_access: total_stops |  |
+| 26 | `detenciones_media` | double precision | sí |  |  | Detenciones por vehículo. | stops_by_access: mean_stops |  |
+| 27 | `cota_inf_detenciones` | double precision | sí |  |  | Cota inferior de detenciones. | stops_by_access: lower_bound_mean_stops |  |
+| 28 | `carga_id` | text | no |  | FK → `control.cargas` | Carga que escribió la fila. (columna común) | cargador |  |
+| 29 | `artefacto_id` | text | no |  | FK → `control.artefactos` | Archivo de datos/ (o acta del repositorio) del que sale la fila. (columna común) | cargador |  |
 
 - Clave primaria: `run_id, acceso`.
+- Regla «cohorte_y_demora»: Sin cohorte, toda columna de demora queda vacía; con cohorte, los datos obligatorios están presentes. `CHECK ((con_cohorte AND solicitados IS NOT NULL AND terminados IS NOT NULL AND sin_terminar IS NOT NULL AND no_insertados IS NOT NULL AND estado_demora IS NOT NULL AND suma_demora_s IS NOT NULL) OR (NOT con_cohorte AND solicitados IS NULL AND terminados IS NULL AND sin_terminar IS NULL AND no_insertados IS NULL AND estado_demora IS NULL AND suma_demora_s IS NULL AND demora_media_s IS NULL AND perdida_tiempo_media_s IS NULL AND demora_salida_media_s IS NULL AND cota_inf_demora_s IS NULL AND cota_inf_perdida_tiempo_s IS NULL AND cota_inf_demora_salida_s IS NULL))`
 
 #### `simulacion.resultados_movimiento`
 
@@ -2282,6 +2360,7 @@ erDiagram
 - **Estado de la fuente:** existe desde DEV31 F2 (metricas.json de las corridas nuevas; las 133 anteriores se calculan al cargarlas, F4)
 - **Filas estimadas en DEV16:** unas 108 000
 - **Cegado de la prueba:** Sí. Hereda la visibilidad de `simulacion.corridas(run_id)`.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -2315,6 +2394,7 @@ erDiagram
 - **Estado de la fuente:** existe (cohorte y tripinfo; las columnas de métricas, desde DEV31 F2 en las corridas nuevas)
 - **Filas estimadas en DEV16:** unos 8,4 millones
 - **Cegado de la prueba:** Sí. Hereda la visibilidad de `simulacion.corridas(run_id)`.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -2362,6 +2442,7 @@ erDiagram
 - **Estado de la fuente:** existe
 - **Filas estimadas en DEV16:** miles
 - **Cegado de la prueba:** Sí. Hereda la visibilidad de `simulacion.corridas(run_id)`.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -2388,13 +2469,14 @@ erDiagram
 - **Estado de la fuente:** existe desde DEV31 F2 (metricas.json de las corridas nuevas; las 133 anteriores se calculan al cargarlas, F4). Cambio aprobado por el PO en DEV31 F4: antes era una fila por corrida, acceso y paso (cola_segundo)
 - **Filas estimadas en DEV16:** unas 33 mil (4 692 corridas por unos 7 accesos)
 - **Cegado de la prueba:** Sí. Hereda la visibilidad de `simulacion.corridas(run_id)`.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
 |---|---|---|---|---|---|---|---|---|
 | 1 | `run_id` | text | no |  | PK; FK → `simulacion.corridas`; FK → `simulacion.resultados_corrida` | Corrida. | metricas.json: run_id |  |
 | 2 | `acceso` | text | no |  | PK | Acceso: una clave de zone.queue_series.vehicles_by_access. | metricas.json: zone.queue_series.vehicles_by_access (clave) |  |
-| 3 | `vehiculos_en_cola` | jsonb | no | veh |  | Vehículos del acceso con velocidad menor o igual que el umbral de cola, en los carriles de la zona, en cada paso (un número por paso, en el orden de pasos_cola_s de la corrida). Un paso que la FCD no trae no tiene valor: no se rellena con cero. | metricas.json: zone.queue_series.vehicles_by_access[acceso] |  |
+| 3 | `vehiculos_en_cola` | integer[] | no | veh |  | Vehículos no negativos del acceso con velocidad menor o igual que el umbral de cola, en los carriles de la zona, en cada paso (un número por paso, en el orden de pasos_cola_s de la corrida). Un paso que la FCD no trae no tiene valor: no se rellena con cero. | metricas.json: zone.queue_series.vehicles_by_access[acceso] | `array_position(vehiculos_en_cola, NULL) IS NULL AND 0 <= ALL(vehiculos_en_cola)` |
 | 4 | `carga_id` | text | no |  | FK → `control.cargas` | Carga que escribió la fila. (columna común) | cargador |  |
 | 5 | `artefacto_id` | text | no |  | FK → `control.artefactos` | Archivo de datos/ (o acta del repositorio) del que sale la fila. (columna común) | cargador |  |
 
@@ -2409,6 +2491,7 @@ erDiagram
 - **Estado de la fuente:** existe
 - **Filas estimadas en DEV16:** unas 46
 - **Cegado de la prueba:** Sí. Se ocultan las filas cuyo escenario (`escenario_id`) es de una prueba no abierta.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -2465,6 +2548,7 @@ erDiagram
 - **Estado de la fuente:** existe
 - **Filas estimadas en DEV16:** unas 1 000
 - **Cegado de la prueba:** Sí. Hereda la visibilidad de `simulacion.busquedas(busqueda_id)`.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -2505,6 +2589,7 @@ erDiagram
 - **Estado de la fuente:** existe (clase_incidente desde la regla de selección de DEV16)
 - **Filas estimadas en DEV16:** unas 4 700
 - **Cegado de la prueba:** Sí. Hereda la visibilidad de `simulacion.candidatos(busqueda_id,candidato_id)`.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -2536,6 +2621,7 @@ erDiagram
 - **Estado de la fuente:** existe
 - **Filas estimadas en DEV16:** unas 46
 - **Cegado de la prueba:** Sí. Se ocultan las filas cuyo escenario (`escenario_id`) es de una prueba no abierta.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -2570,6 +2656,7 @@ erDiagram
 - **Estado de la fuente:** existe
 - **Filas estimadas en DEV16:** unas 46
 - **Cegado de la prueba:** Sí. Se ocultan las filas cuyo escenario (`escenario_id`) es de una prueba no abierta.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -2715,9 +2802,10 @@ erDiagram
     text seleccion_id PK
     text particion_id FK
     text protocolo_id FK
+    huella huella_seleccion
     jsonb criterios
     jsonb candidatos
-    text modelo_ganador_id FK
+    text modelo_ganador_id FK, UK
     text motivo
     timestamptz decidido_en
     text carga_id
@@ -2780,7 +2868,7 @@ erDiagram
   conjuntos ||--o{ modelos : "conjunto_id"
   entrenamientos ||--o{ modelos : "entrenamiento_id"
   particiones ||--o{ seleccion : "particion_id"
-  protocolos |o--o{ seleccion : "protocolo_id"
+  protocolos ||--o{ seleccion : "protocolo_id"
   modelos ||--o{ seleccion : "modelo_ganador_id"
   casos ||--o{ consultas : "caso_id, caso_version"
   modelos |o--o{ consultas : "modelo_id"
@@ -2801,6 +2889,7 @@ erDiagram
 - **Estado de la fuente:** pendiente DEV16
 - **Filas estimadas en DEV16:** pocas
 - **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -2830,6 +2919,7 @@ erDiagram
 - **Estado de la fuente:** pendiente DEV16
 - **Filas estimadas en DEV16:** unas 40
 - **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Visible porque:** Solo se admiten etiquetas de entrenamiento o validación; el disparador rechaza las de prueba.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -2851,6 +2941,7 @@ erDiagram
 - **Estado de la fuente:** pendiente DEV16
 - **Filas estimadas en DEV16:** decenas
 - **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -2881,6 +2972,7 @@ erDiagram
 - **Estado de la fuente:** pendiente DEV16
 - **Filas estimadas en DEV16:** miles
 - **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -2904,6 +2996,7 @@ erDiagram
 - **Estado de la fuente:** pendiente DEV16
 - **Filas estimadas en DEV16:** cientos
 - **Cegado de la prueba:** Sí. Las filas de prueba se ocultan hasta abrir la prueba de su partición (`particion_id,asignacion`).
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -2932,6 +3025,7 @@ erDiagram
 - **Estado de la fuente:** pendiente DEV16
 - **Filas estimadas en DEV16:** cientos
 - **Cegado de la prueba:** Sí. Se ocultan las filas cuyo escenario (`escenario_id`) es de una prueba no abierta.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -2959,6 +3053,7 @@ erDiagram
 - **Estado de la fuente:** pendiente DEV16 y DEV17
 - **Filas estimadas en DEV16:** decenas
 - **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -2992,22 +3087,25 @@ erDiagram
 - **Estado de la fuente:** pendiente DEV16
 - **Filas estimadas en DEV16:** 1 o pocas
 - **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
 |---|---|---|---|---|---|---|---|---|
 | 1 | `seleccion_id` | text | no |  | PK | Identificador. | registro de selección (DEV16) |  |
 | 2 | `particion_id` | text | no |  | FK → `experimento.particiones` | Partición con cuya validación se eligió. | registro de selección (DEV16) |  |
-| 3 | `protocolo_id` | text | sí |  | FK opc. → `experimento.protocolos` | Protocolo aplicado. | registro de selección (DEV16) |  |
-| 4 | `criterios` | jsonb | no |  |  | Orden de criterios: factibilidad, cobertura, error en validación y costo. | registro de selección (DEV16) |  |
-| 5 | `candidatos` | jsonb | no |  |  | Modelos comparados y sus métricas de validación. | registro de selección (DEV16) |  |
-| 6 | `modelo_ganador_id` | text | no |  | FK → `aprendizaje.modelos` | Modelo elegido. | registro de selección (DEV16) |  |
-| 7 | `motivo` | text | no |  |  | Explicación de la decisión. | registro de selección (DEV16) |  |
-| 8 | `decidido_en` | timestamptz | no |  |  | Cuándo se decidió. | registro de selección (DEV16) |  |
-| 9 | `carga_id` | text | no |  | FK → `control.cargas` | Carga que escribió la fila. (columna común) | cargador |  |
-| 10 | `artefacto_id` | text | no |  | FK → `control.artefactos` | Archivo de datos/ (o acta del repositorio) del que sale la fila. (columna común) | cargador |  |
+| 3 | `protocolo_id` | text | no |  | FK → `experimento.protocolos` | Protocolo aplicado, obligatorio y congelado antes del modelo. | registro de selección (DEV16) |  |
+| 4 | `huella_seleccion` | huella | no |  |  | Huella del registro inmutable de selección. | registro de selección (DEV16) |  |
+| 5 | `criterios` | jsonb | no |  |  | Orden de criterios: factibilidad, cobertura, error en validación y costo. | registro de selección (DEV16) |  |
+| 6 | `candidatos` | jsonb | no |  |  | Modelos comparados y sus métricas de validación. | registro de selección (DEV16) |  |
+| 7 | `modelo_ganador_id` | text | no |  | FK → `aprendizaje.modelos`; única | Modelo elegido. | registro de selección (DEV16) |  |
+| 8 | `motivo` | text | no |  |  | Explicación de la decisión. | registro de selección (DEV16) |  |
+| 9 | `decidido_en` | timestamptz | no |  |  | Cuándo se decidió. | registro de selección (DEV16) |  |
+| 10 | `carga_id` | text | no |  | FK → `control.cargas` | Carga que escribió la fila. (columna común) | cargador |  |
+| 11 | `artefacto_id` | text | no |  | FK → `control.artefactos` | Archivo de datos/ (o acta del repositorio) del que sale la fila. (columna común) | cargador |  |
 
 - Clave primaria: `seleccion_id`.
+- Clave única: `modelo_ganador_id`.
 
 #### `aprendizaje.consultas`
 
@@ -3017,6 +3115,7 @@ erDiagram
 - **Estado de la fuente:** pendiente DEV18
 - **Filas estimadas en DEV16:** decenas
 - **Cegado de la prueba:** Sí, si la fila tiene escenario (`escenario_id`) de una prueba no abierta.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -3051,6 +3150,7 @@ erDiagram
 - **Estado de la fuente:** pendiente DEV18
 - **Filas estimadas en DEV16:** cientos
 - **Cegado de la prueba:** Sí. Hereda la visibilidad de `aprendizaje.consultas(request_id)`.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -3074,6 +3174,7 @@ erDiagram
 - **Estado de la fuente:** pendiente DEV18
 - **Filas estimadas en DEV16:** decenas
 - **Cegado de la prueba:** Sí. Hereda la visibilidad de `aprendizaje.consultas(request_id)`.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -3102,8 +3203,9 @@ erDiagram
     text caso_id FK
     text caso_version FK
     text protocolo_id FK
-    text particion_id FK
+    text particion_id FK, UK
     text modelo_id FK
+    text seleccion_id FK
     jsonb alternativas
     timestamptz creado_en
     huella huella_experimento
@@ -3185,6 +3287,7 @@ erDiagram
   protocolos ||--o{ experimentos : "protocolo_id"
   particiones ||--o{ experimentos : "particion_id"
   modelos ||--o{ experimentos : "modelo_id"
+  seleccion ||--o{ experimentos : "seleccion_id"
   experimentos ||--o{ comparaciones : "experimento_id"
   escenarios ||--o{ comparaciones : "escenario_id"
   corridas |o--o{ comparaciones : "run_id"
@@ -3209,6 +3312,7 @@ erDiagram
 - **Estado de la fuente:** pendiente DEV20
 - **Filas estimadas en DEV16:** 0 a 1
 - **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -3217,15 +3321,17 @@ erDiagram
 | 2 | `caso_id` | text | no |  | FK → `caso.casos` | Caso. | manifiesto de evaluación |  |
 | 3 | `caso_version` | text | no |  | FK → `caso.casos` | Versión del caso. | manifiesto de evaluación |  |
 | 4 | `protocolo_id` | text | no |  | FK → `experimento.protocolos` | Protocolo congelado. | manifiesto de evaluación |  |
-| 5 | `particion_id` | text | no |  | FK → `experimento.particiones` | Partición cuya prueba se usa. | manifiesto de evaluación |  |
+| 5 | `particion_id` | text | no |  | FK → `experimento.particiones`; única | Partición cuya prueba se usa. | manifiesto de evaluación |  |
 | 6 | `modelo_id` | text | no |  | FK → `aprendizaje.modelos` | Modelo congelado. | manifiesto de evaluación |  |
-| 7 | `alternativas` | jsonb | no |  |  | Alternativas comparadas: modelo, mediana, vigente, Webster y búsqueda. | manifiesto de evaluación |  |
-| 8 | `creado_en` | timestamptz | no |  |  | Cuándo se preparó. | manifiesto de evaluación |  |
-| 9 | `huella_experimento` | huella | no |  |  | Huella de lo congelado. | manifiesto de evaluación |  |
-| 10 | `carga_id` | text | no |  | FK → `control.cargas` | Carga que escribió la fila. (columna común) | cargador |  |
-| 11 | `artefacto_id` | text | no |  | FK → `control.artefactos` | Archivo de datos/ (o acta del repositorio) del que sale la fila. (columna común) | cargador |  |
+| 7 | `seleccion_id` | text | no |  | FK → `aprendizaje.seleccion` | Selección fijada al congelar ese modelo. | manifiesto de evaluación |  |
+| 8 | `alternativas` | jsonb | no |  |  | Alternativas comparadas: modelo, mediana, vigente, Webster y búsqueda. | manifiesto de evaluación |  |
+| 9 | `creado_en` | timestamptz | no |  |  | Cuándo se preparó. | manifiesto de evaluación |  |
+| 10 | `huella_experimento` | huella | no |  |  | Huella de lo congelado. | manifiesto de evaluación |  |
+| 11 | `carga_id` | text | no |  | FK → `control.cargas` | Carga que escribió la fila. (columna común) | cargador |  |
+| 12 | `artefacto_id` | text | no |  | FK → `control.artefactos` | Archivo de datos/ (o acta del repositorio) del que sale la fila. (columna común) | cargador |  |
 
 - Clave primaria: `experimento_id`.
+- Clave única: `particion_id`.
 
 #### `evaluacion.comparaciones`
 
@@ -3235,6 +3341,7 @@ erDiagram
 - **Estado de la fuente:** pendiente DEV20
 - **Filas estimadas en DEV16:** 0
 - **Cegado de la prueba:** Sí. Se ocultan las filas cuyo escenario (`escenario_id`) es de una prueba no abierta.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -3268,7 +3375,8 @@ erDiagram
 - **Origen:** Pendiente DEV20 y DEV26 (compare_cohorts de DEV19).
 - **Estado de la fuente:** pendiente DEV20
 - **Filas estimadas en DEV16:** 0
-- **Cegado de la prueba:** Sí. Hereda la visibilidad de `evaluacion.comparaciones(comparacion_a_id)`.
+- **Cegado de la prueba:** Sí. Solo cuando las dos comparaciones son visibles.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -3300,6 +3408,7 @@ erDiagram
 - **Estado de la fuente:** pendiente DEV20
 - **Filas estimadas en DEV16:** 0
 - **Cegado de la prueba:** Sí. Se oculta hasta abrir la prueba del experimento (`experimento_id`).
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -3337,6 +3446,7 @@ erDiagram
 - **Estado de la fuente:** pendiente DEV20
 - **Filas estimadas en DEV16:** decenas
 - **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Visible porque:** No aplica.
 - **Solo agregar:** Sí: no se modifican ni se borran filas.
 
 | # | Columna | Tipo | Vacío | Unidad | Clave | Descripción | Origen | Regla |
@@ -3362,10 +3472,13 @@ Además de estas, cada tabla se relaciona con `control.cargas` por `carga_id` y 
 | Tabla | Columnas | Referencia | Columnas referidas | Cardinalidad |
 |---|---|---|---|---|
 | `control.artefactos` | `manifiesto_id` | `control.artefactos` | `artefacto_id` | 0..1 a N (opcional) |
+| `control.archivo_escenarios` | `artefacto_id` | `control.artefactos` | `artefacto_id` | 1 a N |
+| `control.archivo_escenarios` | `escenario_id` | `experimento.escenarios` | `escenario_id` | 1 a N |
 | `control.hitos` | `protocolo_id` | `experimento.protocolos` | `protocolo_id` | 0..1 a N (opcional) |
 | `control.hitos` | `particion_id` | `experimento.particiones` | `particion_id` | 0..1 a N (opcional) |
 | `control.hitos` | `modelo_id` | `aprendizaje.modelos` | `modelo_id` | 0..1 a N (opcional) |
 | `control.hitos` | `experimento_id` | `evaluacion.experimentos` | `experimento_id` | 0..1 a N (opcional) |
+| `control.hitos` | `seleccion_id` | `aprendizaje.seleccion` | `seleccion_id` | 0..1 a N (opcional) |
 | `control.replicas` | `run_id_a` | `simulacion.corridas` | `run_id` | 1 a N |
 | `control.replicas` | `run_id_b` | `simulacion.corridas` | `run_id` | 1 a N |
 | `caso.movimientos` | `caso_id, caso_version` | `caso.casos` | `caso_id, caso_version` | 1 a N |
@@ -3449,7 +3562,7 @@ Además de estas, cada tabla se relaciona con `control.cargas` por `carga_id` y 
 | `aprendizaje.modelos` | `conjunto_id` | `aprendizaje.conjuntos` | `conjunto_id` | 1 a N |
 | `aprendizaje.modelos` | `entrenamiento_id` | `aprendizaje.entrenamientos` | `entrenamiento_id` | 1 a N |
 | `aprendizaje.seleccion` | `particion_id` | `experimento.particiones` | `particion_id` | 1 a N |
-| `aprendizaje.seleccion` | `protocolo_id` | `experimento.protocolos` | `protocolo_id` | 0..1 a N (opcional) |
+| `aprendizaje.seleccion` | `protocolo_id` | `experimento.protocolos` | `protocolo_id` | 1 a N |
 | `aprendizaje.seleccion` | `modelo_ganador_id` | `aprendizaje.modelos` | `modelo_id` | 1 a N |
 | `aprendizaje.consultas` | `caso_id, caso_version` | `caso.casos` | `caso_id, caso_version` | 1 a N |
 | `aprendizaje.consultas` | `modelo_id` | `aprendizaje.modelos` | `modelo_id` | 0..1 a N (opcional) |
@@ -3462,6 +3575,7 @@ Además de estas, cada tabla se relaciona con `control.cargas` por `carga_id` y 
 | `evaluacion.experimentos` | `protocolo_id` | `experimento.protocolos` | `protocolo_id` | 1 a N |
 | `evaluacion.experimentos` | `particion_id` | `experimento.particiones` | `particion_id` | 1 a N |
 | `evaluacion.experimentos` | `modelo_id` | `aprendizaje.modelos` | `modelo_id` | 1 a N |
+| `evaluacion.experimentos` | `seleccion_id` | `aprendizaje.seleccion` | `seleccion_id` | 1 a N |
 | `evaluacion.comparaciones` | `experimento_id` | `evaluacion.experimentos` | `experimento_id` | 1 a N |
 | `evaluacion.comparaciones` | `escenario_id` | `experimento.escenarios` | `escenario_id` | 1 a N |
 | `evaluacion.comparaciones` | `run_id` | `simulacion.corridas` | `run_id` | 0..1 a N (opcional) |

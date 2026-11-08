@@ -29,7 +29,19 @@ __all__ = [
 ]
 
 BASE_TYPES = frozenset(
-    {"text", "integer", "bigint", "double precision", "boolean", "timestamptz", "date", "jsonb"}
+    {
+        "text",
+        "integer",
+        "bigint",
+        "double precision",
+        "boolean",
+        "timestamptz",
+        "date",
+        "jsonb",
+        "integer[]",
+        "double precision[]",
+        "boolean[]",
+    }
 )
 NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 PARENT = re.compile(r"^([a-z_]+\.[a-z_]+)\(([a-z_,]+)\)$")
@@ -87,6 +99,7 @@ class Table:
     cegado: str
     propuesta: bool
     excepcion: str | None
+    visible_porque: str | None
     columnas: tuple[Column, ...]
     clave_primaria: tuple[str, ...]
     claves_foraneas: tuple[ForeignKey, ...]
@@ -244,6 +257,7 @@ def _table(data: Record, commons: dict[str, tuple[Column, str]]) -> Table:
         cegado=_text(data, "cegado", where),
         propuesta=_flag(data, "propuesta", where),
         excepcion=_opt_text(data, "excepcion_solo_agregar", where),
+        visible_porque=_opt_text(data, "visible_porque", where),
         columnas=(*own, *common_columns),
         clave_primaria=_names(data, "clave_primaria", where),
         claves_foraneas=(
@@ -430,7 +444,9 @@ def _check_opening(table: Table, kind: str, arg: str, found: _Findings) -> None:
         found.add(table.full, f"apertura_experimento necesita clave foránea a {EXPERIMENTS}")
 
 
-def _check_blinding(table: Table, design: Design, found: _Findings) -> None:
+def _check_blinding(  # noqa: PLR0912 (validación de cada tipo de cegado)
+    table: Table, design: Design, found: _Findings
+) -> None:
     kind, _, arg = table.cegado.partition(":")
     if kind == "no" and not arg:
         return
@@ -440,8 +456,39 @@ def _check_blinding(table: Table, design: Design, found: _Findings) -> None:
         _check_parent(table, arg, design, found)
     elif kind in ("apertura_particion", "apertura_experimento"):
         _check_opening(table, kind, arg, found)
+    elif kind == "archivo_alcance" and table.full == "control.artefactos":
+        if table.column("alcance") is None:
+            found.add(table.full, "el cegado de archivos necesita la columna alcance")
+    elif kind == "archivo_enlace" and table.full == "control.archivo_escenarios":
+        if not _has_key(table, ("artefacto_id",), "control.artefactos"):
+            found.add(table.full, "el enlace debe referir a un archivo")
+    elif kind == "uso_plan" and table.full == "simulacion.planes":
+        pass  # las referencias de uso se construyen desde las claves foráneas en ddl.py
+    elif kind == "ambas_corridas" and table.full == "control.replicas":
+        for column in ("run_id_a", "run_id_b"):
+            if not _has_key(table, (column,), "simulacion.corridas"):
+                found.add(table.full, f"falta la clave foránea de {column} a corridas")
+    elif kind == "ambas_comparaciones" and table.full == "evaluacion.diferencias":
+        for column in ("comparacion_a_id", "comparacion_b_id"):
+            if not _has_key(table, (column,), "evaluacion.comparaciones"):
+                found.add(table.full, f"falta la clave foránea de {column} a comparaciones")
     else:
         found.add(table.full, f"cegado desconocido «{table.cegado}»")
+
+
+def _check_blinded_links(table: Table, design: Design, found: _Findings) -> None:
+    """Una relación con datos cegados exige cegado propio o una razón escrita."""
+    if table.cegado != "no" or table.visible_porque:
+        return
+    for key in table.claves_foraneas:
+        if key.comun:
+            continue  # la excepción de procedencia está escrita en [comunes].artefacto_id
+        target = design.table(key.referencia)
+        if target is not None and target.cegado != "no":
+            found.add(
+                table.full,
+                f"referencia {target.full} cegada: declare cegado o visible_porque",
+            )
 
 
 def verify(design: Design, catalog: set[str]) -> list[str]:
@@ -464,6 +511,7 @@ def verify(design: Design, catalog: set[str]) -> list[str]:
         for key in table.claves_foraneas:
             _check_foreign_key(table, key, design, found)
         _check_blinding(table, design, found)
+        _check_blinded_links(table, design, found)
     approved = {t.nombre for t in design.tablas if not t.propuesta}
     if approved != catalog:
         found.add(

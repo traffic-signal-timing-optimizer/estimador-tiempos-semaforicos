@@ -2,7 +2,7 @@
 
 Dos de los tres archivos de ``semaforo/bd/sql`` salen de aquí; el del medio se escribe a mano:
 
-1. ``01_tablas.sql``: esquemas, el tipo ``huella``, las 56 tablas con sus columnas, claves, reglas
+1. ``01_tablas.sql``: esquemas, el tipo ``huella``, las tablas con sus columnas, claves, reglas
    (``CHECK``), relaciones e índices, y sus descripciones como comentarios de la base;
 2. ``02_reglas.sql`` (a mano): las funciones y disparadores con lógica (orden de los hitos,
    asignaciones, corridas finales, conjuntos), los índices parciales de los hitos y las vistas;
@@ -29,6 +29,19 @@ __all__ = [
 
 CARGA = "semaforo_carga"
 LECTURA = "semaforo_lectura"
+PANEL = "semaforo_panel"
+PANEL_VIEWS = (
+    "zona_escenario",
+    "estado_hitos",
+    "corridas_resumen",
+    "vehiculos_cohorte",
+    "cola_por_segundo",
+    "busquedas_resumen",
+    "etiquetas_entrenamiento",
+    "metricas_modelos",
+    "consultas_resumen",
+    "indicadores_finales",
+)
 VIEWS_SCHEMA = "vistas"
 MAX_NAME = 63  # largo máximo de un nombre en PostgreSQL
 DOMAIN_SCHEMA = "control"
@@ -144,7 +157,9 @@ def _parent_key(table: Table, parent: str, columns: tuple[str, ...]) -> ForeignK
     raise ValueError(f"{table.full}: falta la relación con {parent}")
 
 
-def blinding_expression(table: Table) -> str | None:
+def blinding_expression(  # noqa: PLR0911, PLR0912 (cada tipo de cegado tiene su regla)
+    table: Table, design: Design | None = None
+) -> str | None:
     """La condición que deja ver una fila al usuario de lectura; ``None`` si no hay cegado.
 
     La zona no se guarda en las filas: se deduce de las asignaciones y los hitos (acta de F1).
@@ -158,6 +173,38 @@ def blinding_expression(table: Table) -> str | None:
     )
     if kind == "no":
         return None
+    if kind == "archivo_alcance":
+        return "control.archivo_visible(artefactos.artefacto_id)"
+    if kind == "archivo_enlace":
+        return "control.archivo_visible(archivo_escenarios.artefacto_id)"
+    if kind == "ambas_corridas":
+        return (
+            "EXISTS (SELECT 1 FROM simulacion.corridas AS a "
+            "WHERE a.run_id = replicas.run_id_a) AND "
+            "EXISTS (SELECT 1 FROM simulacion.corridas AS b "
+            "WHERE b.run_id = replicas.run_id_b)"
+        )
+    if kind == "ambas_comparaciones":
+        return (
+            "EXISTS (SELECT 1 FROM evaluacion.comparaciones AS a "
+            "WHERE a.comparacion_id = diferencias.comparacion_a_id) AND "
+            "EXISTS (SELECT 1 FROM evaluacion.comparaciones AS b "
+            "WHERE b.comparacion_id = diferencias.comparacion_b_id)"
+        )
+    if kind == "uso_plan":
+        if design is None:
+            raise ValueError("el cegado de planes necesita el diseño de las relaciones")
+        uses: list[str] = []
+        for other in design.tablas:
+            if other.full == "simulacion.plan_tramos":
+                continue  # son los detalles del plan, no una mención visible de él
+            for key in other.claves_foraneas:
+                if key.referencia == "simulacion.planes":
+                    uses.append(
+                        f"EXISTS (SELECT 1 FROM {other.full} AS uso "  # noqa: S608
+                        f"WHERE uso.{key.columnas[0]} = planes.plan_id)"
+                    )
+        return " OR ".join(uses)
     if kind == "raiz":
         return hidden
     if kind == "raiz_opcional":
@@ -227,7 +274,7 @@ def security_sql(design: Design) -> str:
     out.append("")
     out.append("-- Cegado de la prueba (B4, con la zona deducida de F1): seguridad por filas.")
     for table in design.tablas:
-        condition = blinding_expression(table)
+        condition = blinding_expression(table, design)
         if condition is None:
             continue
         out.append(f"ALTER TABLE {table.full} ENABLE ROW LEVEL SECURITY;")
@@ -247,4 +294,15 @@ def security_sql(design: Design) -> str:
     out.append(f"GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA {schemas} TO {CARGA};")
     out.append(f"GRANT UPDATE ON {', '.join(_updatable(design))} TO {CARGA};")
     out.append(f"GRANT SELECT ON ALL TABLES IN SCHEMA {schemas}, {VIEWS_SCHEMA} TO {LECTURA};")
+    out.append("")
+    out.append(
+        "-- El panel solo lee las vistas con filtro explícito de cegado, revisadas por separado."
+    )
+    out.append(f"GRANT USAGE ON SCHEMA {VIEWS_SCHEMA} TO {PANEL};")
+    for name in PANEL_VIEWS:
+        full = f"{VIEWS_SCHEMA}.{name}"
+        if not any(view == full for view, _, _ in design.vistas):
+            raise ValueError(f"vista del panel ausente del diseño: {full}")
+        out.append(f"ALTER VIEW {full} SET (security_invoker = false);")
+        out.append(f"GRANT SELECT ON {full} TO {PANEL};")
     return "\n".join(out) + "\n"

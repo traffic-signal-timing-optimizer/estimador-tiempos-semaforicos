@@ -32,7 +32,13 @@ from semaforo.bd.carga.modelo import (
     artifact_id,
     read_file,
 )
-from semaforo.bd.carga.motor import LoadOptions, LoadReport, artifact_rows, load_workspace
+from semaforo.bd.carga.motor import (
+    LoadOptions,
+    LoadReport,
+    artifact_links,
+    artifact_rows,
+    load_workspace,
+)
 from semaforo.bd.conciliacion import ReconcileReport, reconcile
 from semaforo.bd.conexion import CARGA, DATABASE, BdError, Connection, connect
 from semaforo.bd.esquema import installed_version
@@ -508,6 +514,19 @@ def register_milestone(  # noqa: PLR0913  (cada dato del hito es de solo palabra
         found = connection.execute(OBJECT_HASH[kind], (target,)).fetchone()
         if found is None or found[0] is None:
             raise BdError(ErrorCode.INPUT_SCHEMA, f"el objeto {target} no está en la base", target)
+        selection = None
+        if kind == "model_frozen":
+            selection = connection.execute(
+                "SELECT seleccion_id, huella_seleccion FROM aprendizaje.seleccion "
+                "WHERE modelo_ganador_id = %s",
+                (target,),
+            ).fetchone()
+            if selection is None:
+                raise BdError(
+                    ErrorCode.INPUT_SCHEMA,
+                    "el modelo no tiene una selección registrada que se pueda congelar",
+                    target,
+                )
         moment = utc_now()
         ids = _ids(kind, target, partition)
         milestone = Milestone(
@@ -518,6 +537,8 @@ def register_milestone(  # noqa: PLR0913  (cada dato del hito es de solo palabra
             particion_id=ids["particion_id"],
             modelo_id=ids["modelo_id"],
             experimento_id=ids["experimento_id"],
+            seleccion_id=None if selection is None else str(selection[0]),
+            huella_seleccion=None if selection is None else str(selection[1]),
             huella_objeto=str(found[0]),
             acta=relative,
             acta_sha256=acta_record.sha256,
@@ -549,7 +570,11 @@ def _dry_run(connection: Connection, milestone: Milestone, acta_record: FileReco
     probe = f"prueba-{secrets.token_hex(4)}"
     unit = Unit(key=milestone.hito_id, kind="milestone", files=[acta_record])
     unit.add("control.hitos", milestone_row(milestone), acta_record)
-    rows = {"control.artefactos": artifact_rows(unit), **unit.rows}
+    rows = {
+        "control.artefactos": artifact_rows(unit),
+        "control.archivo_escenarios": artifact_links(unit),
+        **unit.rows,
+    }
     try:
         with connection.transaction():
             connection.execute(

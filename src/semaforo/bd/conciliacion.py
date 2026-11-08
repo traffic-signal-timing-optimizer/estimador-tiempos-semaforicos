@@ -23,9 +23,19 @@ es *no concluyente*. No escribe nada. Una diferencia no se corrige aquí: se inf
 
 import math
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
-from semaforo.bd.carga.corridas import METRIC_COLUMNS, log_events, metric_columns
+from psycopg import sql
+
+from semaforo.bd.carga.corridas import (
+    METRIC_COLUMNS,
+    cohort_rows,
+    delay_columns,
+    log_events,
+    metric_columns,
+    queue_columns,
+    stop_columns,
+)
 from semaforo.bd.carga.fuentes import Sources, discover
 from semaforo.bd.carga.modelo import DATA_ROOT
 from semaforo.bd.conexion import CARGA, Connection
@@ -33,8 +43,13 @@ from semaforo.bd.instantanea import Inconcluso, lectura_estable
 from semaforo.bd.metricas import ProtocolContext, load_context
 from semaforo.dominio.base_model import FrozenModel
 from semaforo.dominio.errors import DomainError
-from semaforo.evaluacion.published_metrics import METRICS, RUNS, read_run_metrics
-from semaforo.evaluacion.run_metrics import evaluate_run
+from semaforo.evaluacion.published_metrics import (
+    METRICS,
+    RUNS,
+    protocol_fingerprint,
+    read_run_metrics,
+)
+from semaforo.evaluacion.run_metrics import RunMetrics, evaluate_run
 from semaforo.trazabilidad.hashing import sha256_file
 
 __all__ = ["Coverage", "Difference", "ReconcileReport", "reconcile"]
@@ -80,14 +95,15 @@ class ReconcileReport(FrozenModel):
     runs_checked: int
     runs_recomputed: int
     runs_unverified: int
+    legacy_protocol_manifests: int = 0
     differences_total: int
     differences: list[Difference]
     unverified: list[Difference]
     coverage: Coverage
 
 
-def _rows(connection: Connection, query: str) -> list[Row]:
-    cursor = connection.execute(query.encode())
+def _rows(connection: Connection, query: str, params: tuple[object, ...] = ()) -> list[Row]:
+    cursor = connection.execute(query.encode(), params)
     names = [column.name for column in cursor.description or []]
     return [dict(zip(names, row, strict=True)) for row in cursor]
 
@@ -245,8 +261,8 @@ def _check_counts(connection: Connection, workspace: Path, runs: list[Row], foun
         found.compare(run_id, "eventos del registro de SUMO", events.get(run_id, 0), expected[2])
 
 
-def _recompute(context: ProtocolContext, row: Row, stored: Row, found: _Found) -> bool:
-    """Recalcula las métricas de una corrida y las compara. Devuelve si pudo verificarla."""
+def _recompute(context: ProtocolContext, row: Row, stored: Row, found: _Found) -> RunMetrics | None:
+    """Recalcula las métricas de una corrida y compara las columnas y cada demora vehicular."""
     run_id = str(row["run_id"])
     workspace = context.workspace
     case = context.cases.get((str(row["caso_id"]), str(row["caso_version"])))
@@ -267,7 +283,7 @@ def _recompute(context: ProtocolContext, row: Row, stored: Row, found: _Found) -
             if item is None
         ]
         found.unverify(run_id, f"falta {' y '.join(absent)} en datos/")
-        return False
+        return None
     folder = workspace / RUNS / run_id
     try:
         metrics = evaluate_run(
@@ -275,28 +291,147 @@ def _recompute(context: ProtocolContext, row: Row, stored: Row, found: _Found) -
         )
     except DomainError as error:
         found.unverify(run_id, f"{error.code.value}: {error.message}")
-        return False
+        return None
     for name, value in metric_columns(metrics).items():
         found.compare(run_id, f"demora y métricas: {name}", stored[name], value)
-    return True
+    return metrics
 
 
-def _check_series(connection: Connection, workspace: Path, runs: list[Row], found: _Found) -> None:
-    """Filas de cola, de accesos y de movimientos contra ``metricas.json`` de cada corrida."""
+def _compare_value(found: _Found, where: str, field: str, actual: object, expected: object) -> None:
+    """Los arreglos se cotejan posición por posición, para señalar un intercambio concreto."""
+    if isinstance(expected, list) and isinstance(actual, list):
+        actual_items = cast("list[object]", actual)
+        expected_items = cast("list[object]", expected)
+        if len(actual_items) != len(expected_items):
+            found.add(where, f"{field}: longitud", len(actual_items), len(expected_items))
+            return
+        for index, (left, right) in enumerate(zip(actual_items, expected_items, strict=True)):
+            if left != right:
+                found.add(where, f"{field}[{index}]", left, right)
+        return
+    if actual != expected:
+        found.add(where, field, actual, cast("object", expected))
+
+
+def _compare_table(  # noqa: PLR0913, PLR0917 (clave, tabla y conexión son independientes)
+    connection: Connection,
+    table: str,
+    run_id: str,
+    key: str,
+    expected: dict[str, Row],
+    found: _Found,
+) -> None:
+    query = sql.SQL("SELECT * FROM {} WHERE run_id = %s").format(sql.Identifier(*table.split(".")))
+    cursor = connection.execute(query, (run_id,))
+    names = [column.name for column in cursor.description or []]
+    rows = {
+        str(row[key]): row for row in (dict(zip(names, values, strict=True)) for values in cursor)
+    }
+    for identifier in sorted(set(rows) | set(expected)):
+        where = f"{run_id}/{table}/{identifier}"
+        actual = rows.get(identifier)
+        reference = expected.get(identifier)
+        if actual is None or reference is None:
+            found.add(
+                where,
+                "fila",
+                "ausente" if actual is None else "presente",
+                "ausente" if reference is None else "presente",
+            )
+            continue
+        for field, value in reference.items():
+            _compare_value(found, where, field, actual.get(field), value)
+
+
+def _check_vehicles(  # noqa: PLR0913, PLR0917 (archivos, métricas y base)
+    connection: Connection,
+    workspace: Path,
+    run_id: str,
+    metrics: RunMetrics,
+    recomputed: RunMetrics | None,
+    found: _Found,
+) -> None:
+    cohort = workspace / RUNS / run_id / "outputs" / "cohorte_conciliada.csv"
+    if not cohort.is_file():
+        return
+    try:
+        source_rows = cohort_rows(cohort.read_bytes())
+    except (DomainError, OSError) as error:
+        found.add(run_id, "cohorte_conciliada.csv", "cargada", str(error))
+        return
+    by_vehicle = {v.vehicle_id: v for v in metrics.cohort.vehicles}
+    stops = {} if metrics.zone is None else metrics.zone.vehicle_stops
+    expected: dict[str, Row] = {}
+    for source in source_rows:
+        identifier = str(source["vehiculo_id"])
+        delay = by_vehicle.get(identifier)
+        expected[identifier] = {
+            **source,
+            "acceso": None if delay is None else delay.access_id,
+            "perdida_tiempo_cohorte_s": None if delay is None else delay.time_loss_s,
+            "demora_salida_cohorte_s": None if delay is None else delay.depart_delay_s,
+            "fuente_demora_salida": None if delay is None else delay.depart_delay_source,
+            "detenciones": None if delay is None or metrics.zone is None else stops.get(identifier),
+        }
+    _compare_table(connection, "simulacion.vehiculos", run_id, "vehiculo_id", expected, found)
+    if recomputed is not None:
+        recalculated = {v.vehicle_id: v for v in recomputed.cohort.vehicles}
+        rows = _rows(
+            connection,
+            "SELECT vehiculo_id, perdida_tiempo_cohorte_s, demora_salida_cohorte_s "
+            "FROM simulacion.vehiculos WHERE run_id = %s",
+            (run_id,),
+        )
+        for row in rows:
+            vehicle = recalculated.get(str(row["vehiculo_id"]))
+            if vehicle is not None:
+                found.compare(
+                    run_id,
+                    f"demora recalculada {vehicle.vehicle_id}: timeLoss",
+                    row["perdida_tiempo_cohorte_s"],
+                    vehicle.time_loss_s,
+                )
+                found.compare(
+                    run_id,
+                    f"demora recalculada {vehicle.vehicle_id}: salida",
+                    row["demora_salida_cohorte_s"],
+                    vehicle.depart_delay_s,
+                )
+
+
+def _check_events(connection: Connection, workspace: Path, run_id: str, found: _Found) -> None:
+    log = workspace / RUNS / run_id / "outputs" / "sumo.log"
+    if not log.is_file():
+        return
+    expected = {
+        str(event["orden"]): event
+        for event in log_events(log.read_text(encoding="utf-8", errors="replace"))
+    }
+    _compare_table(connection, "simulacion.eventos", run_id, "orden", expected, found)
+
+
+def _check_series(
+    connection: Connection,
+    workspace: Path,
+    runs: list[Row],
+    found: _Found,
+    recomputed: dict[str, RunMetrics],
+) -> int:
+    """Compara conteos y contenido por clave con los archivos de cada corrida."""
     # Un valor por paso en cada arreglo por acceso: los pasos cuentan igual que antes (una fila por
     # paso). Se cuenta en las tablas porque esta conexión (la de carga) no lee las vistas.
     queue = _by_run(
         connection,
-        "SELECT run_id, sum(jsonb_array_length(vehiculos_en_cola)) "
+        "SELECT run_id, sum(cardinality(vehiculos_en_cola)) "
         "FROM simulacion.cola_por_acceso GROUP BY 1",
     )
     window = _by_run(
         connection,
         "SELECT q.run_id, sum(s.v::integer) FROM simulacion.cola_por_acceso AS q "
         "JOIN simulacion.resultados_corrida AS r ON r.run_id = q.run_id "
-        "CROSS JOIN LATERAL ROWS FROM (jsonb_array_elements_text(q.vehiculos_en_cola), "
-        "jsonb_array_elements_text(r.pasos_en_ventana)) AS s(v, w) "
-        "WHERE s.w::boolean GROUP BY 1",
+        "CROSS JOIN LATERAL ROWS FROM (unnest(q.vehiculos_en_cola), "
+        "unnest(r.pasos_en_ventana)) AS s(v, w) "
+        "WHERE s.w GROUP BY 1",
     )
     accesses = _by_run(
         connection, "SELECT run_id, count(*) FROM simulacion.resultados_acceso GROUP BY 1"
@@ -304,23 +439,52 @@ def _check_series(connection: Connection, workspace: Path, runs: list[Row], foun
     movements = _by_run(
         connection, "SELECT run_id, count(*) FROM simulacion.resultados_movimiento GROUP BY 1"
     )
+    legacy = 0
     for row in runs:
         run_id = str(row["run_id"])
+        _check_events(connection, workspace, run_id, found)
         folder = workspace / METRICS / str(row["caso_id"]) / run_id
         if not folder.is_dir():
             continue
         try:
-            metrics = read_run_metrics(folder).metrics
+            published = read_run_metrics(folder)
+            metrics = published.metrics
         except DomainError as error:
             found.add(
                 run_id, "métricas publicadas", "cargadas", f"no se pueden leer: {error.message}"
             )
             continue
+        if published.manifest.protocol_sha256 is None:
+            legacy += 1
+        else:
+            try:
+                current = protocol_fingerprint(workspace, metrics.protocol_id)
+            except DomainError as error:
+                found.add(
+                    run_id,
+                    "huella del protocolo",
+                    published.manifest.protocol_sha256,
+                    error.message,
+                )
+            else:
+                _compare_value(
+                    found,
+                    run_id,
+                    "huella del protocolo",
+                    current,
+                    published.manifest.protocol_sha256,
+                )
         series = None if metrics.zone is None else metrics.zone.queue_series
+        zone = metrics.zone
+        queues = {} if zone is None else zone.queue_by_access
+        stops = {} if zone is None else zone.stops_by_access
         expected = 0 if series is None else len(series.times_s) * len(series.vehicles_by_access)
         found.compare(run_id, "filas de cola segundo a segundo", queue.get(run_id, 0), expected)
         found.compare(
-            run_id, "resultados por acceso", accesses.get(run_id, 0), len(metrics.cohort.by_access)
+            run_id,
+            "resultados por acceso",
+            accesses.get(run_id, 0),
+            len(set(metrics.cohort.by_access) | set(queues) | set(stops)),
         )
         found.compare(
             run_id,
@@ -331,6 +495,55 @@ def _check_series(connection: Connection, workspace: Path, runs: list[Row], foun
         ticks = None if metrics.zone is None else metrics.zone.queue.vehicle_ticks
         if ticks is not None:
             found.compare(run_id, "vehículos en cola en la ventana", window.get(run_id, 0), ticks)
+        top = _rows(
+            connection,
+            "SELECT pasos_cola_s, pasos_en_ventana FROM simulacion.resultados_corrida "
+            "WHERE run_id = %s",
+            (run_id,),
+        )
+        if top:
+            for field, value in {
+                "pasos_cola_s": None if series is None else list(series.times_s),
+                "pasos_en_ventana": None if series is None else list(series.in_window),
+            }.items():
+                _compare_value(found, run_id, field, top[0][field], value)
+        queue_expected: dict[str, Row] = (
+            {}
+            if series is None
+            else {
+                access: {"vehiculos_en_cola": list(values)}
+                for access, values in series.vehicles_by_access.items()
+            }
+        )
+        _compare_table(
+            connection, "simulacion.cola_por_acceso", run_id, "acceso", queue_expected, found
+        )
+        access_expected = {
+            access: {
+                "con_cohorte": access in metrics.cohort.by_access,
+                **delay_columns(metrics.cohort.by_access.get(access)),
+                **queue_columns(queues.get(access)),
+                **stop_columns(stops.get(access)),
+            }
+            for access in set(metrics.cohort.by_access) | set(queues) | set(stops)
+        }
+        _compare_table(
+            connection, "simulacion.resultados_acceso", run_id, "acceso", access_expected, found
+        )
+        movement_expected = {
+            movement: delay_columns(summary)
+            for movement, summary in metrics.cohort.by_movement.items()
+        }
+        _compare_table(
+            connection,
+            "simulacion.resultados_movimiento",
+            run_id,
+            "movimiento_id",
+            movement_expected,
+            found,
+        )
+        _check_vehicles(connection, workspace, run_id, metrics, recomputed.get(run_id), found)
+    return legacy
 
 
 def _empty_coverage() -> Coverage:
@@ -366,6 +579,8 @@ def reconcile(
     found = _Found()
     context = load_context(workspace, sources) if recompute else None
     recomputed = 0
+    recalculated: dict[str, RunMetrics] = {}
+    legacy = 0
     files = 0
     runs: list[Row] = []
     coverage = _empty_coverage()
@@ -380,7 +595,6 @@ def reconcile(
             )
             coverage = _coverage(connection, workspace, sources, runs, found)
             _check_counts(connection, workspace, runs, found)
-            _check_series(connection, workspace, runs, found)
             stored = {
                 str(row["run_id"]): row
                 for row in _rows(
@@ -391,12 +605,12 @@ def reconcile(
             }
             for row in runs:
                 result = stored.get(str(row["run_id"]))
-                if (
-                    context is not None
-                    and result is not None
-                    and _recompute(context, row, result, found)
-                ):
-                    recomputed += 1
+                if context is not None and result is not None:
+                    metrics = _recompute(context, row, result, found)
+                    if metrics is not None:
+                        recalculated[str(row["run_id"])] = metrics
+                        recomputed += 1
+            legacy = _check_series(connection, workspace, runs, found, recalculated)
     except Inconcluso as stopped:
         return ReconcileReport(
             status="inconclusive",
@@ -405,6 +619,7 @@ def reconcile(
             runs_checked=0,
             runs_recomputed=0,
             runs_unverified=0,
+            legacy_protocol_manifests=0,
             differences_total=0,
             differences=[],
             unverified=[],
@@ -430,6 +645,7 @@ def reconcile(
         runs_checked=len(runs),
         runs_recomputed=recomputed,
         runs_unverified=len(found.unverified),
+        legacy_protocol_manifests=legacy,
         differences_total=len(found.items),
         differences=found.items[:MAX_SHOWN],
         unverified=found.unverified[:MAX_SHOWN],

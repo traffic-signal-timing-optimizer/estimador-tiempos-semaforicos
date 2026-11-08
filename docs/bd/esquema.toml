@@ -13,10 +13,10 @@
 # - «origen» dice de qué archivo y campo sale el dato, o qué proceso lo calcula;
 # - cada tabla recibe además las columnas comunes (sección [comunes]); el generador las agrega.
 
-version = "1.0.0-borrador"
-fecha = "2026-11-05"
+version = "1.1.0-candidato"
+fecha = "2026-11-07"
 motor = "PostgreSQL 17.9"
-estado = "propuesto para revisión del PO (DEV31 F1)"
+estado = "candidato C2; pendiente de aprobar las tres huellas en D11"
 
 [[esquemas]]
 nombre = "control"
@@ -50,7 +50,7 @@ descripcion = "Huella SHA-256 en hexadecimal minúscula (64 caracteres)."
 
 [comunes]
 carga_id = { tipo = "text", descripcion = "Carga que escribió la fila.", origen = "cargador", referencia = "control.cargas" }
-artefacto_id = { tipo = "text", descripcion = "Archivo de datos/ (o acta del repositorio) del que sale la fila.", origen = "cargador", referencia = "control.artefactos" }
+artefacto_id = { tipo = "text", descripcion = "Archivo de datos/ (o acta del repositorio) del que sale la fila.", origen = "cargador", referencia = "control.artefactos", visible_porque = "Relación común de procedencia: no define por sí sola la visibilidad de una fila; cada tabla declara su propio cegado. El archivo asociado se ciega por separado." }
 
 [[roles]]
 nombre = "semaforo_admin"
@@ -68,6 +68,11 @@ descripcion = "Lo usan el panel, las consultas guardadas y el PO para consultar.
 permisos = "USAGE y SELECT en todas las tablas y vistas. La seguridad por filas le oculta lo que esté cegado."
 
 [[roles]]
+nombre = "semaforo_panel"
+descripcion = "Rol exclusivo del panel local; solo consulta las vistas revisadas."
+permisos = "USAGE en vistas y SELECT en las vistas aprobadas; ningún permiso directo sobre tablas."
+
+[[roles]]
 nombre = "postgres"
 descripcion = "Administrador del servicio PostgreSQL de la laptop."
 permisos = "Solo el PO. El proyecto no lo usa."
@@ -75,12 +80,22 @@ permisos = "Solo el PO. El proyecto no lo usa."
 [[funciones]]
 nombre = "control.escenarios_cegados"
 clase = "vista"
-descripcion = "Escenarios asignados a «test» en una partición cuya prueba no tiene hito de apertura. Es la base del cegado."
+descripcion = "Escenarios asignados a «test» en una partición cuya prueba no tiene hito de apertura. ADR07 permite mostrar los identificadores y la asignación para auditar el cegado, sin exponer resultados ni archivos. Es la base del cegado."
 
 [[funciones]]
 nombre = "control.prueba_abierta(particion_id)"
 clase = "función"
 descripcion = "Verdadero si existe un hito «test_opened» para esa partición."
+
+[[funciones]]
+nombre = "control.escenario_visible(escenario_id)"
+clase = "función"
+descripcion = "Filtro explícito de las vistas del panel: excluye los escenarios de prueba cerrada aun cuando la vista lea con permisos del dueño."
+
+[[funciones]]
+nombre = "control.archivo_visible(artefacto_id)"
+clase = "función"
+descripcion = "Un archivo global es visible; uno de escenarios exige enlaces y que todos estén abiertos; uno de alcance desconocido queda oculto. La misma regla ciega el archivo y sus enlaces, para no revelar la ruta por artefacto_id."
 
 [[funciones]]
 nombre = "control.bloquear_cambios()"
@@ -213,7 +228,7 @@ grano = "Una fila por archivo"
 origen = "Manifiestos de cada carpeta publicada; las actas de los hitos (raíz repositorio)."
 fuente = "existe"
 filas_dev16 = "unas 60 000"
-cegado = "no"
+cegado = "archivo_alcance"
 comunes = ["carga_id"]
 clave_primaria = ["artefacto_id"]
 columnas = [
@@ -225,6 +240,7 @@ columnas = [
   { nombre = "sha256", tipo = "huella", descripcion = "Huella del contenido, recalculada al cargar.", origen = "manifiesto: sha256 (verificada)" },
   { nombre = "manifiesto_id", tipo = "text", nulo = true, descripcion = "Manifiesto que declara este archivo; vacío si es un manifiesto o un acta.", origen = "cargador" },
   { nombre = "estado", tipo = "text", descripcion = "intact (huella coincide), unknown (sin manifiesto reconocido), not_loadable (no se pudo leer) o rejected (rechazado por conflicto).", origen = "cargador", regla = "estado IN ('intact','unknown','not_loadable','rejected')" },
+  { nombre = "alcance", tipo = "text", descripcion = "global, escenarios o desconocido. Los desconocidos quedan ocultos hasta clasificarlos.", origen = "cargador", regla = "alcance IN ('global','escenarios','desconocido')" },
   { nombre = "motivo", tipo = "text", nulo = true, descripcion = "Por qué no está intact; vacío si lo está.", origen = "cargador" },
   { nombre = "registrado_en", tipo = "timestamptz", descripcion = "Cuándo se registró.", origen = "cargador" },
 ]
@@ -234,6 +250,26 @@ claves_foraneas = [
 unicas = [["raiz", "ruta_relativa"]]
 reglas = [
   { nombre = "motivo_si_no_intacto", sql = "estado = 'intact' OR motivo IS NOT NULL", descripcion = "Todo lo que no está intacto lleva motivo." },
+]
+
+[[tablas]]
+esquema = "control"
+nombre = "archivo_escenarios"
+descripcion = "Escenarios a los que corresponde un archivo. Todos deben ser visibles para mostrar el archivo."
+grano = "Una fila por archivo y escenario vinculado"
+origen = "Unidades de carga de corridas, búsquedas, escenarios y particiones"
+fuente = "DEV31 C2.6"
+filas_dev16 = "según archivos de corridas y escenarios"
+cegado = "archivo_enlace"
+comunes = ["carga_id"]
+clave_primaria = ["artefacto_id", "escenario_id"]
+columnas = [
+  { nombre = "artefacto_id", tipo = "text", descripcion = "Archivo vinculado.", origen = "control.artefactos" },
+  { nombre = "escenario_id", tipo = "text", descripcion = "Escenario vinculado.", origen = "unidad de carga" },
+]
+claves_foraneas = [
+  { columnas = ["artefacto_id"], referencia = "control.artefactos", referidas = ["artefacto_id"] },
+  { columnas = ["escenario_id"], referencia = "experimento.escenarios", referidas = ["escenario_id"] },
 ]
 
 [[tablas]]
@@ -277,6 +313,7 @@ origen = "Comando «bd hito» con el acta que lo autoriza (artefacto_id apunta a
 fuente = "pendiente F3"
 filas_dev16 = "decenas"
 cegado = "no"
+visible_porque = "ADR07 hace pública la secuencia de congelamientos y la apertura; no expone resultados de prueba."
 clave_primaria = ["hito_id"]
 columnas = [
   { nombre = "hito_id", tipo = "text", descripcion = "Identificador del hito.", origen = "bd hito" },
@@ -286,6 +323,8 @@ columnas = [
   { nombre = "particion_id", tipo = "text", nulo = true, descripcion = "Partición congelada, o cuya prueba se abre.", origen = "bd hito" },
   { nombre = "modelo_id", tipo = "text", nulo = true, descripcion = "Modelo congelado (tipo model_frozen).", origen = "bd hito" },
   { nombre = "experimento_id", tipo = "text", nulo = true, descripcion = "Experimento cuya prueba se abre (tipo test_opened).", origen = "bd hito" },
+  { nombre = "seleccion_id", tipo = "text", nulo = true, descripcion = "Selección fijada al congelar el modelo; no cambia con selecciones posteriores.", origen = "aprendizaje.seleccion al registrar model_frozen" },
+  { nombre = "huella_seleccion", tipo = "huella", nulo = true, descripcion = "Huella de la selección fijada al congelar el modelo.", origen = "aprendizaje.seleccion al registrar model_frozen" },
   { nombre = "huella_objeto", tipo = "huella", descripcion = "Huella del objeto en el momento del hito.", origen = "artefacto del objeto" },
   { nombre = "commit_codigo", tipo = "text", nulo = true, descripcion = "Commit que contiene el acta y la huella; da la fecha externa al subirse a GitHub.", origen = "git" },
   { nombre = "responsable", tipo = "text", descripcion = "Quién registró el hito.", origen = "bd hito" },
@@ -296,9 +335,10 @@ claves_foraneas = [
   { columnas = ["particion_id"], referencia = "experimento.particiones", referidas = ["particion_id"], opcional = true },
   { columnas = ["modelo_id"], referencia = "aprendizaje.modelos", referidas = ["modelo_id"], opcional = true },
   { columnas = ["experimento_id"], referencia = "evaluacion.experimentos", referidas = ["experimento_id"], opcional = true },
+  { columnas = ["seleccion_id"], referencia = "aprendizaje.seleccion", referidas = ["seleccion_id"], opcional = true },
 ]
 reglas = [
-  { nombre = "objeto_segun_tipo", sql = "(tipo = 'protocol_frozen' AND protocolo_id IS NOT NULL) OR (tipo = 'split_frozen' AND particion_id IS NOT NULL) OR (tipo = 'model_frozen' AND modelo_id IS NOT NULL) OR (tipo = 'test_opened' AND experimento_id IS NOT NULL AND particion_id IS NOT NULL)", descripcion = "Cada tipo de hito dice sobre qué objeto es." },
+  { nombre = "objeto_segun_tipo", sql = "(tipo = 'protocol_frozen' AND protocolo_id IS NOT NULL) OR (tipo = 'split_frozen' AND particion_id IS NOT NULL) OR (tipo = 'model_frozen' AND modelo_id IS NOT NULL AND seleccion_id IS NOT NULL AND huella_seleccion IS NOT NULL) OR (tipo = 'test_opened' AND experimento_id IS NOT NULL AND particion_id IS NOT NULL)", descripcion = "Cada tipo de hito dice sobre qué objeto es; congelar un modelo fija su selección y huella." },
   { nombre = "orden_de_hitos", sql = "", descripcion = "Disparador control.validar_hito(): no hay apertura sin modelo, protocolo y partición congelados antes." },
   { nombre = "un_hito_por_objeto", sql = "", descripcion = "Índices únicos parciales: un solo protocol_frozen por protocolo, un split_frozen por partición, un model_frozen por modelo y un test_opened por experimento." },
 ]
@@ -339,7 +379,7 @@ grano = "Una fila por réplica comparada"
 origen = "replica.json (simulacion/replica.py, DEV14 A06). Solo se carga si las dos corridas están en datos/."
 fuente = "existe"
 filas_dev16 = "pocas"
-cegado = "no"
+cegado = "ambas_corridas"
 clave_primaria = ["replica_id"]
 columnas = [
   { nombre = "replica_id", tipo = "text", descripcion = "Identificador de la comparación.", origen = "cargador" },
@@ -531,6 +571,7 @@ origen = "comparadores.json: current_plan (DEV15 F4)"
 fuente = "existe"
 filas_dev16 = "1"
 cegado = "no"
+visible_porque = "El plan vigente observado es una referencia pública del caso; su uso hace visible el plan asociado."
 clave_primaria = ["plan_observado_id"]
 columnas = [
   { nombre = "plan_observado_id", tipo = "text", descripcion = "Caso y carpeta del programa, por ejemplo caso-001:20261031T041338Z_63437585.", origen = "cargador" },
@@ -858,6 +899,7 @@ origen = "split: assignments (scenario_id, group_id, partition)"
 fuente = "existe el código; ninguna publicada todavía"
 filas_dev16 = "unas 46"
 cegado = "no"
+visible_porque = "ADR07 permite ver la asignación y el nombre del escenario de prueba; las métricas y archivos siguen cegados."
 clave_primaria = ["particion_id", "escenario_id"]
 columnas = [
   { nombre = "particion_id", tipo = "text", descripcion = "Partición.", origen = "split: split_id" },
@@ -947,7 +989,7 @@ grano = "Una fila por plan distinto (vector de duraciones)"
 origen = "traza.json (candidatos), label.json, comparadores.json, respuestas del modelo y programas de las corridas."
 fuente = "existe"
 filas_dev16 = "unas 1 000"
-cegado = "no"
+cegado = "uso_plan"
 clave_primaria = ["plan_id"]
 columnas = [
   { nombre = "plan_id", tipo = "huella", descripcion = "Huella del vector de duraciones en el orden de los tramos del caso.", origen = "cargador" },
@@ -968,7 +1010,7 @@ grano = "Una fila por plan y tramo"
 origen = "Las mismas fuentes que planes."
 fuente = "existe"
 filas_dev16 = "unas 9 000"
-cegado = "no"
+cegado = "padre:simulacion.planes(plan_id)"
 clave_primaria = ["plan_id", "tramo_id"]
 columnas = [
   { nombre = "plan_id", tipo = "huella", descripcion = "Plan.", origen = "cargador" },
@@ -1125,8 +1167,8 @@ columnas = [
   { nombre = "detenciones_media", tipo = "double precision", nulo = true, descripcion = "Detenciones por vehículo.", origen = "metricas.json: zone.stops.mean_stops" },
   { nombre = "cota_inf_detenciones", tipo = "double precision", nulo = true, descripcion = "Cota inferior de detenciones por vehículo.", origen = "metricas.json: zone.stops.lower_bound_mean_stops" },
   { nombre = "pasos_fcd", tipo = "integer", nulo = true, descripcion = "Pasos leídos del archivo de posiciones.", origen = "metricas.json: zone.fcd_steps" },
-  { nombre = "pasos_cola_s", tipo = "jsonb", nulo = true, unidad = "s", descripcion = "Momento de cada paso de la serie de cola, en orden (la misma para todos los accesos de la corrida). Vacío sin zona.", origen = "metricas.json: zone.queue_series.times_s" },
-  { nombre = "pasos_en_ventana", tipo = "jsonb", nulo = true, descripcion = "Si cada paso cuenta para la cola del resumen (intervalo de medición y momento de muestreo), en el mismo orden que pasos_cola_s. Los demás pasos (calentamiento, vaciado) se guardan, pero no entran en las medias. Vacío sin zona.", origen = "metricas.json: zone.queue_series.in_window" },
+  { nombre = "pasos_cola_s", tipo = "double precision[]", nulo = true, unidad = "s", descripcion = "Momento finito y no negativo de cada paso de la serie de cola, en orden estricto (la misma para todos los accesos de la corrida). Vacío sin zona.", origen = "metricas.json: zone.queue_series.times_s", regla = "array_position(pasos_cola_s, NULL) IS NULL AND 0 <= ALL(pasos_cola_s) AND 'Infinity'::double precision > ALL(pasos_cola_s)" },
+  { nombre = "pasos_en_ventana", tipo = "boolean[]", nulo = true, descripcion = "Si cada paso cuenta para la cola del resumen (intervalo de medición y momento de muestreo), en el mismo orden que pasos_cola_s. Los demás pasos (calentamiento, vaciado) se guardan, pero no entran en las medias. Vacío sin zona.", origen = "metricas.json: zone.queue_series.in_window", regla = "array_position(pasos_en_ventana, NULL) IS NULL" },
 ]
 claves_foraneas = [
   { columnas = ["run_id"], referencia = "simulacion.corridas", referidas = ["run_id"], uno_a_uno = true },
@@ -1152,12 +1194,13 @@ clave_primaria = ["run_id", "acceso"]
 columnas = [
   { nombre = "run_id", tipo = "text", descripcion = "Corrida.", origen = "metricas.json: run_id" },
   { nombre = "acceso", tipo = "text", descripcion = "Acceso: approach_id del caso o, para carriles de la zona sin movimiento, su calle.", origen = "metricas.json (clave del acceso)" },
-  { nombre = "solicitados", tipo = "integer", unidad = "veh", descripcion = "Vehículos de la cohorte por este acceso.", origen = "by_access: requested" },
-  { nombre = "terminados", tipo = "integer", unidad = "veh", descripcion = "Terminados.", origen = "by_access: finished" },
-  { nombre = "sin_terminar", tipo = "integer", unidad = "veh", descripcion = "Sin terminar.", origen = "by_access: unfinished" },
-  { nombre = "no_insertados", tipo = "integer", unidad = "veh", descripcion = "No insertados.", origen = "by_access: not_inserted" },
-  { nombre = "estado_demora", tipo = "text", descripcion = "complete, censored o empty.", origen = "by_access: status", regla = "estado_demora IN ('complete','censored','empty')" },
-  { nombre = "suma_demora_s", tipo = "double precision", unidad = "s", descripcion = "Suma de demoras.", origen = "by_access: sum_delay_s" },
+  { nombre = "con_cohorte", tipo = "boolean", descripcion = "Si el acceso tiene vehículos de la cohorte y por eso datos de demora; si no, solo puede tener cola y detenciones.", origen = "presencia en metricas.json: cohort.by_access" },
+  { nombre = "solicitados", tipo = "integer", nulo = true, unidad = "veh", descripcion = "Vehículos de la cohorte por este acceso.", origen = "by_access: requested" },
+  { nombre = "terminados", tipo = "integer", nulo = true, unidad = "veh", descripcion = "Terminados.", origen = "by_access: finished" },
+  { nombre = "sin_terminar", tipo = "integer", nulo = true, unidad = "veh", descripcion = "Sin terminar.", origen = "by_access: unfinished" },
+  { nombre = "no_insertados", tipo = "integer", nulo = true, unidad = "veh", descripcion = "No insertados.", origen = "by_access: not_inserted" },
+  { nombre = "estado_demora", tipo = "text", nulo = true, descripcion = "complete, censored o empty; vacío sin cohorte.", origen = "by_access: status", regla = "estado_demora IS NULL OR estado_demora IN ('complete','censored','empty')" },
+  { nombre = "suma_demora_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Suma de demoras; vacía sin cohorte.", origen = "by_access: sum_delay_s" },
   { nombre = "demora_media_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Demora media; vacía si está censurada.", origen = "by_access: mean_delay_s" },
   { nombre = "perdida_tiempo_media_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Pérdida de tiempo media.", origen = "by_access: mean_time_loss_s" },
   { nombre = "demora_salida_media_s", tipo = "double precision", nulo = true, unidad = "s", descripcion = "Espera de salida media.", origen = "by_access: mean_depart_delay_s" },
@@ -1176,6 +1219,9 @@ columnas = [
   { nombre = "detenciones_total", tipo = "integer", nulo = true, descripcion = "Detenciones.", origen = "stops_by_access: total_stops" },
   { nombre = "detenciones_media", tipo = "double precision", nulo = true, descripcion = "Detenciones por vehículo.", origen = "stops_by_access: mean_stops" },
   { nombre = "cota_inf_detenciones", tipo = "double precision", nulo = true, descripcion = "Cota inferior de detenciones.", origen = "stops_by_access: lower_bound_mean_stops" },
+]
+reglas = [
+  { nombre = "cohorte_y_demora", sql = "(con_cohorte AND solicitados IS NOT NULL AND terminados IS NOT NULL AND sin_terminar IS NOT NULL AND no_insertados IS NOT NULL AND estado_demora IS NOT NULL AND suma_demora_s IS NOT NULL) OR (NOT con_cohorte AND solicitados IS NULL AND terminados IS NULL AND sin_terminar IS NULL AND no_insertados IS NULL AND estado_demora IS NULL AND suma_demora_s IS NULL AND demora_media_s IS NULL AND perdida_tiempo_media_s IS NULL AND demora_salida_media_s IS NULL AND cota_inf_demora_s IS NULL AND cota_inf_perdida_tiempo_s IS NULL AND cota_inf_demora_salida_s IS NULL)", descripcion = "Sin cohorte, toda columna de demora queda vacía; con cohorte, los datos obligatorios están presentes." },
 ]
 claves_foraneas = [
   { columnas = ["run_id"], referencia = "simulacion.corridas", referidas = ["run_id"] },
@@ -1302,7 +1348,7 @@ clave_primaria = ["run_id", "acceso"]
 columnas = [
   { nombre = "run_id", tipo = "text", descripcion = "Corrida.", origen = "metricas.json: run_id" },
   { nombre = "acceso", tipo = "text", descripcion = "Acceso: una clave de zone.queue_series.vehicles_by_access.", origen = "metricas.json: zone.queue_series.vehicles_by_access (clave)" },
-  { nombre = "vehiculos_en_cola", tipo = "jsonb", unidad = "veh", descripcion = "Vehículos del acceso con velocidad menor o igual que el umbral de cola, en los carriles de la zona, en cada paso (un número por paso, en el orden de pasos_cola_s de la corrida). Un paso que la FCD no trae no tiene valor: no se rellena con cero.", origen = "metricas.json: zone.queue_series.vehicles_by_access[acceso]" },
+  { nombre = "vehiculos_en_cola", tipo = "integer[]", unidad = "veh", descripcion = "Vehículos no negativos del acceso con velocidad menor o igual que el umbral de cola, en los carriles de la zona, en cada paso (un número por paso, en el orden de pasos_cola_s de la corrida). Un paso que la FCD no trae no tiene valor: no se rellena con cero.", origen = "metricas.json: zone.queue_series.vehicles_by_access[acceso]", regla = "array_position(vehiculos_en_cola, NULL) IS NULL AND 0 <= ALL(vehiculos_en_cola)" },
 ]
 claves_foraneas = [
   { columnas = ["run_id"], referencia = "simulacion.corridas", referidas = ["run_id"] },
@@ -1572,6 +1618,7 @@ origen = "Pendiente DEV16 (artefacto del conjunto)."
 fuente = "pendiente DEV16"
 filas_dev16 = "unas 40"
 cegado = "no"
+visible_porque = "Solo se admiten etiquetas de entrenamiento o validación; el disparador rechaza las de prueba."
 clave_primaria = ["conjunto_id", "etiqueta_id"]
 columnas = [
   { nombre = "conjunto_id", tipo = "text", descripcion = "Conjunto.", origen = "artefacto del conjunto (DEV16)" },
@@ -1744,7 +1791,8 @@ clave_primaria = ["seleccion_id"]
 columnas = [
   { nombre = "seleccion_id", tipo = "text", descripcion = "Identificador.", origen = "registro de selección (DEV16)" },
   { nombre = "particion_id", tipo = "text", descripcion = "Partición con cuya validación se eligió.", origen = "registro de selección (DEV16)" },
-  { nombre = "protocolo_id", tipo = "text", nulo = true, descripcion = "Protocolo aplicado.", origen = "registro de selección (DEV16)" },
+  { nombre = "protocolo_id", tipo = "text", descripcion = "Protocolo aplicado, obligatorio y congelado antes del modelo.", origen = "registro de selección (DEV16)" },
+  { nombre = "huella_seleccion", tipo = "huella", descripcion = "Huella del registro inmutable de selección.", origen = "registro de selección (DEV16)" },
   { nombre = "criterios", tipo = "jsonb", descripcion = "Orden de criterios: factibilidad, cobertura, error en validación y costo.", origen = "registro de selección (DEV16)" },
   { nombre = "candidatos", tipo = "jsonb", descripcion = "Modelos comparados y sus métricas de validación.", origen = "registro de selección (DEV16)" },
   { nombre = "modelo_ganador_id", tipo = "text", descripcion = "Modelo elegido.", origen = "registro de selección (DEV16)" },
@@ -1753,9 +1801,10 @@ columnas = [
 ]
 claves_foraneas = [
   { columnas = ["particion_id"], referencia = "experimento.particiones", referidas = ["particion_id"] },
-  { columnas = ["protocolo_id"], referencia = "experimento.protocolos", referidas = ["protocolo_id"], opcional = true },
+  { columnas = ["protocolo_id"], referencia = "experimento.protocolos", referidas = ["protocolo_id"] },
   { columnas = ["modelo_ganador_id"], referencia = "aprendizaje.modelos", referidas = ["modelo_id"] },
 ]
+unicas = [["modelo_ganador_id"]]
 
 [[tablas]]
 esquema = "aprendizaje"
@@ -1861,6 +1910,7 @@ columnas = [
   { nombre = "protocolo_id", tipo = "text", descripcion = "Protocolo congelado.", origen = "manifiesto de evaluación" },
   { nombre = "particion_id", tipo = "text", descripcion = "Partición cuya prueba se usa.", origen = "manifiesto de evaluación" },
   { nombre = "modelo_id", tipo = "text", descripcion = "Modelo congelado.", origen = "manifiesto de evaluación" },
+  { nombre = "seleccion_id", tipo = "text", descripcion = "Selección fijada al congelar ese modelo.", origen = "manifiesto de evaluación" },
   { nombre = "alternativas", tipo = "jsonb", descripcion = "Alternativas comparadas: modelo, mediana, vigente, Webster y búsqueda.", origen = "manifiesto de evaluación" },
   { nombre = "creado_en", tipo = "timestamptz", descripcion = "Cuándo se preparó.", origen = "manifiesto de evaluación" },
   { nombre = "huella_experimento", tipo = "huella", descripcion = "Huella de lo congelado.", origen = "manifiesto de evaluación" },
@@ -1870,7 +1920,9 @@ claves_foraneas = [
   { columnas = ["protocolo_id"], referencia = "experimento.protocolos", referidas = ["protocolo_id"] },
   { columnas = ["particion_id"], referencia = "experimento.particiones", referidas = ["particion_id"] },
   { columnas = ["modelo_id"], referencia = "aprendizaje.modelos", referidas = ["modelo_id"] },
+  { columnas = ["seleccion_id"], referencia = "aprendizaje.seleccion", referidas = ["seleccion_id"] },
 ]
+unicas = [["particion_id"]]
 
 [[tablas]]
 esquema = "evaluacion"
@@ -1921,7 +1973,7 @@ grano = "Una fila por par de comparaciones, métrica y alcance"
 origen = "Pendiente DEV20 y DEV26 (compare_cohorts de DEV19)."
 fuente = "pendiente DEV20"
 filas_dev16 = "0"
-cegado = "padre:evaluacion.comparaciones(comparacion_a_id)"
+cegado = "ambas_comparaciones"
 clave_primaria = ["diferencia_id"]
 columnas = [
   { nombre = "diferencia_id", tipo = "text", descripcion = "Identificador.", origen = "artefacto de comparación" },

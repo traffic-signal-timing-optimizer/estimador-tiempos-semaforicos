@@ -46,8 +46,9 @@ def _add_file_row(database: str) -> None:
     with connect(ADMIN, database=database, autocommit=True) as connection:
         connection.execute(
             "INSERT INTO control.artefactos (artefacto_id, raiz, ruta_relativa, tipo, "
-            "tamano_bytes, sha256, manifiesto_id, estado, registrado_en, carga_id) VALUES "
-            "('datos:otro.json', 'datos', 'otro.json', 'other', 1, %s, NULL, 'intact', now(), %s)",
+            "tamano_bytes, sha256, manifiesto_id, estado, alcance, registrado_en, carga_id) VALUES "
+            "('datos:otro.json', 'datos', 'otro.json', 'other', 1, %s, NULL, 'intact', "
+            "'desconocido', now(), %s)",
             ("a" * 64, RECORDED),
         )
 

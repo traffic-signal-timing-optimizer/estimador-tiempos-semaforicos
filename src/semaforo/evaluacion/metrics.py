@@ -23,9 +23,9 @@ zona que no es de ningún movimiento usa el nombre de su calle.
 import math
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
-from pydantic import Field, model_validator
+from pydantic import Field, StrictBool, model_validator
 
 from semaforo.dominio.base_model import FrozenModel
 from semaforo.dominio.case import Case
@@ -80,9 +80,9 @@ class QueueSeries(FrozenModel):
     aparece: no se rellena con cero.
     """
 
-    times_s: list[float]
-    in_window: list[bool]
-    vehicles_by_access: dict[str, list[int]]
+    times_s: list[Annotated[float, Field(strict=True, ge=0, allow_inf_nan=False)]]
+    in_window: list[StrictBool]
+    vehicles_by_access: dict[str, list[Annotated[int, Field(strict=True, ge=0)]]]
 
     @model_validator(mode="after")
     def _same_length(self) -> Self:
@@ -91,6 +91,10 @@ class QueueSeries(FrozenModel):
             len(counts) != steps for counts in self.vehicles_by_access.values()
         ):
             raise ValueError("la serie de la cola tiene columnas de distinto largo")
+        if any(
+            later <= earlier for earlier, later in zip(self.times_s, self.times_s[1:], strict=False)
+        ):
+            raise ValueError("los momentos de la cola deben crecer estrictamente")
         return self
 
 

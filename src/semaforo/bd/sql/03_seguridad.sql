@@ -1,4 +1,4 @@
--- Archivo generado por scripts/bd_esquema.py desde docs/bd/esquema.toml (versión 1.0.0-borrador).
+-- Archivo generado por scripts/bd_esquema.py desde docs/bd/esquema.toml (versión 1.1.0-candidato).
 -- No se edita a mano: se cambia el esquema y se vuelve a generar.
 
 -- Solo agregar (B2): se rechazan la modificación, el borrado y el vaciado.
@@ -6,6 +6,8 @@ CREATE TRIGGER solo_agregar BEFORE UPDATE OR DELETE ON control.cargas FOR EACH R
 CREATE TRIGGER solo_agregar_vaciado BEFORE TRUNCATE ON control.cargas FOR EACH STATEMENT EXECUTE FUNCTION control.bloquear_cambios();
 CREATE TRIGGER solo_agregar BEFORE UPDATE OR DELETE ON control.artefactos FOR EACH ROW EXECUTE FUNCTION control.bloquear_cambios();
 CREATE TRIGGER solo_agregar_vaciado BEFORE TRUNCATE ON control.artefactos FOR EACH STATEMENT EXECUTE FUNCTION control.bloquear_cambios();
+CREATE TRIGGER solo_agregar BEFORE UPDATE OR DELETE ON control.archivo_escenarios FOR EACH ROW EXECUTE FUNCTION control.bloquear_cambios();
+CREATE TRIGGER solo_agregar_vaciado BEFORE TRUNCATE ON control.archivo_escenarios FOR EACH STATEMENT EXECUTE FUNCTION control.bloquear_cambios();
 CREATE TRIGGER solo_agregar BEFORE UPDATE OR DELETE ON control.entornos FOR EACH ROW EXECUTE FUNCTION control.bloquear_cambios();
 CREATE TRIGGER solo_agregar_vaciado BEFORE TRUNCATE ON control.entornos FOR EACH STATEMENT EXECUTE FUNCTION control.bloquear_cambios();
 CREATE TRIGGER solo_agregar BEFORE UPDATE OR DELETE ON control.hitos FOR EACH ROW EXECUTE FUNCTION control.bloquear_cambios();
@@ -116,12 +118,27 @@ CREATE TRIGGER solo_agregar BEFORE UPDATE OR DELETE ON evaluacion.costos FOR EAC
 CREATE TRIGGER solo_agregar_vaciado BEFORE TRUNCATE ON evaluacion.costos FOR EACH STATEMENT EXECUTE FUNCTION control.bloquear_cambios();
 
 -- Cegado de la prueba (B4, con la zona deducida de F1): seguridad por filas.
+ALTER TABLE control.artefactos ENABLE ROW LEVEL SECURITY;
+CREATE POLICY carga_ve_todo ON control.artefactos TO semaforo_carga USING (true) WITH CHECK (true);
+CREATE POLICY lectura_cegada ON control.artefactos FOR SELECT TO semaforo_lectura USING (control.archivo_visible(artefactos.artefacto_id));
+ALTER TABLE control.archivo_escenarios ENABLE ROW LEVEL SECURITY;
+CREATE POLICY carga_ve_todo ON control.archivo_escenarios TO semaforo_carga USING (true) WITH CHECK (true);
+CREATE POLICY lectura_cegada ON control.archivo_escenarios FOR SELECT TO semaforo_lectura USING (control.archivo_visible(archivo_escenarios.artefacto_id));
+ALTER TABLE control.replicas ENABLE ROW LEVEL SECURITY;
+CREATE POLICY carga_ve_todo ON control.replicas TO semaforo_carga USING (true) WITH CHECK (true);
+CREATE POLICY lectura_cegada ON control.replicas FOR SELECT TO semaforo_lectura USING (EXISTS (SELECT 1 FROM simulacion.corridas AS a WHERE a.run_id = replicas.run_id_a) AND EXISTS (SELECT 1 FROM simulacion.corridas AS b WHERE b.run_id = replicas.run_id_b));
 ALTER TABLE experimento.escenarios ENABLE ROW LEVEL SECURITY;
 CREATE POLICY carga_ve_todo ON experimento.escenarios TO semaforo_carga USING (true) WITH CHECK (true);
 CREATE POLICY lectura_cegada ON experimento.escenarios FOR SELECT TO semaforo_lectura USING (NOT EXISTS (SELECT 1 FROM control.escenarios_cegados AS cegado WHERE cegado.escenario_id = escenarios.escenario_id));
 ALTER TABLE experimento.demanda ENABLE ROW LEVEL SECURITY;
 CREATE POLICY carga_ve_todo ON experimento.demanda TO semaforo_carga USING (true) WITH CHECK (true);
 CREATE POLICY lectura_cegada ON experimento.demanda FOR SELECT TO semaforo_lectura USING (NOT EXISTS (SELECT 1 FROM control.escenarios_cegados AS cegado WHERE cegado.escenario_id = demanda.escenario_id));
+ALTER TABLE simulacion.planes ENABLE ROW LEVEL SECURITY;
+CREATE POLICY carga_ve_todo ON simulacion.planes TO semaforo_carga USING (true) WITH CHECK (true);
+CREATE POLICY lectura_cegada ON simulacion.planes FOR SELECT TO semaforo_lectura USING (EXISTS (SELECT 1 FROM caso.planes_observados AS uso WHERE uso.plan_id = planes.plan_id) OR EXISTS (SELECT 1 FROM simulacion.corridas AS uso WHERE uso.plan_id = planes.plan_id) OR EXISTS (SELECT 1 FROM simulacion.candidatos AS uso WHERE uso.plan_id = planes.plan_id) OR EXISTS (SELECT 1 FROM simulacion.etiquetas AS uso WHERE uso.plan_id = planes.plan_id) OR EXISTS (SELECT 1 FROM simulacion.comparadores AS uso WHERE uso.webster_plan_id = planes.plan_id) OR EXISTS (SELECT 1 FROM aprendizaje.consultas AS uso WHERE uso.plan_id = planes.plan_id) OR EXISTS (SELECT 1 FROM evaluacion.comparaciones AS uso WHERE uso.plan_id = planes.plan_id));
+ALTER TABLE simulacion.plan_tramos ENABLE ROW LEVEL SECURITY;
+CREATE POLICY carga_ve_todo ON simulacion.plan_tramos TO semaforo_carga USING (true) WITH CHECK (true);
+CREATE POLICY lectura_cegada ON simulacion.plan_tramos FOR SELECT TO semaforo_lectura USING (EXISTS (SELECT 1 FROM simulacion.planes AS padre WHERE padre.plan_id = plan_tramos.plan_id));
 ALTER TABLE simulacion.corridas ENABLE ROW LEVEL SECURITY;
 CREATE POLICY carga_ve_todo ON simulacion.corridas TO semaforo_carga USING (true) WITH CHECK (true);
 CREATE POLICY lectura_cegada ON simulacion.corridas FOR SELECT TO semaforo_lectura USING (NOT EXISTS (SELECT 1 FROM control.escenarios_cegados AS cegado WHERE cegado.escenario_id = corridas.escenario_id));
@@ -178,7 +195,7 @@ CREATE POLICY carga_ve_todo ON evaluacion.comparaciones TO semaforo_carga USING 
 CREATE POLICY lectura_cegada ON evaluacion.comparaciones FOR SELECT TO semaforo_lectura USING (NOT EXISTS (SELECT 1 FROM control.escenarios_cegados AS cegado WHERE cegado.escenario_id = comparaciones.escenario_id));
 ALTER TABLE evaluacion.diferencias ENABLE ROW LEVEL SECURITY;
 CREATE POLICY carga_ve_todo ON evaluacion.diferencias TO semaforo_carga USING (true) WITH CHECK (true);
-CREATE POLICY lectura_cegada ON evaluacion.diferencias FOR SELECT TO semaforo_lectura USING (EXISTS (SELECT 1 FROM evaluacion.comparaciones AS padre WHERE padre.comparacion_id = diferencias.comparacion_a_id));
+CREATE POLICY lectura_cegada ON evaluacion.diferencias FOR SELECT TO semaforo_lectura USING (EXISTS (SELECT 1 FROM evaluacion.comparaciones AS a WHERE a.comparacion_id = diferencias.comparacion_a_id) AND EXISTS (SELECT 1 FROM evaluacion.comparaciones AS b WHERE b.comparacion_id = diferencias.comparacion_b_id));
 ALTER TABLE evaluacion.indicadores ENABLE ROW LEVEL SECURITY;
 CREATE POLICY carga_ve_todo ON evaluacion.indicadores TO semaforo_carga USING (true) WITH CHECK (true);
 CREATE POLICY lectura_cegada ON evaluacion.indicadores FOR SELECT TO semaforo_lectura USING (EXISTS (SELECT 1 FROM control.hitos AS hito WHERE hito.tipo = 'test_opened' AND hito.experimento_id = indicadores.experimento_id));
@@ -189,3 +206,26 @@ GRANT USAGE ON SCHEMA control, caso, experimento, simulacion, aprendizaje, evalu
 GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA control, caso, experimento, simulacion, aprendizaje, evaluacion TO semaforo_carga;
 GRANT UPDATE ON control.cargas, control.conflictos TO semaforo_carga;
 GRANT SELECT ON ALL TABLES IN SCHEMA control, caso, experimento, simulacion, aprendizaje, evaluacion, vistas TO semaforo_lectura;
+
+-- El panel solo lee las vistas con filtro explícito de cegado, revisadas por separado.
+GRANT USAGE ON SCHEMA vistas TO semaforo_panel;
+ALTER VIEW vistas.zona_escenario SET (security_invoker = false);
+GRANT SELECT ON vistas.zona_escenario TO semaforo_panel;
+ALTER VIEW vistas.estado_hitos SET (security_invoker = false);
+GRANT SELECT ON vistas.estado_hitos TO semaforo_panel;
+ALTER VIEW vistas.corridas_resumen SET (security_invoker = false);
+GRANT SELECT ON vistas.corridas_resumen TO semaforo_panel;
+ALTER VIEW vistas.vehiculos_cohorte SET (security_invoker = false);
+GRANT SELECT ON vistas.vehiculos_cohorte TO semaforo_panel;
+ALTER VIEW vistas.cola_por_segundo SET (security_invoker = false);
+GRANT SELECT ON vistas.cola_por_segundo TO semaforo_panel;
+ALTER VIEW vistas.busquedas_resumen SET (security_invoker = false);
+GRANT SELECT ON vistas.busquedas_resumen TO semaforo_panel;
+ALTER VIEW vistas.etiquetas_entrenamiento SET (security_invoker = false);
+GRANT SELECT ON vistas.etiquetas_entrenamiento TO semaforo_panel;
+ALTER VIEW vistas.metricas_modelos SET (security_invoker = false);
+GRANT SELECT ON vistas.metricas_modelos TO semaforo_panel;
+ALTER VIEW vistas.consultas_resumen SET (security_invoker = false);
+GRANT SELECT ON vistas.consultas_resumen TO semaforo_panel;
+ALTER VIEW vistas.indicadores_finales SET (security_invoker = false);
+GRANT SELECT ON vistas.indicadores_finales TO semaforo_panel;

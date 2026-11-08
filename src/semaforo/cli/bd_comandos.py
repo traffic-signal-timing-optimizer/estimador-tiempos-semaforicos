@@ -320,6 +320,8 @@ def _reconcile_summary(report: ReconcileReport) -> str:
         f"La base {RECONCILE_WORDS[report.status]}: {report.files_checked} archivos, "
         f"{report.runs_checked} corridas ({report.runs_recomputed} recalculadas, "
         f"{report.runs_unverified} sin verificar), {report.differences_total} diferencias.",
+        f"Manifiestos de métricas 1.0.0 sin huella del protocolo registrada: "
+        f"{report.legacy_protocol_manifests}.",
         f"Cobertura de lo publicado ({coverage.expected}): {coverage.loaded} cargadas, "
         f"{coverage.excluded_with_decision} excluidas con decisión, "
         f"{coverage.excluded_pending} excluidas pendientes, {coverage.missing} faltan, "

@@ -46,7 +46,13 @@ from semaforo.dominio.errors import ErrorCode
 from semaforo.evaluacion.cohort import DelaySummary
 from semaforo.evaluacion.metrics import QueueSummary, StopsSummary
 from semaforo.evaluacion.published_metrics import MANIFEST_FILE as METRICS_MANIFEST
-from semaforo.evaluacion.published_metrics import METRICS, METRICS_FILE, RUNS, read_run_metrics
+from semaforo.evaluacion.published_metrics import (
+    METRICS,
+    METRICS_FILE,
+    RUNS,
+    protocol_fingerprint,
+    read_run_metrics,
+)
 from semaforo.evaluacion.run_metrics import RunMetrics
 from semaforo.simulacion.prepare import InputsManifest, canonical_json_sha256
 from semaforo.simulacion.runner import FCD, FCD_GZ, LOG, SUMMARY, TIMING, TRIPINFO
@@ -60,10 +66,15 @@ __all__ = [
     "PROGRAMS",
     "ProgramFinder",
     "SearchRun",
+    "cohort_rows",
+    "delay_columns",
     "entorno_row",
     "log_events",
     "metric_columns",
+    "metric_rows",
+    "queue_columns",
     "run_unit",
+    "stop_columns",
 ]
 
 COHORT = "cohorte_conciliada.csv"
@@ -235,7 +246,7 @@ def _optional(text: str, where: str) -> float | None:
         raise CargaError(ErrorCode.INPUT_SCHEMA, f"número no válido {text!r}", where) from error
 
 
-def _cohort(data: bytes) -> list[Row]:
+def cohort_rows(data: bytes) -> list[Row]:
     """Filas de ``cohorte_conciliada.csv`` (la conciliación oficial de DEV19)."""
     where = f"outputs/{COHORT}"
     try:
@@ -325,7 +336,9 @@ def _trips(data: bytes) -> dict[str, Row]:
 # --- métricas --------------------------------------------------------------------------------
 
 
-def _delay(summary: DelaySummary) -> Row:
+def delay_columns(summary: DelaySummary | None) -> Row:
+    if summary is None:
+        return {name: None for name in DELAY_COLUMNS}
     return {
         "solicitados": summary.requested,
         "terminados": summary.finished,
@@ -342,7 +355,7 @@ def _delay(summary: DelaySummary) -> Row:
     }
 
 
-def _queue(summary: QueueSummary | None) -> Row:
+def queue_columns(summary: QueueSummary | None) -> Row:
     if summary is None:
         return {name: None for name in QUEUE_COLUMNS}
     return {
@@ -356,7 +369,7 @@ def _queue(summary: QueueSummary | None) -> Row:
     }
 
 
-def _stops(summary: StopsSummary | None) -> Row:
+def stop_columns(summary: StopsSummary | None) -> Row:
     if summary is None:
         return {name: None for name in STOPS_COLUMNS}
     return {
@@ -368,6 +381,20 @@ def _stops(summary: StopsSummary | None) -> Row:
     }
 
 
+DELAY_COLUMNS = (
+    "solicitados",
+    "terminados",
+    "sin_terminar",
+    "no_insertados",
+    "estado_demora",
+    "suma_demora_s",
+    "demora_media_s",
+    "perdida_tiempo_media_s",
+    "demora_salida_media_s",
+    "cota_inf_demora_s",
+    "cota_inf_perdida_tiempo_s",
+    "cota_inf_demora_salida_s",
+)
 QUEUE_COLUMNS = (
     "estado_cola",
     "ticks_esperados",
@@ -458,36 +485,32 @@ def metric_columns(metrics: RunMetrics | None) -> Row:
         "muestreo_cola_s": None if settings is None else settings.queue_sampling_s,
         "inicio_medicion_s": None if settings is None else settings.measure_start_s,
         "fin_medicion_s": None if settings is None else settings.measure_end_s,
-        **_queue(None if zone is None else zone.queue),
-        **_stops(None if zone is None else zone.stops),
+        **queue_columns(None if zone is None else zone.queue),
+        **stop_columns(None if zone is None else zone.stops),
         "pasos_fcd": None if zone is None else zone.fcd_steps,
         "pasos_cola_s": None if series is None else list(series.times_s),
         "pasos_en_ventana": None if series is None else list(series.in_window),
     }
 
 
-def _metric_rows(unit: Unit, run_id: str, metrics: RunMetrics, source: FileRecord) -> None:
+def metric_rows(unit: Unit, run_id: str, metrics: RunMetrics, source: FileRecord) -> None:
     """Resultados por acceso y por movimiento, y la cola paso a paso."""
     zone = metrics.zone
     queues = {} if zone is None else zone.queue_by_access
     stops = {} if zone is None else zone.stops_by_access
-    for access, summary in sorted(metrics.cohort.by_access.items()):
+    for access in sorted(set(metrics.cohort.by_access) | set(queues) | set(stops)):
+        summary = metrics.cohort.by_access.get(access)
         unit.add(
             "simulacion.resultados_acceso",
             {
                 "run_id": run_id,
                 "acceso": access,
-                **_delay(summary),
-                **_queue(queues.get(access)),
-                **_stops(stops.get(access)),
+                "con_cohorte": summary is not None,
+                **delay_columns(summary),
+                **queue_columns(queues.get(access)),
+                **stop_columns(stops.get(access)),
             },
             source,
-        )
-    extra = sorted(set(queues) - set(metrics.cohort.by_access))
-    if extra:
-        unit.notes.append(
-            f"accesos de la zona sin vehículos de la cohorte ({', '.join(extra)}): su cola va "
-            "en cola_por_acceso pero no en resultados_acceso"
         )
     for movement, summary in sorted(metrics.cohort.by_movement.items()):
         unit.add(
@@ -497,7 +520,7 @@ def _metric_rows(unit: Unit, run_id: str, metrics: RunMetrics, source: FileRecor
                 "caso_id": metrics.case_id,
                 "caso_version": metrics.case_version,
                 "movimiento_id": movement,
-                **_delay(summary),
+                **delay_columns(summary),
             },
             source,
         )
@@ -574,6 +597,7 @@ class _Measured:
     metrics: RunMetrics
     manifest: FileRecord
     data: FileRecord
+    protocol_sha256: str | None
 
 
 def _measured(workspace: Path, case_id: str, run_id: str, run_sha: str) -> _Measured | None:
@@ -581,6 +605,14 @@ def _measured(workspace: Path, case_id: str, run_id: str, run_sha: str) -> _Meas
     if not folder.exists():
         return None
     stored = read_run_metrics(folder)
+    if stored.manifest.protocol_sha256 is not None:
+        current = protocol_fingerprint(workspace, stored.metrics.protocol_id)
+        if current != stored.manifest.protocol_sha256:
+            raise CargaError(
+                ErrorCode.HASH_MISMATCH,
+                "la huella del protocolo de las métricas es distinta",
+                f"{METRICS}/{run_id}",
+            )
     if stored.manifest.run_manifest_sha256 != run_sha:
         raise CargaError(
             ErrorCode.HASH_MISMATCH, "las métricas no son de esta corrida", f"{METRICS}/{run_id}"
@@ -595,7 +627,7 @@ def _measured(workspace: Path, case_id: str, run_id: str, run_sha: str) -> _Meas
         stored.manifest.files[METRICS_FILE],
         manifest.artifact_id,
     )
-    return _Measured(stored.metrics, manifest, data)
+    return _Measured(stored.metrics, manifest, data, stored.manifest.protocol_sha256)
 
 
 def _program_plan(
@@ -771,7 +803,7 @@ def _vehicles(unit: Unit, folder: _Folder, metrics: RunMetrics | None) -> None:
     zone = None if metrics is None else metrics.zone
     stops = {} if zone is None else zone.vehicle_stops
     no_trip: Row = {name: None for name in TRIP_COLUMNS}
-    for row in _cohort(cohort_bytes):
+    for row in cohort_rows(cohort_bytes):
         vehicle = str(row["vehiculo_id"])
         delay = delays.get(vehicle)
         counted = delay is not None and zone is not None
@@ -813,10 +845,10 @@ def _outcomes(unit: Unit, folder: _Folder, measured: _Measured | None) -> None:
     )
     _vehicles(unit, folder, None if measured is None else measured.metrics)
     if measured is not None:
-        _metric_rows(unit, folder.run_id, measured.metrics, measured.data)
+        metric_rows(unit, folder.run_id, measured.metrics, measured.data)
 
 
-def run_unit(  # noqa: PLR0913  (los índices de la carga son de solo palabra clave)
+def run_unit(  # noqa: PLR0912, PLR0913  (la corrida reúne todas las fuentes)
     workspace: Path,
     run_id: str,
     cases: Mapping[tuple[str, str], Case],
@@ -848,6 +880,8 @@ def run_unit(  # noqa: PLR0913  (los índices de la carga son de solo palabra cl
             "faltan sus métricas publicadas (derivados/metricas); sin ellas, --sin-metricas"
         )
     unit = Unit(key=f"corrida:{run_id}", kind="run")
+    if measured is not None and measured.protocol_sha256 is None:
+        unit.notes.append("métricas de manifiesto 1.0.0: sin huella de protocolo registrada")
     unit.add_file(manifest_record)
     inputs_record, inputs_bytes = folder.read(INPUTS_MANIFEST)
     inputs = _model(InputsManifest.model_validate_json, inputs_bytes, INPUTS_MANIFEST)
@@ -869,6 +903,12 @@ def run_unit(  # noqa: PLR0913  (los índices de la carga son de solo palabra cl
         plan = _program_plan(unit, workspace, case, inputs, programs)
         stage, protocol = "diagnostic", manifest.protocol_id
     _needs(unit, manifest, protocol)
+    if measured is not None and protocol is not None and measured.metrics.protocol_id != protocol:
+        raise CargaError(
+            ErrorCode.INPUT_SCHEMA,
+            "el protocolo de las métricas no es el de la corrida y su búsqueda",
+            run_id,
+        )
     timing: RunTiming | None = None
     if folder.has(f"outputs/{TIMING}"):
         _, timing_bytes = folder.read(f"outputs/{TIMING}")

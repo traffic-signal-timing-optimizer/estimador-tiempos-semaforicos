@@ -57,7 +57,7 @@ def test_the_cohort_table_is_read_without_the_excel_protection() -> None:
         'entrada_real_s;llegada_s\r\n"=""M01.cal.passenger.1""";"=""M01""";"=""passenger""";'
         'no;0;finished;0;138\r\n"=""M02.bus.3""";"=""M02""";"=""bus""";sí;301.5;not_inserted;;\r\n'
     ).encode()
-    rows = corridas._cohort(data)  # pyright: ignore[reportPrivateUsage]
+    rows = corridas.cohort_rows(data)
     assert rows[0] == {
         "vehiculo_id": "M01.cal.passenger.1",
         "movimiento_id": "M01",
@@ -74,7 +74,7 @@ def test_the_cohort_table_is_read_without_the_excel_protection() -> None:
 
 def test_a_cohort_table_with_another_header_is_refused() -> None:
     with pytest.raises(CargaError, match="cabecera"):
-        corridas._cohort(b"id;movimiento\n")  # pyright: ignore[reportPrivateUsage]
+        corridas.cohort_rows(b"id;movimiento\n")
 
 
 def test_sumo_minus_one_means_missing_and_empty_vaporized_means_no() -> None:

@@ -25,11 +25,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, cast
 
-from pydantic import ValidationError
+from pydantic import ValidationError, model_validator
 
 from semaforo.datos.scenario_set import SAFE_FOLDER
 from semaforo.dominio.base_model import FrozenModel
-from semaforo.dominio.errors import ErrorCode
+from semaforo.dominio.errors import DomainError, ErrorCode
+from semaforo.dominio.protocol import parse_protocol
 from semaforo.evaluacion.errors import EvaluacionError
 from semaforo.evaluacion.run_metrics import RunMetrics
 from semaforo.simulacion.environment import capture_environment
@@ -46,6 +47,7 @@ __all__ = [
     "MetricsManifest",
     "StoredMetrics",
     "metrics_bytes",
+    "protocol_fingerprint",
     "publish_run_metrics",
     "read_run_metrics",
 ]
@@ -56,22 +58,37 @@ METRICS_FILE = "metricas.json"
 MANIFEST_FILE = "manifiesto.json"
 MAX_METRICS_BYTES = 256 * 1024 * 1024
 INDENT = "  "
+SHA256_HEX_LENGTH = 64
 
 
 class MetricsManifest(FrozenModel):
     """Manifiesto de las métricas publicadas de una corrida."""
 
-    schema_version: Literal["1.0.0"] = "1.0.0"
+    schema_version: Literal["1.0.0", "1.1.0"] = "1.1.0"
     created_at: datetime
     case_id: str
     case_version: str
     scenario_id: str
     protocol_id: str
+    protocol_sha256: str | None = None
     run_id: str
     metrics_schema_version: str
     run_manifest_sha256: str
     environment: dict[str, str]
     files: dict[str, str]
+
+    @model_validator(mode="after")
+    def protocol_fingerprint_matches_version(self) -> "MetricsManifest":
+        digest = self.protocol_sha256
+        if self.schema_version == "1.1.0" and (
+            digest is None
+            or len(digest) != SHA256_HEX_LENGTH
+            or any(c not in "0123456789abcdef" for c in digest)
+        ):
+            raise ValueError("el manifiesto 1.1.0 exige la huella SHA-256 del protocolo")
+        if self.schema_version == "1.0.0" and digest is not None:
+            raise ValueError("el manifiesto 1.0.0 no registra la huella del protocolo")
+        return self
 
 
 @dataclass(frozen=True)
@@ -114,6 +131,36 @@ def metrics_bytes(metrics: RunMetrics) -> bytes:
 
 def _environment() -> dict[str, str]:
     return {"python": platform.python_version(), **capture_environment()}
+
+
+def protocol_fingerprint(workspace: Path, protocol_id: str) -> str:
+    """Huella del único protocolo publicado con esta identidad, sin seguir enlaces externos."""
+    matches: list[Path] = []
+    for path in (workspace / "derivados" / "protocolos").rglob("*.json"):
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            raw = json.loads(path.read_bytes())
+        except (OSError, ValueError):
+            continue
+        if (
+            isinstance(raw, dict)
+            and cast("dict[str, object]", raw).get("protocol_id") == protocol_id
+        ):
+            matches.append(path)
+    if len(matches) != 1:
+        raise EvaluacionError(
+            ErrorCode.INPUT_SCHEMA,
+            "se exige un único archivo publicado para el protocolo de las métricas",
+            "protocol_id",
+        )
+    try:
+        parse_protocol(json.loads(matches[0].read_bytes()))
+    except (DomainError, OSError, ValueError) as error:
+        raise EvaluacionError(
+            ErrorCode.INPUT_SCHEMA, "el protocolo no es válido", "protocol_id"
+        ) from error
+    return sha256_file(matches[0])
 
 
 def publish_run_metrics(
@@ -161,6 +208,7 @@ def publish_run_metrics(
         case_version=metrics.case_version,
         scenario_id=metrics.scenario_id,
         protocol_id=metrics.protocol_id,
+        protocol_sha256=protocol_fingerprint(workspace, metrics.protocol_id),
         run_id=metrics.run_id,
         metrics_schema_version=metrics.schema_version,
         run_manifest_sha256=sha256_file(run_manifest),

@@ -9,6 +9,8 @@ import pytest
 
 from semaforo.app.integrity import verify_workspace
 from semaforo.app.reception import RUNS as APP_RUNS
+from semaforo.bd.carga.corridas import DELAY_COLUMNS, metric_rows
+from semaforo.bd.carga.modelo import FileRecord, Unit
 from semaforo.dominio.case import Case, parse_case
 from semaforo.dominio.errors import ErrorCode
 from semaforo.dominio.protocol import Protocol, parse_protocol
@@ -126,6 +128,9 @@ def workspace(tmp_path: Path) -> Iterator[Path]:
     run = root / RUNS / RUN_ID
     run.mkdir(parents=True)
     (run / "manifest.json").write_text('{"run_id": "run-0001"}', encoding="utf-8")
+    protocol_file = root / "derivados" / "protocolos" / "demo" / "protocolo.json"
+    protocol_file.parent.mkdir(parents=True)
+    protocol_file.write_bytes((FIXTURES / "protocol.json").read_bytes())
     yield root
     remove_tree(root)
 
@@ -152,6 +157,29 @@ def test_the_metrics_read_back_are_the_published_ones(workspace: Path, tmp_path:
     assert stored.metrics.zone.queue_series.vehicles_by_access["N"] == [0, 1, 2, 1]
 
 
+def test_an_access_with_queue_but_no_cohort_has_a_row_without_delay(tmp_path: Path) -> None:
+    metrics = real_metrics(tmp_path)
+    zone = metrics.zone
+    assert zone is not None
+    only_queue = zone.queue_by_access["N"]
+    changed = metrics.model_copy(
+        update={
+            "zone": zone.model_copy(
+                update={"queue_by_access": {**zone.queue_by_access, "SIN_COHORTE": only_queue}}
+            )
+        }
+    )
+    unit = Unit(key="corrida:prueba", kind="run")
+    source = FileRecord("datos", "prueba/metricas.json", "metrics", "a" * 64, 1)
+    metric_rows(unit, metrics.run_id, changed, source)
+    row = next(
+        row for row in unit.rows["simulacion.resultados_acceso"] if row["acceso"] == "SIN_COHORTE"
+    )
+    assert row["con_cohorte"] is False
+    assert all(row[column] is None for column in DELAY_COLUMNS)
+    assert row["estado_cola"] == only_queue.status
+
+
 def test_the_manifest_says_where_the_metrics_come_from(workspace: Path, tmp_path: Path) -> None:
     stored = read_run_metrics(published(workspace, tmp_path))
     manifest = stored.manifest
@@ -159,6 +187,10 @@ def test_the_manifest_says_where_the_metrics_come_from(workspace: Path, tmp_path
     assert manifest.run_manifest_sha256 == sha256_file(run_manifest)
     assert (manifest.run_id, manifest.scenario_id) == (RUN_ID, "ESC_1")
     assert manifest.metrics_schema_version == "2.1.0"
+    assert manifest.schema_version == "1.1.0"
+    assert manifest.protocol_sha256 == sha256_file(
+        workspace / "derivados" / "protocolos" / "demo" / "protocolo.json"
+    )
     assert manifest.environment == EQUIPMENT
     assert manifest.created_at == NOW
     folder = workspace / METRICS / manifest.case_id / RUN_ID

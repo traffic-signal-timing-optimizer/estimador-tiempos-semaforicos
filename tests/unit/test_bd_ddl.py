@@ -36,7 +36,7 @@ def test_every_table_and_column_of_the_design_is_created(design: Design) -> None
     text = ddl.tables_sql(design)
     tables = re.findall(r"^CREATE TABLE (\S+) \(", text, flags=re.MULTILINE)
     assert sorted(tables) == sorted(t.full for t in design.tablas)
-    assert len(tables) == 56
+    assert len(tables) == 57
     for table in design.tablas:
         for column in table.columnas:
             assert f"COMMENT ON COLUMN {table.full}.{column.nombre} IS" in text
@@ -45,8 +45,8 @@ def test_every_table_and_column_of_the_design_is_created(design: Design) -> None
 def test_every_relation_of_the_design_is_a_foreign_key(design: Design) -> None:
     text = ddl.tables_sql(design)
     keys = sum(len(t.claves_foraneas) for t in design.tablas)
-    # 222: la cola por acceso tiene dos (a corridas y a resultados_corrida, DEV31 F4).
-    assert text.count(" FOREIGN KEY (") == keys == 222
+    # C2 añade dos enlaces de archivo y fija la selección en el hito y el experimento.
+    assert text.count(" FOREIGN KEY (") == keys == 227
 
 
 def test_only_the_partition_link_is_deferred(design: Design) -> None:
@@ -77,9 +77,9 @@ def test_a_child_inherits_the_visibility_of_its_parent(design: Design) -> None:
     )
     differences = design.table("evaluacion.diferencias")
     assert differences is not None
-    assert "padre.comparacion_id = diferencias.comparacion_a_id" in str(
-        ddl.blinding_expression(differences)
-    )
+    condition = str(ddl.blinding_expression(differences))
+    assert "a.comparacion_id = diferencias.comparacion_a_id" in condition
+    assert "b.comparacion_id = diferencias.comparacion_b_id" in condition
 
 
 def test_a_scenario_table_hides_the_rows_of_a_closed_test(design: Design) -> None:

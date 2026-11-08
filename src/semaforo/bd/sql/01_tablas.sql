@@ -1,4 +1,4 @@
--- Archivo generado por scripts/bd_esquema.py desde docs/bd/esquema.toml (versión 1.0.0-borrador).
+-- Archivo generado por scripts/bd_esquema.py desde docs/bd/esquema.toml (versión 1.1.0-candidato).
 -- No se edita a mano: se cambia el esquema y se vuelve a generar.
 
 CREATE SCHEMA control;
@@ -69,6 +69,7 @@ CREATE TABLE control.artefactos (
     sha256 control.huella NOT NULL,
     manifiesto_id text,
     estado text NOT NULL,
+    alcance text NOT NULL,
     motivo text,
     registrado_en timestamptz NOT NULL,
     carga_id text NOT NULL,
@@ -77,6 +78,7 @@ CREATE TABLE control.artefactos (
     CONSTRAINT artefactos_raiz_regla CHECK (raiz IN ('datos','repositorio')),
     CONSTRAINT artefactos_tamano_bytes_regla CHECK (tamano_bytes >= 0),
     CONSTRAINT artefactos_estado_regla CHECK (estado IN ('intact','unknown','not_loadable','rejected')),
+    CONSTRAINT artefactos_alcance_regla CHECK (alcance IN ('global','escenarios','desconocido')),
     CONSTRAINT artefactos_motivo_si_no_intacto CHECK (estado = 'intact' OR motivo IS NOT NULL)
 );
 COMMENT ON TABLE control.artefactos IS 'Cada archivo que la base conoce, con su huella. Es el enlace de cada fila con su original.';
@@ -88,9 +90,21 @@ COMMENT ON COLUMN control.artefactos.tamano_bytes IS 'Tamaño del archivo. Unida
 COMMENT ON COLUMN control.artefactos.sha256 IS 'Huella del contenido, recalculada al cargar.';
 COMMENT ON COLUMN control.artefactos.manifiesto_id IS 'Manifiesto que declara este archivo; vacío si es un manifiesto o un acta.';
 COMMENT ON COLUMN control.artefactos.estado IS 'intact (huella coincide), unknown (sin manifiesto reconocido), not_loadable (no se pudo leer) o rejected (rechazado por conflicto).';
+COMMENT ON COLUMN control.artefactos.alcance IS 'global, escenarios o desconocido. Los desconocidos quedan ocultos hasta clasificarlos.';
 COMMENT ON COLUMN control.artefactos.motivo IS 'Por qué no está intact; vacío si lo está.';
 COMMENT ON COLUMN control.artefactos.registrado_en IS 'Cuándo se registró.';
 COMMENT ON COLUMN control.artefactos.carga_id IS 'Carga que escribió la fila.';
+
+CREATE TABLE control.archivo_escenarios (
+    artefacto_id text NOT NULL,
+    escenario_id text NOT NULL,
+    carga_id text NOT NULL,
+    CONSTRAINT archivo_escenarios_pk PRIMARY KEY (artefacto_id, escenario_id)
+);
+COMMENT ON TABLE control.archivo_escenarios IS 'Escenarios a los que corresponde un archivo. Todos deben ser visibles para mostrar el archivo.';
+COMMENT ON COLUMN control.archivo_escenarios.artefacto_id IS 'Archivo vinculado.';
+COMMENT ON COLUMN control.archivo_escenarios.escenario_id IS 'Escenario vinculado.';
+COMMENT ON COLUMN control.archivo_escenarios.carga_id IS 'Carga que escribió la fila.';
 
 CREATE TABLE control.entornos (
     entorno_id control.huella NOT NULL,
@@ -145,6 +159,8 @@ CREATE TABLE control.hitos (
     particion_id text,
     modelo_id text,
     experimento_id text,
+    seleccion_id text,
+    huella_seleccion control.huella,
     huella_objeto control.huella NOT NULL,
     commit_codigo text,
     responsable text NOT NULL,
@@ -153,7 +169,7 @@ CREATE TABLE control.hitos (
     artefacto_id text NOT NULL,
     CONSTRAINT hitos_pk PRIMARY KEY (hito_id),
     CONSTRAINT hitos_tipo_regla CHECK (tipo IN ('protocol_frozen','split_frozen','model_frozen','test_opened')),
-    CONSTRAINT hitos_objeto_segun_tipo CHECK ((tipo = 'protocol_frozen' AND protocolo_id IS NOT NULL) OR (tipo = 'split_frozen' AND particion_id IS NOT NULL) OR (tipo = 'model_frozen' AND modelo_id IS NOT NULL) OR (tipo = 'test_opened' AND experimento_id IS NOT NULL AND particion_id IS NOT NULL))
+    CONSTRAINT hitos_objeto_segun_tipo CHECK ((tipo = 'protocol_frozen' AND protocolo_id IS NOT NULL) OR (tipo = 'split_frozen' AND particion_id IS NOT NULL) OR (tipo = 'model_frozen' AND modelo_id IS NOT NULL AND seleccion_id IS NOT NULL AND huella_seleccion IS NOT NULL) OR (tipo = 'test_opened' AND experimento_id IS NOT NULL AND particion_id IS NOT NULL))
 );
 COMMENT ON TABLE control.hitos IS 'Pasos fechados del procedimiento que el jurado puede pedir: congelar el protocolo, la partición y el modelo, y abrir la prueba.';
 COMMENT ON COLUMN control.hitos.hito_id IS 'Identificador del hito.';
@@ -163,6 +179,8 @@ COMMENT ON COLUMN control.hitos.protocolo_id IS 'Protocolo congelado (tipo proto
 COMMENT ON COLUMN control.hitos.particion_id IS 'Partición congelada, o cuya prueba se abre.';
 COMMENT ON COLUMN control.hitos.modelo_id IS 'Modelo congelado (tipo model_frozen).';
 COMMENT ON COLUMN control.hitos.experimento_id IS 'Experimento cuya prueba se abre (tipo test_opened).';
+COMMENT ON COLUMN control.hitos.seleccion_id IS 'Selección fijada al congelar el modelo; no cambia con selecciones posteriores.';
+COMMENT ON COLUMN control.hitos.huella_seleccion IS 'Huella de la selección fijada al congelar el modelo.';
 COMMENT ON COLUMN control.hitos.huella_objeto IS 'Huella del objeto en el momento del hito.';
 COMMENT ON COLUMN control.hitos.commit_codigo IS 'Commit que contiene el acta y la huella; da la fecha externa al subirse a GitHub.';
 COMMENT ON COLUMN control.hitos.responsable IS 'Quién registró el hito.';
@@ -1100,8 +1118,8 @@ CREATE TABLE simulacion.resultados_corrida (
     detenciones_media double precision,
     cota_inf_detenciones double precision,
     pasos_fcd integer,
-    pasos_cola_s jsonb,
-    pasos_en_ventana jsonb,
+    pasos_cola_s double precision[],
+    pasos_en_ventana boolean[],
     carga_id text NOT NULL,
     artefacto_id text NOT NULL,
     CONSTRAINT resultados_corrida_pk PRIMARY KEY (run_id),
@@ -1125,6 +1143,8 @@ CREATE TABLE simulacion.resultados_corrida (
     CONSTRAINT resultados_corrida_estado_demora_regla CHECK (estado_demora IS NULL OR estado_demora IN ('complete','censored','empty')),
     CONSTRAINT resultados_corrida_estado_cola_regla CHECK (estado_cola IS NULL OR estado_cola IN ('complete','incomplete','empty')),
     CONSTRAINT resultados_corrida_estado_detenciones_regla CHECK (estado_detenciones IS NULL OR estado_detenciones IN ('complete','censored','empty')),
+    CONSTRAINT resultados_corrida_pasos_cola_s_regla CHECK (array_position(pasos_cola_s, NULL) IS NULL AND 0 <= ALL(pasos_cola_s) AND 'Infinity'::double precision > ALL(pasos_cola_s)),
+    CONSTRAINT resultados_corrida_pasos_en_ventana_regla CHECK (array_position(pasos_en_ventana, NULL) IS NULL),
     CONSTRAINT resultados_corrida_demora_completa CHECK (estado_demora IS DISTINCT FROM 'complete' OR demora_media_s IS NOT NULL),
     CONSTRAINT resultados_corrida_demora_censurada CHECK (estado_demora IS DISTINCT FROM 'censored' OR (demora_media_s IS NULL AND cota_inf_demora_s IS NOT NULL)),
     CONSTRAINT resultados_corrida_zona_con_motivo CHECK (zona_disponible IS DISTINCT FROM false OR motivo_zona_no_disponible IS NOT NULL)
@@ -1192,7 +1212,7 @@ COMMENT ON COLUMN simulacion.resultados_corrida.detenciones_total IS 'Detencione
 COMMENT ON COLUMN simulacion.resultados_corrida.detenciones_media IS 'Detenciones por vehículo.';
 COMMENT ON COLUMN simulacion.resultados_corrida.cota_inf_detenciones IS 'Cota inferior de detenciones por vehículo.';
 COMMENT ON COLUMN simulacion.resultados_corrida.pasos_fcd IS 'Pasos leídos del archivo de posiciones.';
-COMMENT ON COLUMN simulacion.resultados_corrida.pasos_cola_s IS 'Momento de cada paso de la serie de cola, en orden (la misma para todos los accesos de la corrida). Vacío sin zona. Unidad: s.';
+COMMENT ON COLUMN simulacion.resultados_corrida.pasos_cola_s IS 'Momento finito y no negativo de cada paso de la serie de cola, en orden estricto (la misma para todos los accesos de la corrida). Vacío sin zona. Unidad: s.';
 COMMENT ON COLUMN simulacion.resultados_corrida.pasos_en_ventana IS 'Si cada paso cuenta para la cola del resumen (intervalo de medición y momento de muestreo), en el mismo orden que pasos_cola_s. Los demás pasos (calentamiento, vaciado) se guardan, pero no entran en las medias. Vacío sin zona.';
 COMMENT ON COLUMN simulacion.resultados_corrida.carga_id IS 'Carga que escribió la fila.';
 COMMENT ON COLUMN simulacion.resultados_corrida.artefacto_id IS 'Archivo de datos/ (o acta del repositorio) del que sale la fila.';
@@ -1200,12 +1220,13 @@ COMMENT ON COLUMN simulacion.resultados_corrida.artefacto_id IS 'Archivo de dato
 CREATE TABLE simulacion.resultados_acceso (
     run_id text NOT NULL,
     acceso text NOT NULL,
-    solicitados integer NOT NULL,
-    terminados integer NOT NULL,
-    sin_terminar integer NOT NULL,
-    no_insertados integer NOT NULL,
-    estado_demora text NOT NULL,
-    suma_demora_s double precision NOT NULL,
+    con_cohorte boolean NOT NULL,
+    solicitados integer,
+    terminados integer,
+    sin_terminar integer,
+    no_insertados integer,
+    estado_demora text,
+    suma_demora_s double precision,
     demora_media_s double precision,
     perdida_tiempo_media_s double precision,
     demora_salida_media_s double precision,
@@ -1227,19 +1248,21 @@ CREATE TABLE simulacion.resultados_acceso (
     carga_id text NOT NULL,
     artefacto_id text NOT NULL,
     CONSTRAINT resultados_acceso_pk PRIMARY KEY (run_id, acceso),
-    CONSTRAINT resultados_acceso_estado_demora_regla CHECK (estado_demora IN ('complete','censored','empty')),
+    CONSTRAINT resultados_acceso_estado_demora_regla CHECK (estado_demora IS NULL OR estado_demora IN ('complete','censored','empty')),
     CONSTRAINT resultados_acceso_estado_cola_regla CHECK (estado_cola IS NULL OR estado_cola IN ('complete','incomplete','empty')),
-    CONSTRAINT resultados_acceso_estado_detenciones_regla CHECK (estado_detenciones IS NULL OR estado_detenciones IN ('complete','censored','empty'))
+    CONSTRAINT resultados_acceso_estado_detenciones_regla CHECK (estado_detenciones IS NULL OR estado_detenciones IN ('complete','censored','empty')),
+    CONSTRAINT resultados_acceso_cohorte_y_demora CHECK ((con_cohorte AND solicitados IS NOT NULL AND terminados IS NOT NULL AND sin_terminar IS NOT NULL AND no_insertados IS NOT NULL AND estado_demora IS NOT NULL AND suma_demora_s IS NOT NULL) OR (NOT con_cohorte AND solicitados IS NULL AND terminados IS NULL AND sin_terminar IS NULL AND no_insertados IS NULL AND estado_demora IS NULL AND suma_demora_s IS NULL AND demora_media_s IS NULL AND perdida_tiempo_media_s IS NULL AND demora_salida_media_s IS NULL AND cota_inf_demora_s IS NULL AND cota_inf_perdida_tiempo_s IS NULL AND cota_inf_demora_salida_s IS NULL))
 );
 COMMENT ON TABLE simulacion.resultados_acceso IS 'Demora, cola y detenciones por acceso del cruce (I6 por acceso).';
 COMMENT ON COLUMN simulacion.resultados_acceso.run_id IS 'Corrida.';
 COMMENT ON COLUMN simulacion.resultados_acceso.acceso IS 'Acceso: approach_id del caso o, para carriles de la zona sin movimiento, su calle.';
+COMMENT ON COLUMN simulacion.resultados_acceso.con_cohorte IS 'Si el acceso tiene vehículos de la cohorte y por eso datos de demora; si no, solo puede tener cola y detenciones.';
 COMMENT ON COLUMN simulacion.resultados_acceso.solicitados IS 'Vehículos de la cohorte por este acceso. Unidad: veh.';
 COMMENT ON COLUMN simulacion.resultados_acceso.terminados IS 'Terminados. Unidad: veh.';
 COMMENT ON COLUMN simulacion.resultados_acceso.sin_terminar IS 'Sin terminar. Unidad: veh.';
 COMMENT ON COLUMN simulacion.resultados_acceso.no_insertados IS 'No insertados. Unidad: veh.';
-COMMENT ON COLUMN simulacion.resultados_acceso.estado_demora IS 'complete, censored o empty.';
-COMMENT ON COLUMN simulacion.resultados_acceso.suma_demora_s IS 'Suma de demoras. Unidad: s.';
+COMMENT ON COLUMN simulacion.resultados_acceso.estado_demora IS 'complete, censored o empty; vacío sin cohorte.';
+COMMENT ON COLUMN simulacion.resultados_acceso.suma_demora_s IS 'Suma de demoras; vacía sin cohorte. Unidad: s.';
 COMMENT ON COLUMN simulacion.resultados_acceso.demora_media_s IS 'Demora media; vacía si está censurada. Unidad: s.';
 COMMENT ON COLUMN simulacion.resultados_acceso.perdida_tiempo_media_s IS 'Pérdida de tiempo media. Unidad: s.';
 COMMENT ON COLUMN simulacion.resultados_acceso.demora_salida_media_s IS 'Espera de salida media. Unidad: s.';
@@ -1404,15 +1427,16 @@ COMMENT ON COLUMN simulacion.eventos.artefacto_id IS 'Archivo de datos/ (o acta 
 CREATE TABLE simulacion.cola_por_acceso (
     run_id text NOT NULL,
     acceso text NOT NULL,
-    vehiculos_en_cola jsonb NOT NULL,
+    vehiculos_en_cola integer[] NOT NULL,
     carga_id text NOT NULL,
     artefacto_id text NOT NULL,
-    CONSTRAINT cola_por_acceso_pk PRIMARY KEY (run_id, acceso)
+    CONSTRAINT cola_por_acceso_pk PRIMARY KEY (run_id, acceso),
+    CONSTRAINT cola_por_acceso_vehiculos_en_cola_regla CHECK (array_position(vehiculos_en_cola, NULL) IS NULL AND 0 <= ALL(vehiculos_en_cola))
 );
 COMMENT ON TABLE simulacion.cola_por_acceso IS 'Cola de cada acceso de la zona, paso a paso, como un arreglo por acceso. Los momentos de los pasos y cuáles cuentan para la cola del resumen están una sola vez por corrida, en resultados_corrida (pasos_cola_s y pasos_en_ventana). La vista vistas.cola_por_segundo muestra una fila por corrida, acceso y paso, como antes.';
 COMMENT ON COLUMN simulacion.cola_por_acceso.run_id IS 'Corrida.';
 COMMENT ON COLUMN simulacion.cola_por_acceso.acceso IS 'Acceso: una clave de zone.queue_series.vehicles_by_access.';
-COMMENT ON COLUMN simulacion.cola_por_acceso.vehiculos_en_cola IS 'Vehículos del acceso con velocidad menor o igual que el umbral de cola, en los carriles de la zona, en cada paso (un número por paso, en el orden de pasos_cola_s de la corrida). Un paso que la FCD no trae no tiene valor: no se rellena con cero. Unidad: veh.';
+COMMENT ON COLUMN simulacion.cola_por_acceso.vehiculos_en_cola IS 'Vehículos no negativos del acceso con velocidad menor o igual que el umbral de cola, en los carriles de la zona, en cada paso (un número por paso, en el orden de pasos_cola_s de la corrida). Un paso que la FCD no trae no tiene valor: no se rellena con cero. Unidad: veh.';
 COMMENT ON COLUMN simulacion.cola_por_acceso.carga_id IS 'Carga que escribió la fila.';
 COMMENT ON COLUMN simulacion.cola_por_acceso.artefacto_id IS 'Archivo de datos/ (o acta del repositorio) del que sale la fila.';
 
@@ -1944,7 +1968,8 @@ COMMENT ON COLUMN aprendizaje.modelos.artefacto_id IS 'Archivo de datos/ (o acta
 CREATE TABLE aprendizaje.seleccion (
     seleccion_id text NOT NULL,
     particion_id text NOT NULL,
-    protocolo_id text,
+    protocolo_id text NOT NULL,
+    huella_seleccion control.huella NOT NULL,
     criterios jsonb NOT NULL,
     candidatos jsonb NOT NULL,
     modelo_ganador_id text NOT NULL,
@@ -1952,12 +1977,14 @@ CREATE TABLE aprendizaje.seleccion (
     decidido_en timestamptz NOT NULL,
     carga_id text NOT NULL,
     artefacto_id text NOT NULL,
-    CONSTRAINT seleccion_pk PRIMARY KEY (seleccion_id)
+    CONSTRAINT seleccion_pk PRIMARY KEY (seleccion_id),
+    CONSTRAINT seleccion_unica_1 UNIQUE (modelo_ganador_id)
 );
 COMMENT ON TABLE aprendizaje.seleccion IS 'Decisión de elegir un modelo, con el orden de criterios fijado antes y los candidatos comparados (QA19).';
 COMMENT ON COLUMN aprendizaje.seleccion.seleccion_id IS 'Identificador.';
 COMMENT ON COLUMN aprendizaje.seleccion.particion_id IS 'Partición con cuya validación se eligió.';
-COMMENT ON COLUMN aprendizaje.seleccion.protocolo_id IS 'Protocolo aplicado.';
+COMMENT ON COLUMN aprendizaje.seleccion.protocolo_id IS 'Protocolo aplicado, obligatorio y congelado antes del modelo.';
+COMMENT ON COLUMN aprendizaje.seleccion.huella_seleccion IS 'Huella del registro inmutable de selección.';
 COMMENT ON COLUMN aprendizaje.seleccion.criterios IS 'Orden de criterios: factibilidad, cobertura, error en validación y costo.';
 COMMENT ON COLUMN aprendizaje.seleccion.candidatos IS 'Modelos comparados y sus métricas de validación.';
 COMMENT ON COLUMN aprendizaje.seleccion.modelo_ganador_id IS 'Modelo elegido.';
@@ -2060,12 +2087,14 @@ CREATE TABLE evaluacion.experimentos (
     protocolo_id text NOT NULL,
     particion_id text NOT NULL,
     modelo_id text NOT NULL,
+    seleccion_id text NOT NULL,
     alternativas jsonb NOT NULL,
     creado_en timestamptz NOT NULL,
     huella_experimento control.huella NOT NULL,
     carga_id text NOT NULL,
     artefacto_id text NOT NULL,
-    CONSTRAINT experimentos_pk PRIMARY KEY (experimento_id)
+    CONSTRAINT experimentos_pk PRIMARY KEY (experimento_id),
+    CONSTRAINT experimentos_unica_1 UNIQUE (particion_id)
 );
 COMMENT ON TABLE evaluacion.experimentos IS 'Experimento de evaluación: protocolo, partición y modelo congelados. Su apertura es un hito.';
 COMMENT ON COLUMN evaluacion.experimentos.experimento_id IS 'Identificador.';
@@ -2074,6 +2103,7 @@ COMMENT ON COLUMN evaluacion.experimentos.caso_version IS 'Versión del caso.';
 COMMENT ON COLUMN evaluacion.experimentos.protocolo_id IS 'Protocolo congelado.';
 COMMENT ON COLUMN evaluacion.experimentos.particion_id IS 'Partición cuya prueba se usa.';
 COMMENT ON COLUMN evaluacion.experimentos.modelo_id IS 'Modelo congelado.';
+COMMENT ON COLUMN evaluacion.experimentos.seleccion_id IS 'Selección fijada al congelar ese modelo.';
 COMMENT ON COLUMN evaluacion.experimentos.alternativas IS 'Alternativas comparadas: modelo, mediana, vigente, Webster y búsqueda.';
 COMMENT ON COLUMN evaluacion.experimentos.creado_en IS 'Cuándo se preparó.';
 COMMENT ON COLUMN evaluacion.experimentos.huella_experimento IS 'Huella de lo congelado.';
@@ -2240,14 +2270,18 @@ COMMENT ON COLUMN evaluacion.costos.artefacto_id IS 'Archivo de datos/ (o acta d
 -- Relaciones: se agregan al final para que el orden de las tablas no importe.
 ALTER TABLE control.artefactos ADD CONSTRAINT artefactos_fk_1 FOREIGN KEY (manifiesto_id) REFERENCES control.artefactos (artefacto_id);
 ALTER TABLE control.artefactos ADD CONSTRAINT artefactos_fk_2 FOREIGN KEY (carga_id) REFERENCES control.cargas (carga_id);
+ALTER TABLE control.archivo_escenarios ADD CONSTRAINT archivo_escenarios_fk_1 FOREIGN KEY (artefacto_id) REFERENCES control.artefactos (artefacto_id);
+ALTER TABLE control.archivo_escenarios ADD CONSTRAINT archivo_escenarios_fk_2 FOREIGN KEY (escenario_id) REFERENCES experimento.escenarios (escenario_id);
+ALTER TABLE control.archivo_escenarios ADD CONSTRAINT archivo_escenarios_fk_3 FOREIGN KEY (carga_id) REFERENCES control.cargas (carga_id);
 ALTER TABLE control.entornos ADD CONSTRAINT entornos_fk_1 FOREIGN KEY (carga_id) REFERENCES control.cargas (carga_id);
 ALTER TABLE control.entornos ADD CONSTRAINT entornos_fk_2 FOREIGN KEY (artefacto_id) REFERENCES control.artefactos (artefacto_id);
 ALTER TABLE control.hitos ADD CONSTRAINT hitos_fk_1 FOREIGN KEY (protocolo_id) REFERENCES experimento.protocolos (protocolo_id);
 ALTER TABLE control.hitos ADD CONSTRAINT hitos_fk_2 FOREIGN KEY (particion_id) REFERENCES experimento.particiones (particion_id);
 ALTER TABLE control.hitos ADD CONSTRAINT hitos_fk_3 FOREIGN KEY (modelo_id) REFERENCES aprendizaje.modelos (modelo_id);
 ALTER TABLE control.hitos ADD CONSTRAINT hitos_fk_4 FOREIGN KEY (experimento_id) REFERENCES evaluacion.experimentos (experimento_id);
-ALTER TABLE control.hitos ADD CONSTRAINT hitos_fk_5 FOREIGN KEY (carga_id) REFERENCES control.cargas (carga_id);
-ALTER TABLE control.hitos ADD CONSTRAINT hitos_fk_6 FOREIGN KEY (artefacto_id) REFERENCES control.artefactos (artefacto_id);
+ALTER TABLE control.hitos ADD CONSTRAINT hitos_fk_5 FOREIGN KEY (seleccion_id) REFERENCES aprendizaje.seleccion (seleccion_id);
+ALTER TABLE control.hitos ADD CONSTRAINT hitos_fk_6 FOREIGN KEY (carga_id) REFERENCES control.cargas (carga_id);
+ALTER TABLE control.hitos ADD CONSTRAINT hitos_fk_7 FOREIGN KEY (artefacto_id) REFERENCES control.artefactos (artefacto_id);
 ALTER TABLE control.conflictos ADD CONSTRAINT conflictos_fk_1 FOREIGN KEY (carga_id) REFERENCES control.cargas (carga_id);
 ALTER TABLE control.conflictos ADD CONSTRAINT conflictos_fk_2 FOREIGN KEY (artefacto_id) REFERENCES control.artefactos (artefacto_id);
 ALTER TABLE control.replicas ADD CONSTRAINT replicas_fk_1 FOREIGN KEY (run_id_a) REFERENCES simulacion.corridas (run_id);
@@ -2438,8 +2472,9 @@ ALTER TABLE evaluacion.experimentos ADD CONSTRAINT experimentos_fk_1 FOREIGN KEY
 ALTER TABLE evaluacion.experimentos ADD CONSTRAINT experimentos_fk_2 FOREIGN KEY (protocolo_id) REFERENCES experimento.protocolos (protocolo_id);
 ALTER TABLE evaluacion.experimentos ADD CONSTRAINT experimentos_fk_3 FOREIGN KEY (particion_id) REFERENCES experimento.particiones (particion_id);
 ALTER TABLE evaluacion.experimentos ADD CONSTRAINT experimentos_fk_4 FOREIGN KEY (modelo_id) REFERENCES aprendizaje.modelos (modelo_id);
-ALTER TABLE evaluacion.experimentos ADD CONSTRAINT experimentos_fk_5 FOREIGN KEY (carga_id) REFERENCES control.cargas (carga_id);
-ALTER TABLE evaluacion.experimentos ADD CONSTRAINT experimentos_fk_6 FOREIGN KEY (artefacto_id) REFERENCES control.artefactos (artefacto_id);
+ALTER TABLE evaluacion.experimentos ADD CONSTRAINT experimentos_fk_5 FOREIGN KEY (seleccion_id) REFERENCES aprendizaje.seleccion (seleccion_id);
+ALTER TABLE evaluacion.experimentos ADD CONSTRAINT experimentos_fk_6 FOREIGN KEY (carga_id) REFERENCES control.cargas (carga_id);
+ALTER TABLE evaluacion.experimentos ADD CONSTRAINT experimentos_fk_7 FOREIGN KEY (artefacto_id) REFERENCES control.artefactos (artefacto_id);
 ALTER TABLE evaluacion.comparaciones ADD CONSTRAINT comparaciones_fk_1 FOREIGN KEY (experimento_id) REFERENCES evaluacion.experimentos (experimento_id);
 ALTER TABLE evaluacion.comparaciones ADD CONSTRAINT comparaciones_fk_2 FOREIGN KEY (escenario_id) REFERENCES experimento.escenarios (escenario_id);
 ALTER TABLE evaluacion.comparaciones ADD CONSTRAINT comparaciones_fk_3 FOREIGN KEY (run_id) REFERENCES simulacion.corridas (run_id);

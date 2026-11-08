@@ -4,6 +4,7 @@ El ``datos/`` sintético (``cargable``) tiene un caso, un protocolo, un escenari
 cuatro corridas de SUMO con sus métricas y una búsqueda con su etiqueta que usa esas corridas.
 """
 
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -14,13 +15,66 @@ import pytest
 from bd_tools import Loadable, copy_workspace, insert, rows_of, scalar
 from semaforo.app.bd_commands import regenerate, register_milestone, verify
 from semaforo.bd.carga.motor import LoadOptions, LoadReport, load_workspace
-from semaforo.bd.conexion import ADMIN, CARGA, BdError
+from semaforo.bd.conexion import ADMIN, CARGA, BdError, connect
 from semaforo.bd.respaldo import backup, restore
 from semaforo.bd.temporales import create_database, drop_database
+from semaforo.evaluacion.published_metrics import publish_run_metrics, read_run_metrics
+from semaforo.trazabilidad.fs import remove_tree
 
 pytestmark = [pytest.mark.bd, pytest.mark.sumo]
 
 PRELIMINARY = LoadOptions(preliminary=True)
+
+
+def test_search_run_rejects_metrics_from_another_protocol_even_with_a_valid_hash(
+    cargable: Loadable, base: str, tmp_path: Path
+) -> None:
+    workspace = copy_workspace(cargable.workspace, tmp_path / "datos")
+    original = next((workspace / "derivados" / "protocolos").rglob("*.json"))
+    second = json.loads(original.read_text(encoding="utf-8"))
+    second["protocol_id"] = "PROTOCOLO-AJENO"
+    (original.parent / "ajeno.json").write_text(json.dumps(second), encoding="utf-8")
+    run_id = cargable.runs[min(cargable.runs)]
+    folder = workspace / "derivados" / "metricas" / cargable.case_id / run_id
+    changed = read_run_metrics(folder).metrics.model_copy(update={"protocol_id": "PROTOCOLO-AJENO"})
+    remove_tree(folder)
+    publish_run_metrics(workspace, changed)
+    report = load_workspace(workspace, PRELIMINARY, database=base)
+    assert any(
+        unit.key == f"corrida:{run_id}"
+        and unit.status == "not_loadable"
+        and "protocolo" in str(unit.detail)
+        for unit in report.units
+    ), {
+        "run_id": run_id,
+        "runs": [(u.key, u.status, u.detail) for u in report.units if u.kind == "run"],
+    }
+
+
+def test_diagnostic_without_run_protocol_keeps_the_metrics_protocol(
+    cargable: Loadable, base: str, tmp_path: Path
+) -> None:
+    workspace = copy_workspace(cargable.workspace, tmp_path / "datos")
+    remove_tree(workspace / "derivados" / "referencias")
+    report = load_workspace(
+        workspace,
+        LoadOptions(
+            preliminary=True,
+            loose_runs=True,
+            kinds=frozenset({"case", "protocol", "scenario", "run"}),
+        ),
+        database=base,
+    )
+    assert report.counts["not_loadable"] == 0
+    assert report.counts["loaded"] == 7
+    rows = rows_of(
+        base,
+        "SELECT etapa, protocolo_id, protocolo_metricas_id "
+        "FROM simulacion.corridas "
+        "JOIN simulacion.resultados_corrida USING (run_id) ORDER BY run_id",
+        role=ADMIN,
+    )
+    assert rows == [("diagnostic", None, cargable.protocol_id)] * 4
 
 
 def _status(report: LoadReport) -> dict[str, list[str]]:
@@ -44,9 +98,17 @@ def test_qa32_everything_published_is_loaded_with_its_rows(cargable: Loadable, b
     assert count("simulacion.vehiculos") == 4 * cargable.vehicles_per_run
     assert count("simulacion.resultados_corrida WHERE artefacto_metricas_id IS NOT NULL") == 4
     assert count("simulacion.cola_por_acceso") > 0
+    types = rows_of(
+        base,
+        "SELECT pg_typeof(r.pasos_cola_s)::text, pg_typeof(r.pasos_en_ventana)::text, "
+        "pg_typeof(q.vehiculos_en_cola)::text FROM simulacion.resultados_corrida AS r "
+        "JOIN simulacion.cola_por_acceso AS q USING (run_id) LIMIT 1",
+        role=ADMIN,
+    )
+    assert types == [("double precision[]", "boolean[]", "integer[]")]
     # La vista muestra un paso por fila: cada valor de cada arreglo sale una vez.
     steps = scalar(
-        base, "SELECT sum(jsonb_array_length(vehiculos_en_cola)) FROM simulacion.cola_por_acceso"
+        base, "SELECT sum(cardinality(vehiculos_en_cola)) FROM simulacion.cola_por_acceso"
     )
     shown = scalar(base, "SELECT count(*) FROM vistas.cola_por_segundo", role=ADMIN)
     assert int(str(shown)) == int(str(steps)) > 0
@@ -77,7 +139,7 @@ def test_the_queue_of_an_access_has_one_value_per_step_or_it_is_refused(
     load_workspace(cargable.workspace, PRELIMINARY, database=base)
     run_id, steps = rows_of(
         base,
-        "SELECT run_id, jsonb_array_length(pasos_cola_s) FROM simulacion.resultados_corrida "
+        "SELECT run_id, cardinality(pasos_cola_s) FROM simulacion.resultados_corrida "
         "WHERE pasos_cola_s IS NOT NULL ORDER BY run_id LIMIT 1",
         role=ADMIN,
     )[0]
@@ -92,6 +154,30 @@ def test_the_queue_of_an_access_has_one_value_per_step_or_it_is_refused(
     with pytest.raises(psycopg.Error) as refused:
         insert(base, {"simulacion.cola_por_acceso": [short]})
     assert refused.value.sqlstate == "SM006"
+
+
+@pytest.mark.parametrize("bad", [-1, None])
+def test_native_queue_array_rejects_negative_or_null_value(
+    cargable: Loadable, base: str, bad: int | None
+) -> None:
+    load_workspace(cargable.workspace, PRELIMINARY, database=base)
+    run_id, steps, load_id = rows_of(
+        base,
+        "SELECT run_id, cardinality(pasos_cola_s), carga_id "
+        "FROM simulacion.resultados_corrida WHERE pasos_cola_s IS NOT NULL ORDER BY run_id LIMIT 1",
+        role=ADMIN,
+    )[0]
+    artifact = scalar(base, "SELECT artefacto_id FROM control.artefactos LIMIT 1", role=ADMIN)
+    values: list[int | None] = [0] * int(str(steps))
+    values[0] = bad
+    with connect(ADMIN, database=base) as connection:
+        with pytest.raises(psycopg.errors.CheckViolation):
+            connection.execute(
+                "INSERT INTO simulacion.cola_por_acceso "
+                "(run_id, acceso, vehiculos_en_cola, carga_id, artefacto_id) "
+                "VALUES (%s, %s, %s, %s, %s)",
+                (run_id, "ACCESO-PRUEBA", values, load_id, artifact),
+            )
 
 
 def test_qa32_loading_again_writes_nothing_and_keeps_the_content_hash(

@@ -1,8 +1,9 @@
 """Conexión con PostgreSQL por nombre de servicio (DEV31 F3; decisiones de despliegue de F0).
 
 El código nunca ve una contraseña: pide el servicio por nombre (``semaforo_admin``,
-``semaforo_carga`` o ``semaforo_lectura``) y ``libpq`` toma los datos de conexión del archivo de
-servicios del usuario de Windows y la contraseña de su ``pgpass.conf``. Los dos archivos viven en
+``semaforo_carga``, ``semaforo_lectura`` o ``semaforo_panel``) y ``libpq`` toma los datos de
+conexión del archivo de servicios del usuario de Windows y la contraseña de su ``pgpass.conf``.
+Los dos archivos viven en
 ``%APPDATA%\\postgresql`` y nunca entran al repositorio (QA34).
 """
 
@@ -22,6 +23,7 @@ __all__ = [
     "DATABASE",
     "HOST",
     "LECTURA",
+    "PANEL",
     "PORT",
     "ROLES",
     "BdError",
@@ -34,7 +36,8 @@ __all__ = [
 ADMIN = "semaforo_admin"
 CARGA = "semaforo_carga"
 LECTURA = "semaforo_lectura"
-ROLES = (ADMIN, CARGA, LECTURA)
+PANEL = "semaforo_panel"
+ROLES = (ADMIN, CARGA, LECTURA)  # solo estos tres los administra «bd iniciar»
 DATABASE = "semaforo"
 HOST = "localhost"
 PORT = 5432
@@ -88,7 +91,7 @@ def connect(role: str, *, database: str | None = None, autocommit: bool = False)
         BdError: DEPENDENCY_MISSING si PostgreSQL no responde, falta el servicio o la contraseña,
             o el usuario no puede entrar. El mensaje no incluye contraseñas.
     """
-    if role not in ROLES:
+    if role not in (*ROLES, PANEL):
         raise ValueError(f"usuario desconocido: {role}")
     options = {
         "service": role,

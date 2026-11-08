@@ -7,20 +7,22 @@ Cada prueba usa una base temporal nueva con el esquema (``base``). Las filas se 
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import psycopg
 import pytest
+from psycopg import sql
 
 from bd_tools import insert, rows_of, scalar
 from prepared_inputs import request_for
 from search_tools import protocol
 from semaforo.bd.carga.caso import case_unit, protocol_unit
 from semaforo.bd.carga.corridas import entorno_row
-from semaforo.bd.carga.modelo import Row, Unit
+from semaforo.bd.carga.modelo import CargaError, Row, Unit
 from semaforo.bd.carga.motor import artifact_rows
-from semaforo.bd.conexion import ADMIN, CARGA, LECTURA, connect
+from semaforo.bd.conexion import ADMIN, CARGA, LECTURA, PANEL, connect
+from semaforo.bd.ddl import PANEL_VIEWS
 from workspace_tools import build_workspace
 
 pytestmark = pytest.mark.bd
@@ -46,6 +48,7 @@ def _merge(*units: Unit) -> dict[str, list[Row]]:
             "sha256": HASH,
             "manifiesto_id": None,
             "estado": "intact",
+            "alcance": "global",
             "motivo": None,
             "registrado_en": MOMENT,
         }
@@ -198,15 +201,24 @@ def _sqlstate(action: Callable[[], object]) -> str | None:
 
 
 def _milestone(world: World, hito_id: str, kind: str, **objects: object) -> dict[str, list[Row]]:
-    names = ("protocolo_id", "particion_id", "modelo_id", "experimento_id")
+    names = (
+        "protocolo_id",
+        "particion_id",
+        "modelo_id",
+        "experimento_id",
+        "seleccion_id",
+        "huella_seleccion",
+    )
     values: dict[str, object] = {name: None for name in names}
+    if kind == "model_frozen":
+        values.update(seleccion_id="S1", huella_seleccion=HASH)
     values.update(objects)
     return {
         "control.hitos": [
             _row(
                 hito_id=hito_id,
                 tipo=kind,
-                registrado_en=MOMENT,
+                registrado_en=MOMENT + timedelta(minutes=int(hito_id[1]) + 1),
                 huella_objeto=HASH,
                 commit_codigo=None,
                 responsable="prueba",
@@ -271,6 +283,19 @@ def _model_rows(world: World) -> dict[str, list[Row]]:
                 huella_paquete=None,
             )
         ],
+        "aprendizaje.seleccion": [
+            _row(
+                seleccion_id="S1",
+                particion_id="P1",
+                protocolo_id=world.protocol_id,
+                huella_seleccion=HASH,
+                criterios=["factibilidad"],
+                candidatos=["M1"],
+                modelo_ganador_id="M1",
+                motivo="prueba",
+                decidido_en=MOMENT,
+            )
+        ],
         "evaluacion.experimentos": [
             _row(
                 experimento_id="X1",
@@ -278,6 +303,7 @@ def _model_rows(world: World) -> dict[str, list[Row]]:
                 protocolo_id=world.protocol_id,
                 particion_id="P1",
                 modelo_id="M1",
+                seleccion_id="S1",
                 alternativas=["model"],
                 creado_en=MOMENT,
                 huella_experimento=HASH,
@@ -322,6 +348,180 @@ def test_the_reader_does_not_see_a_closed_test_and_the_loader_sees_everything(
     assert hidden == [("ESC-TEST",)]
 
 
+def test_the_panel_reads_only_approved_views_and_sees_no_closed_test(world: World) -> None:
+    database = world.database
+    assert (
+        _sqlstate(lambda: rows_of(database, "SELECT run_id FROM simulacion.corridas", PANEL))
+        == "42501"
+    )
+    assert rows_of(database, "SELECT run_id FROM vistas.corridas_resumen ORDER BY 1", PANEL) == [
+        ("RUN-TRAIN",)
+    ]
+    assert (
+        _sqlstate(lambda: rows_of(database, "SELECT carga_id FROM vistas.estado_cargas", PANEL))
+        == "42501"
+    )
+
+
+def test_catalog_sweep_hides_test_marks_and_denies_panel_tables(world: World) -> None:
+    """P6/C3.2: cada tabla y vista se inspecciona, incluidas las futuras."""
+    database = world.database
+    hidden_file = "datos:prueba/ARCHIVO-PRUEBA-OCULTA.json"
+    hidden_plan = "e" * 64
+    hidden_duration = 7777.125
+    hidden_search = "BUSQUEDA-PRUEBA-OCULTA"
+    tramo = str(rows_of(database, "SELECT tramo_id FROM caso.tramos LIMIT 1", ADMIN)[0][0])
+    insert(
+        database,
+        {
+            "control.artefactos": [
+                {
+                    "artefacto_id": hidden_file,
+                    "raiz": "datos",
+                    "ruta_relativa": "prueba/ARCHIVO-PRUEBA-OCULTA.json",
+                    "tipo": "other",
+                    "tamano_bytes": 1,
+                    "sha256": HASH,
+                    "manifiesto_id": None,
+                    "estado": "intact",
+                    "alcance": "escenarios",
+                    "motivo": None,
+                    "registrado_en": MOMENT,
+                }
+            ],
+            "control.archivo_escenarios": [
+                {"artefacto_id": hidden_file, "escenario_id": world.test}
+            ],
+            "simulacion.planes": [
+                _row(
+                    plan_id=hidden_plan,
+                    caso_id=world.case_id,
+                    caso_version=world.case_version,
+                    duraciones_s={tramo: hidden_duration},
+                    ciclo_s=hidden_duration,
+                )
+            ],
+            "simulacion.plan_tramos": [
+                _row(
+                    plan_id=hidden_plan,
+                    tramo_id=tramo,
+                    duracion_s=hidden_duration,
+                    caso_id=world.case_id,
+                    caso_version=world.case_version,
+                )
+            ],
+            "simulacion.corridas": [_run(world, "RUN-PLAN-TEST", world.test, plan_id=hidden_plan)],
+            "simulacion.busquedas": [
+                _row(
+                    busqueda_id=hidden_search,
+                    escenario_id=world.test,
+                    caso_id=world.case_id,
+                    caso_version=world.case_version,
+                    protocolo_id=world.protocol_id,
+                    estado_protocolo="frozen",
+                    metodo="grid",
+                    version_busqueda="v",
+                    version_reglas="v",
+                    version_identidad=None,
+                    version_bitacora=None,
+                    semilla=1,
+                    presupuesto=1,
+                    cuenta_presupuesto="diagnostic",
+                    presupuesto_usado=0,
+                    limite_intentos=1,
+                    intentos=0,
+                    duplicados=0,
+                    inviables=0,
+                    inviables_por_regla={},
+                    cuadricula_factible=0,
+                    limite_cuadricula=1,
+                    tamano_espacio=1,
+                    agotado=False,
+                    estado_plan_vigente="absent",
+                    estado_webster=None,
+                    finalistas=0,
+                    epsilon_empate_s=0.0,
+                    semillas_busqueda=[],
+                    semillas_finalistas=[],
+                    opciones_sumo={},
+                    huella_candidatos=HASH,
+                    regla_seleccion="diagnostic",
+                    estado_seleccion="no_reference",
+                    motivo_sin_referencia="no_candidates",
+                    cobertura={},
+                    simulaciones=0,
+                    interrumpida=False,
+                )
+            ],
+        },
+    )
+    with connect(ADMIN, database=database) as admin:
+        relations = [
+            (str(schema), str(name), str(kind))
+            for schema, name, kind in admin.execute(
+                "SELECT n.nspname, c.relname, c.relkind FROM pg_class AS c "
+                "JOIN pg_namespace AS n ON n.oid = c.relnamespace "
+                "WHERE n.nspname IN ('control', 'caso', 'experimento', 'simulacion', "
+                "'referencias', 'aprendizaje', 'estimacion', 'evaluacion', 'vistas') "
+                "AND c.relkind IN ('r', 'p', 'v') ORDER BY 1, 2"
+            )
+        ]
+    assert len([rel for rel in relations if rel[2] in {"r", "p"}]) == 57
+    assert len([rel for rel in relations if rel[2] == "v"]) >= len(PANEL_VIEWS)
+    marks = (
+        world.test,
+        "RUN-TEST",
+        "RUN-PLAN-TEST",
+        hidden_file,
+        hidden_plan,
+        str(hidden_duration),
+        hidden_search,
+    )
+    allowed = {
+        ("experimento.asignaciones", "escenario_id"),
+        ("control.escenarios_cegados", "escenario_id"),
+    }
+    for role in (LECTURA, PANEL):
+        with connect(role, database=database, autocommit=True) as connection:
+            for schema, name, _kind in relations:
+                full = f"{schema}.{name}"
+                query = sql.SQL("SELECT * FROM {}").format(sql.Identifier(schema, name))
+                permitted = role == LECTURA or (schema == "vistas" and name in PANEL_VIEWS)
+                if not permitted:
+                    with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                        connection.execute(query)
+                    continue
+                cursor = connection.execute(query)
+                columns = [column.name for column in cursor.description or []]
+                for row in cursor:
+                    for column, value in zip(columns, row, strict=True):
+                        if (full, column) in allowed:
+                            continue
+                        assert not any(mark in str(value) for mark in marks), (
+                            role,
+                            full,
+                            column,
+                            value,
+                        )
+    for code, kind, objects in (
+        ("H1", "protocol_frozen", {"protocolo_id": world.protocol_id}),
+        ("H2", "split_frozen", {"particion_id": "P1"}),
+        ("H3", "model_frozen", {"modelo_id": "M1"}),
+        ("H4", "test_opened", {"experimento_id": "X1", "particion_id": "P1"}),
+    ):
+        if code == "H1":
+            insert(database, _model_rows(world))
+        insert(database, _milestone(world, code, kind, **objects))
+    assert (hidden_file, world.test) in rows_of(
+        database, "SELECT artefacto_id, escenario_id FROM control.archivo_escenarios"
+    )
+    assert ("RUN-PLAN-TEST",) in rows_of(
+        database, "SELECT run_id FROM vistas.corridas_resumen", PANEL
+    )
+    assert (hidden_search,) in rows_of(database, "SELECT busqueda_id FROM simulacion.busquedas")
+    assert (hidden_duration,) in rows_of(database, "SELECT duracion_s FROM simulacion.plan_tramos")
+
+
 def test_the_test_opens_only_in_order_and_then_appears_without_changing_any_row(
     world: World,
 ) -> None:
@@ -344,6 +544,266 @@ def test_the_test_opens_only_in_order_and_then_appears_without_changing_any_row(
     assert _visible(database)["escenarios"] == ["ESC-TEST", "ESC-TRAIN"]
     assert _visible(database)["eventos"] == ["RUN-TEST", "RUN-TRAIN"]
     assert scalar(database, "SELECT count(*) FROM simulacion.corridas", role=ADMIN) == before
+
+
+def test_a_mixed_file_stays_hidden_until_every_link_is_visible(world: World) -> None:
+    database = world.database
+    files: list[dict[str, object]] = []
+    links: list[dict[str, object]] = []
+    for name, scope, scenarios in (
+        ("solo-desarrollo", "escenarios", [world.train]),
+        ("mixto", "escenarios", [world.train, world.test]),
+        ("sin-enlaces", "escenarios", []),
+        ("desconocido", "desconocido", []),
+    ):
+        identifier = f"datos:prueba/{name}.json"
+        files.append(
+            {
+                "artefacto_id": identifier,
+                "raiz": "datos",
+                "ruta_relativa": f"prueba/{name}.json",
+                "tipo": "other",
+                "tamano_bytes": 1,
+                "sha256": HASH,
+                "manifiesto_id": None,
+                "estado": "intact",
+                "alcance": scope,
+                "motivo": None,
+                "registrado_en": MOMENT,
+            }
+        )
+        links.extend(
+            {"artefacto_id": identifier, "escenario_id": scenario} for scenario in scenarios
+        )
+    insert(database, {"control.artefactos": files, "control.archivo_escenarios": links})
+    query = (
+        "SELECT ruta_relativa FROM control.artefactos "
+        "WHERE ruta_relativa LIKE 'prueba/%' ORDER BY 1"
+    )
+    links_query = (
+        "SELECT artefacto_id, escenario_id FROM control.archivo_escenarios "
+        "WHERE artefacto_id LIKE 'datos:prueba/%' ORDER BY 1, 2"
+    )
+    assert rows_of(database, query) == [("prueba/origen.json",), ("prueba/solo-desarrollo.json",)]
+    assert rows_of(database, links_query) == [("datos:prueba/solo-desarrollo.json", "ESC-TRAIN")]
+    insert(database, _model_rows(world))
+    for code, kind, objects in (
+        ("H1", "protocol_frozen", {"protocolo_id": world.protocol_id}),
+        ("H2", "split_frozen", {"particion_id": "P1"}),
+        ("H3", "model_frozen", {"modelo_id": "M1"}),
+        ("H4", "test_opened", {"experimento_id": "X1", "particion_id": "P1"}),
+    ):
+        insert(database, _milestone(world, code, kind, **objects))
+    assert rows_of(database, query) == [
+        ("prueba/mixto.json",),
+        ("prueba/origen.json",),
+        ("prueba/solo-desarrollo.json",),
+    ]
+    assert rows_of(database, links_query) == [
+        ("datos:prueba/mixto.json", "ESC-TEST"),
+        ("datos:prueba/mixto.json", "ESC-TRAIN"),
+        ("datos:prueba/solo-desarrollo.json", "ESC-TRAIN"),
+    ]
+
+
+def test_a_plan_and_a_replica_need_a_visible_use_on_both_sides(world: World) -> None:
+    database = world.database
+    ids = {"train": "c" * 64, "test": "d" * 64}
+    tramo = str(rows_of(database, "SELECT tramo_id FROM caso.tramos LIMIT 1", ADMIN)[0][0])
+    plans = [
+        _row(
+            plan_id=identifier,
+            caso_id=world.case_id,
+            caso_version=world.case_version,
+            duraciones_s={tramo: 10.0},
+            ciclo_s=10.0,
+        )
+        for identifier in ids.values()
+    ]
+    runs = [
+        _run(world, f"RUN-PLAN-{zone.upper()}", getattr(world, zone), plan_id=identifier)
+        for zone, identifier in ids.items()
+    ]
+    tramos = [
+        _row(
+            plan_id=identifier,
+            tramo_id=tramo,
+            duracion_s=10.0,
+            caso_id=world.case_id,
+            caso_version=world.case_version,
+        )
+        for identifier in ids.values()
+    ]
+    replica = _row(
+        replica_id="REPLICA-MIXTA",
+        run_id_a=runs[0]["run_id"],
+        run_id_b=runs[1]["run_id"],
+        creada_en=MOMENT,
+        semilla_a=None,
+        semilla_b=None,
+        entradas_iguales=True,
+        diferencias_entrada={},
+        tolerancia={},
+        archivos={},
+        veredicto="equivalent",
+        motivos=[],
+    )
+    insert(
+        database,
+        {
+            "simulacion.planes": plans,
+            "simulacion.plan_tramos": tramos,
+            "simulacion.corridas": runs,
+            "control.replicas": [replica],
+        },
+    )
+    assert rows_of(database, "SELECT plan_id FROM simulacion.planes ORDER BY 1") == [
+        (ids["train"],)
+    ]
+    assert rows_of(database, "SELECT plan_id FROM simulacion.plan_tramos") == [(ids["train"],)]
+    assert rows_of(database, "SELECT replica_id FROM control.replicas") == []
+    assert rows_of(
+        database,
+        "SELECT run_id FROM vistas.corridas_resumen WHERE run_id LIKE 'RUN-PLAN-%'",
+        PANEL,
+    ) == [("RUN-PLAN-TRAIN",)]
+
+
+def test_a_difference_needs_both_comparisons_visible(world: World) -> None:
+    database = world.database
+    insert(database, _model_rows(world))
+    comparisons = [
+        _row(
+            comparacion_id=f"COMP-{zone.upper()}",
+            experimento_id="X1",
+            escenario_id=getattr(world, zone),
+            alternativa="model",
+            semilla=7,
+            aplicable=True,
+            motivo_no_aplicable=None,
+            run_id=None,
+            plan_id=None,
+            request_id=None,
+            etiqueta_id=None,
+            comparador_id=None,
+            rutas_sha256=None,
+            red_sha256=None,
+        )
+        for zone in ("train", "test")
+    ]
+    difference = _row(
+        diferencia_id="DIF-MIXTA",
+        experimento_id="X1",
+        comparacion_a_id="COMP-TRAIN",
+        comparacion_b_id="COMP-TEST",
+        metrica="delay",
+        alcance="total",
+        valor_a=1.0,
+        valor_b=2.0,
+        diferencia=-1.0,
+        unidad="s",
+        censurada=False,
+        veredicto="a_lower",
+        tolerancia=0.0,
+    )
+    insert(
+        database,
+        {
+            "evaluacion.comparaciones": comparisons,
+            "evaluacion.diferencias": [difference],
+        },
+    )
+    assert rows_of(database, "SELECT comparacion_id FROM evaluacion.comparaciones") == [
+        ("COMP-TRAIN",)
+    ]
+    assert rows_of(database, "SELECT diferencia_id FROM evaluacion.diferencias") == []
+    for code, kind, objects in (
+        ("H1", "protocol_frozen", {"protocolo_id": world.protocol_id}),
+        ("H2", "split_frozen", {"particion_id": "P1"}),
+        ("H3", "model_frozen", {"modelo_id": "M1"}),
+        ("H4", "test_opened", {"experimento_id": "X1", "particion_id": "P1"}),
+    ):
+        insert(database, _milestone(world, code, kind, **objects))
+    assert rows_of(database, "SELECT diferencia_id FROM evaluacion.diferencias") == [("DIF-MIXTA",)]
+
+
+def test_a_model_freeze_fixes_the_selection_and_rejects_another_hash(world: World) -> None:
+    database = world.database
+    insert(database, _model_rows(world))
+    for code, kind, objects in (
+        ("H1", "protocol_frozen", {"protocolo_id": world.protocol_id}),
+        ("H2", "split_frozen", {"particion_id": "P1"}),
+    ):
+        insert(database, _milestone(world, code, kind, **objects))
+    wrong = _milestone(world, "H3", "model_frozen", modelo_id="M1", huella_seleccion="b" * 64)
+    assert _sqlstate(lambda: insert(database, wrong)) == "SM001"
+    insert(database, _milestone(world, "H3", "model_frozen", modelo_id="M1"))
+    selection = _model_rows(world)["aprendizaje.seleccion"][0]
+    duplicate = {**selection, "seleccion_id": "S2"}
+    assert _sqlstate(lambda: insert(database, {"aprendizaje.seleccion": [duplicate]})) == "23505"
+
+
+def test_a_selection_without_protocol_or_decided_after_freeze_is_rejected(world: World) -> None:
+    database = world.database
+    rows = _model_rows(world)
+    rows["aprendizaje.seleccion"][0]["protocolo_id"] = None
+    with pytest.raises(CargaError):
+        insert(database, rows)
+    rows = _model_rows(world)
+    rows["aprendizaje.seleccion"][0]["decidido_en"] = MOMENT + timedelta(days=1)
+    insert(database, rows)
+    insert(database, _milestone(world, "H1", "protocol_frozen", protocolo_id=world.protocol_id))
+    insert(database, _milestone(world, "H2", "split_frozen", particion_id="P1"))
+    assert (
+        _sqlstate(lambda: insert(database, _milestone(world, "H3", "model_frozen", modelo_id="M1")))
+        == "SM001"
+    )
+
+
+def test_opening_rejects_a_selection_other_than_the_frozen_one(world: World) -> None:
+    database = world.database
+    rows = _model_rows(world)
+    rows["aprendizaje.modelos"].append({**rows["aprendizaje.modelos"][0], "modelo_id": "M2"})
+    rows["aprendizaje.seleccion"].append(
+        {
+            **rows["aprendizaje.seleccion"][0],
+            "seleccion_id": "S2",
+            "modelo_ganador_id": "M2",
+            "huella_seleccion": "b" * 64,
+        }
+    )
+    rows["evaluacion.experimentos"][0]["seleccion_id"] = "S2"
+    insert(database, rows)
+    for code, kind, objects in (
+        ("H1", "protocol_frozen", {"protocolo_id": world.protocol_id}),
+        ("H2", "split_frozen", {"particion_id": "P1"}),
+        ("H3", "model_frozen", {"modelo_id": "M1"}),
+    ):
+        insert(database, _milestone(world, code, kind, **objects))
+    opening = _milestone(world, "H4", "test_opened", experimento_id="X1", particion_id="P1")
+    assert _sqlstate(lambda: insert(database, opening)) == "SM001"
+
+
+def test_an_access_without_cohort_cannot_mix_a_delay_value(world: World) -> None:
+    database = world.database
+    no_cohort = _row(
+        run_id="RUN-TRAIN",
+        acceso="SIN-COHORTE",
+        con_cohorte=False,
+        estado_cola="complete",
+        ticks_esperados=1,
+        ticks_observados=1,
+        cobertura_cola=1.0,
+        vehiculo_ticks=2,
+        cola_media_veh=2.0,
+        cola_maxima_veh=2,
+    )
+    insert(database, {"simulacion.resultados_acceso": [no_cohort]})
+    assert rows_of(
+        database, "SELECT con_cohorte, estado_cola, suma_demora_s FROM simulacion.resultados_acceso"
+    ) == [(False, "complete", None)]
+    bad = {**no_cohort, "acceso": "MEZCLA", "suma_demora_s": 4.0}
+    assert _sqlstate(lambda: insert(database, {"simulacion.resultados_acceso": [bad]})) == "23514"
 
 
 def test_a_protocol_freeze_needs_a_protocol_published_as_frozen(
