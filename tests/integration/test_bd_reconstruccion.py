@@ -360,3 +360,24 @@ def test_a_failed_P9_rollback_reports_the_uncertain_state(
     assert rebuild.current in failure.value.message
     assert rebuild.candidate in failure.value.message
     assert rebuild.previous in failure.value.message
+
+
+@pytest.mark.parametrize("folder", ["sin-git", "no-existe"])
+def test_acu17_a_rebuild_without_the_git_repository_stops_at_the_first_gate(
+    rebuild: Rebuild, tmp_path: Path, folder: str
+) -> None:
+    """Sin la carpeta del repositorio no hay referencia de git ni actas: no se prepara nada."""
+    repository = tmp_path / folder
+    if folder == "sin-git":
+        repository.mkdir()
+    prepared = prepare_rebuild(
+        rebuild.workspace,
+        repository,
+        backups=rebuild.backups,
+        database=rebuild.current,
+        candidate=rebuild.candidate,
+    )
+    assert (prepared.status, prepared.stopped_at) == ("detenida", "P0")
+    assert prepared.steps[-1].resultado == "falla"
+    assert not _exists(rebuild.candidate)  # no se creó ninguna candidata
+    assert _has_marker(rebuild.current)  # y la vigente sigue igual

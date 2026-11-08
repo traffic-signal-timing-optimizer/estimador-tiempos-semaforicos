@@ -5,7 +5,7 @@ Cada prueba usa una base temporal nueva con el esquema (``base``). Las filas se 
 """
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -13,19 +13,24 @@ from pathlib import Path
 import psycopg
 import pytest
 from psycopg import sql
+from psycopg.types.json import Jsonb
 
 from bd_tools import insert, rows_of, scalar
 from prepared_inputs import request_for
 from search_tools import protocol
+from semaforo.bd.barrido import sweep, sweep_exit_code
 from semaforo.bd.carga.caso import case_unit, protocol_unit
 from semaforo.bd.carga.corridas import entorno_row
 from semaforo.bd.carga.modelo import CargaError, Row, Unit
 from semaforo.bd.carga.motor import artifact_rows
 from semaforo.bd.conexion import ADMIN, CARGA, LECTURA, PANEL, connect
 from semaforo.bd.ddl import PANEL_VIEWS
+from semaforo.bd.diseno import load
 from workspace_tools import build_workspace
 
 pytestmark = pytest.mark.bd
+
+SCHEMA = Path(__file__).resolve().parents[2] / "docs" / "bd" / "esquema.toml"
 
 MOMENT = datetime(2026, 11, 6, 12, 0, tzinfo=UTC)
 SOURCE = "datos:prueba/origen.json"
@@ -466,7 +471,10 @@ def test_catalog_sweep_hides_test_marks_and_denies_panel_tables(world: World) ->
                 "AND c.relkind IN ('r', 'p', 'v') ORDER BY 1, 2"
             )
         ]
-    assert len([rel for rel in relations if rel[2] in {"r", "p"}]) == 57
+    # Las tablas del diseño entran solas al barrido: la lista sale del diseño, no está escrita aquí.
+    designed = {f"{table.esquema}.{table.nombre}" for table in load(SCHEMA).tablas}
+    swept = {f"{schema}.{name}" for schema, name, kind in relations if kind in {"r", "p"}}
+    assert swept == designed
     assert len([rel for rel in relations if rel[2] == "v"]) >= len(PANEL_VIEWS)
     marks = (
         world.test,
@@ -968,3 +976,321 @@ def test_a_text_is_stored_as_text_never_as_sql(world: World) -> None:
     stored = scalar(world.database, "SELECT texto FROM simulacion.eventos WHERE orden = 2")
     assert stored == hostile
     assert scalar(world.database, "SELECT count(*) FROM caso.casos") == 1
+
+
+# --- C3.1: escenarios de la auditoría que no tenían prueba propia ------------------------------
+
+
+def _message(action: Callable[[], object]) -> str:
+    """El texto del error que lanza la base (vacío si no falla)."""
+    try:
+        action()
+    except psycopg.Error as error:
+        return str(error)
+    return ""
+
+
+def _other_partition_rows(world: World, *, selection_partition: str) -> dict[str, list[Row]]:
+    """Una segunda partición P2 con su modelo M2, su selección S2 y un experimento X2 sobre P1."""
+    first = _model_rows(world)
+    return {
+        "experimento.particiones": [
+            _row(particion_id="P2", politica="prueba", semilla=2, congelada=True)
+        ],
+        "aprendizaje.conjuntos": [
+            {
+                **first["aprendizaje.conjuntos"][0],
+                "conjunto_id": "C2",
+                "particion_id": "P2",
+                "huella_conjunto": "c" * 64,
+            }
+        ],
+        "aprendizaje.entrenamientos": [
+            {
+                **first["aprendizaje.entrenamientos"][0],
+                "entrenamiento_id": "E2",
+                "conjunto_id": "C2",
+            }
+        ],
+        "aprendizaje.modelos": [
+            {
+                **first["aprendizaje.modelos"][0],
+                "modelo_id": "M2",
+                "particion_id": "P2",
+                "conjunto_id": "C2",
+                "entrenamiento_id": "E2",
+            }
+        ],
+        "aprendizaje.seleccion": [
+            {
+                **first["aprendizaje.seleccion"][0],
+                "seleccion_id": "S2",
+                "particion_id": selection_partition,
+                "huella_seleccion": "c" * 64,
+                "candidatos": ["M2"],
+                "modelo_ganador_id": "M2",
+            }
+        ],
+        "evaluacion.experimentos": [
+            {
+                **first["evaluacion.experimentos"][0],
+                "experimento_id": "X2",
+                "modelo_id": "M2",
+                "seleccion_id": "S2",
+                "particion_id": "P1",
+                "huella_experimento": "d" * 64,
+            }
+        ],
+    }
+
+
+def _freeze(world: World, *steps: tuple[str, str, dict[str, object]]) -> None:
+    for code, kind, objects in steps:
+        insert(world.database, _milestone(world, code, kind, **objects))
+
+
+def test_b03_a_model_cannot_be_frozen_with_a_selection_of_another_partition(world: World) -> None:
+    insert(world.database, _other_partition_rows(world, selection_partition="P1"))
+    _freeze(
+        world,
+        ("H1", "protocol_frozen", {"protocolo_id": world.protocol_id}),
+        ("H2", "split_frozen", {"particion_id": "P2"}),
+    )
+    freeze = _milestone(
+        world, "H3", "model_frozen", modelo_id="M2", seleccion_id="S2", huella_seleccion="c" * 64
+    )
+    refusal = _message(lambda: insert(world.database, freeze))
+    assert "no coincide con la selección fijada" in refusal
+    assert (
+        scalar(world.database, "SELECT count(*) FROM control.hitos WHERE tipo = 'model_frozen'")
+        == 0
+    )
+
+
+def test_b03_the_test_does_not_open_with_a_model_frozen_for_another_partition(
+    world: World,
+) -> None:
+    insert(world.database, _other_partition_rows(world, selection_partition="P2"))
+    _freeze(
+        world,
+        ("H1", "protocol_frozen", {"protocolo_id": world.protocol_id}),
+        ("H2", "split_frozen", {"particion_id": "P1"}),
+        ("H3", "split_frozen", {"particion_id": "P2"}),
+        (
+            "H4",
+            "model_frozen",
+            {"modelo_id": "M2", "seleccion_id": "S2", "huella_seleccion": "c" * 64},
+        ),
+    )
+    opening = _milestone(world, "H5", "test_opened", experimento_id="X2", particion_id="P1")
+    refusal = _message(lambda: insert(world.database, opening))
+    assert "solo se abre con su protocolo, su partición y su modelo" in refusal
+    assert (
+        scalar(world.database, "SELECT count(*) FROM control.hitos WHERE tipo = 'test_opened'") == 0
+    )
+
+
+def test_b03_the_test_does_not_open_with_a_partition_that_is_not_the_experiments(
+    world: World,
+) -> None:
+    insert(world.database, _model_rows(world))
+    insert(
+        world.database,
+        {
+            "experimento.particiones": [
+                _row(particion_id="P2", politica="prueba", semilla=2, congelada=True)
+            ]
+        },
+    )
+    _freeze(
+        world,
+        ("H1", "protocol_frozen", {"protocolo_id": world.protocol_id}),
+        ("H2", "split_frozen", {"particion_id": "P1"}),
+        ("H3", "model_frozen", {"modelo_id": "M1"}),
+    )
+    opening = _milestone(world, "H4", "test_opened", experimento_id="X1", particion_id="P2")
+    refusal = _message(lambda: insert(world.database, opening))
+    assert "no es la del experimento" in refusal
+
+
+# --- B09: la cola se valida en la base, no solo en el código que la escribe --------------------
+
+
+def _steps_result(run_id: str, steps: Sequence[float | None]) -> dict[str, list[Row]]:
+    """Un resultado de corrida mínimo cuya serie de pasos es ``steps``."""
+    return {
+        "simulacion.resultados_corrida": [
+            _row(
+                run_id=run_id,
+                modo="base",
+                fin_limite_s=10.0,
+                vehiculos_cargados=0,
+                vehiculos_insertados=0,
+                vehiculos_en_red=0,
+                vehiculos_esperando=0,
+                viajes_terminados=0,
+                viajes_sin_terminar=0,
+                teletransportes_total=0,
+                teletransportes_atasco=0,
+                teletransportes_cruce=0,
+                teletransportes_carril=0,
+                choques=0,
+                avisos_sumo=0,
+                demanda_insatisfecha=False,
+                hallazgos=[],
+                pasos_cola_s=steps,
+                pasos_en_ventana=[True] * len(steps),
+            )
+        ]
+    }
+
+
+def _raw_insert(world: World, table: str, row: Row) -> None:
+    """Escribe una fila directamente como dueño, sin pasar por las validaciones del cargador."""
+    values: dict[str, object] = {**row, "carga_id": "prueba"}
+    for column, value in values.items():
+        if isinstance(value, dict | list) and column == "hallazgos":
+            values[column] = Jsonb(value)
+    schema, name = table.split(".")
+    statement = sql.SQL("INSERT INTO {} ({}) VALUES ({})").format(
+        sql.Identifier(schema, name),
+        sql.SQL(", ").join(sql.Identifier(column) for column in values),
+        sql.SQL(", ").join(sql.Placeholder() for _ in values),
+    )
+    with connect(ADMIN, database=world.database) as connection:
+        connection.execute(statement, list(values.values()))
+
+
+STEP_CASES = [
+    pytest.param([-1.0, 0.0, 1.0], id="negativo"),
+    pytest.param([0.0, float("nan"), 2.0], id="nan"),
+    pytest.param([0.0, float("inf"), 2.0], id="infinito"),
+    pytest.param([0.0, None, 2.0], id="nulo"),
+]
+
+
+@pytest.mark.parametrize("steps", STEP_CASES)
+def test_b09_the_loader_refuses_bad_step_times_before_they_reach_the_base(
+    world: World, steps: list[float | None]
+) -> None:
+    with pytest.raises(CargaError, match="valores inválidos"):
+        insert(world.database, _steps_result("RUN-TRAIN", steps))
+    assert scalar(world.database, "SELECT count(*) FROM simulacion.resultados_corrida") == 0
+
+
+@pytest.mark.parametrize("steps", STEP_CASES)
+def test_b09_the_base_refuses_bad_step_times_even_if_the_loader_were_skipped(
+    world: World, steps: list[float | None]
+) -> None:
+    row = _steps_result("RUN-TRAIN", steps)["simulacion.resultados_corrida"][0]
+    assert _sqlstate(lambda: _raw_insert(world, "simulacion.resultados_corrida", row)) == "23514"
+    assert scalar(world.database, "SELECT count(*) FROM simulacion.resultados_corrida") == 0
+
+
+def _queue_insert(world: World, values: list[object]) -> None:
+    _raw_insert(
+        world,
+        "simulacion.cola_por_acceso",
+        {
+            "run_id": "RUN-TRAIN",
+            "acceso": "ACCESO-PRUEBA",
+            "vehiculos_en_cola": values,
+            "artefacto_id": SOURCE,
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    "steps", [[0.0, 2.0, 1.0], [0.0, 1.0, 1.0]], ids=["desordenados", "repetidos"]
+)
+def test_b09_the_queue_of_an_access_needs_strictly_ordered_steps(
+    world: World, steps: list[float]
+) -> None:
+    insert(world.database, _steps_result("RUN-TRAIN", steps))
+    # Los pasos de la corrida no están en orden estricto: ninguna cola de esa corrida entra.
+    assert _sqlstate(lambda: _queue_insert(world, [0, 0, 0])) == "SM006"
+    assert scalar(world.database, "SELECT count(*) FROM simulacion.cola_por_acceso") == 0
+
+
+def test_b09_the_queue_of_an_access_needs_one_window_flag_per_step(world: World) -> None:
+    rows = _steps_result("RUN-TRAIN", [0.0, 1.0, 2.0])
+    rows["simulacion.resultados_corrida"][0]["pasos_en_ventana"] = [True, True]  # falta una
+    insert(world.database, rows)
+    assert _sqlstate(lambda: _queue_insert(world, [0, 0, 0])) == "SM006"
+    assert scalar(world.database, "SELECT count(*) FROM simulacion.cola_por_acceso") == 0
+
+
+def test_b09_the_queue_of_an_access_is_numbers_only(world: World) -> None:
+    insert(world.database, _steps_result("RUN-TRAIN", [0.0, 1.0, 2.0]))
+    # Un texto en lugar de un número no entra por su tipo, aunque los pasos sean válidos.
+    assert _sqlstate(lambda: _queue_insert(world, ["a", "b", "c"])) in {"42804", "22P02"}
+    assert scalar(world.database, "SELECT count(*) FROM simulacion.cola_por_acceso") == 0
+    # Con el cargador por delante, un texto o un negativo ni siquiera llega a la base.
+    for bad in (["a", "b", "c"], [0, -1, 0]):
+        row: Row = {
+            "run_id": "RUN-TRAIN",
+            "acceso": "ACCESO-PRUEBA",
+            "vehiculos_en_cola": bad,
+            "artefacto_id": SOURCE,
+        }
+        with pytest.raises(CargaError, match="valores inválidos"):
+            insert(world.database, {"simulacion.cola_por_acceso": [row]})
+
+
+# --- C3.2 y C3.5: el barrido de cegado de una base real -----------------------------------------
+
+
+def _admin(world: World, *statements: str) -> None:
+    with connect(ADMIN, database=world.database, autocommit=True) as connection:
+        for statement in statements:
+            connection.execute(statement.encode())
+
+
+def test_c32_the_sweep_of_a_sound_base_finds_nothing_out_of_place(world: World) -> None:
+    report = sweep(world.database)
+    assert (report.status, sweep_exit_code(report)) == ("ok", 0)
+    assert (report.hidden_scenarios, report.marks) == (1, 2)  # ESC-TEST y su corrida RUN-TEST
+    reader, panel = report.roles
+    assert (reader.role, panel.role) == ("semaforo_lectura", "semaforo_panel")
+    assert reader.readable == report.relations and reader.denied == 0
+    assert panel.readable == len(PANEL_VIEWS)
+    assert panel.denied == report.relations - len(PANEL_VIEWS)
+    assert not (reader.leaks or panel.leaks or reader.unexpected_reads or panel.unexpected_reads)
+
+
+def test_c32_the_sweep_finds_a_policy_that_lets_a_closed_test_through(world: World) -> None:
+    _admin(world, "ALTER POLICY lectura_cegada ON simulacion.corridas USING (true)")
+    report = sweep(world.database)
+    assert (report.status, sweep_exit_code(report)) == ("falla", 5)
+    reader = report.roles[0]
+    assert [leak.relation for leak in reader.leaks if leak.relation == "simulacion.corridas"] == [
+        "simulacion.corridas"
+    ]
+
+
+def test_c32_the_sweep_finds_a_permission_that_is_too_wide_or_too_narrow(world: World) -> None:
+    # PostgreSQL niega primero por el esquema: el panel necesita USAGE además de SELECT.
+    _admin(
+        world,
+        "GRANT USAGE ON SCHEMA control TO semaforo_panel",
+        "GRANT SELECT ON control.cargas TO semaforo_panel",
+    )
+    report = sweep(world.database)
+    assert report.status == "falla"
+    assert "control.cargas" in report.roles[1].unexpected_reads
+    _admin(
+        world,
+        "REVOKE SELECT ON control.cargas FROM semaforo_panel",
+        "REVOKE USAGE ON SCHEMA control FROM semaforo_panel",
+    )
+    assert sweep(world.database).status == "ok"
+    _admin(world, "REVOKE SELECT ON control.cargas FROM semaforo_lectura")
+    narrow = sweep(world.database)
+    assert narrow.status == "falla"
+    assert "control.cargas" in narrow.roles[0].unexpected_denials
+
+
+def test_c32_without_a_closed_test_the_sweep_only_checks_the_permissions(base: str) -> None:
+    report = sweep(base)
+    assert (report.status, report.hidden_scenarios, report.marks) == ("ok", 0, 0)
+    assert report.note is not None and "No hay escenarios cegados" in report.note

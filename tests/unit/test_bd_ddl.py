@@ -129,3 +129,30 @@ def test_the_schema_version_changes_with_any_of_its_files(
     monkeypatch.setattr("semaforo.bd.esquema.schema_sql", lambda: changed)
     assert schema_version() != before
     assert re.fullmatch(r"sql-[0-9a-f]{16}", before)
+
+
+def test_n2_a_table_that_points_to_a_blinded_one_needs_its_own_blinding_or_a_written_reason(
+    design: Design,
+) -> None:
+    approved = {t.nombre for t in design.tablas}
+    # La procedencia (artefacto_id) es una excepción escrita en [comunes]: no cuenta como relación.
+    justified = [
+        table
+        for table in design.tablas
+        if table.visible_porque
+        and any(
+            not key.comun
+            and (target := design.table(key.referencia)) is not None
+            and target.cegado != "no"
+            for key in table.claves_foraneas
+        )
+    ]
+    assert justified  # hoy hay tablas con la razón escrita; si no hubiera, la regla no se ejerce
+    for table in justified:
+        bare = dataclasses.replace(table, visible_porque=None)
+        tables = tuple(bare if other.full == table.full else other for other in design.tablas)
+        problems = verify(dataclasses.replace(design, tablas=tables), approved)
+        assert any(
+            table.full in problem and "declare cegado o visible_porque" in problem
+            for problem in problems
+        ), table.full

@@ -50,6 +50,7 @@ __all__ = [
     "backup",
     "ficha_de_archivo",
     "ficha_path",
+    "latest_backup",
     "pg_tool",
     "read_ficha",
     "restore",
@@ -141,6 +142,16 @@ def _run(command: list[str], what: str) -> str:
             what,
         )
     return result.stdout
+
+
+def latest_backup(folder: Path, version: str) -> Path | None:
+    """El respaldo más reciente de ``version`` en ``folder/<versión>/``, o ``None`` si no hay.
+
+    Los respaldos se nombran con su fecha (``AAAAMMDDThhmmssZ.dump``), así que el último por nombre
+    es el más reciente. No se elige un respaldo de otra versión del esquema.
+    """
+    found = sorted((folder / version).glob("*.dump")) if (folder / version).is_dir() else []
+    return found[-1] if found else None
 
 
 def ficha_path(dump: Path) -> Path:

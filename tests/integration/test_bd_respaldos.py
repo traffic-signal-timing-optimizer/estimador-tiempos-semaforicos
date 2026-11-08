@@ -27,15 +27,18 @@ def _content_hash(database: str) -> str:
         return content_hash(connection, Catalog.load(connection))[0]
 
 
-def _record_completed_load(database: str) -> str:
-    """Una carga completa que guardó la huella de contenido de la base tal como está."""
+def _record_completed_load(database: str, version: str | None = None) -> str:
+    """Una carga completa que guardó la huella de contenido de la base tal como está.
+
+    ``version`` es la versión del esquema que dice la carga (por defecto, la instalada).
+    """
     with connect(ADMIN, database=database) as connection:
         digest = content_hash(connection, Catalog.load(connection))[0]
         connection.execute(
             "INSERT INTO control.cargas (carga_id, inicio, fin, estado, comando, version_paquete, "
             "version_postgres, version_esquema, huella_contenido) VALUES (%s, now(), now(), "
             "'completed', '{}'::jsonb, 'prueba', 'prueba', %s, %s)",
-            (RECORDED, installed_version(connection), digest),
+            (RECORDED, version or installed_version(connection), digest),
         )
         connection.commit()
     return digest
@@ -244,3 +247,30 @@ def test_each_old_backup_is_tested_by_its_own_path_and_none_is_moved(
     results = {path.name: probar_respaldo(path) for path in (first, second)}
     assert {r.archivo for r in results.values()} == {first.name, second.name}
     assert first.is_file() and second.is_file()
+
+
+def test_b10_a_card_that_names_another_schema_version_makes_the_content_differ(
+    base: str, tmp_path: Path
+) -> None:
+    dump = _dump(tmp_path, base)
+    card = json.loads(ficha_path(dump).read_text(encoding="utf-8"))
+    card["version_esquema"]["valor"] = "sql-de-otra-version"
+    ficha_path(dump).write_text(json.dumps(card), encoding="utf-8")
+    evidence = probar_respaldo(dump)
+    assert evidence.restauracion.estado == "exitosa"
+    assert evidence.contenido.estado == "difiere"
+    assert evidence.contenido.version_esperada == "sql-de-otra-version"
+    assert "versión del esquema" in str(evidence.contenido.detalle)
+    assert "huella de contenido" not in str(evidence.contenido.detalle)  # las filas son las mismas
+    assert backup_test_exit_code(evidence) == 5
+
+
+def test_b10_an_old_backup_whose_last_load_names_another_schema_version_differs(
+    base: str, tmp_path: Path
+) -> None:
+    _record_completed_load(base, version="sql-de-otra-version")
+    evidence = probar_respaldo(_without_card(_dump(tmp_path, base)))
+    assert evidence.restauracion.estado == "exitosa"
+    assert evidence.contenido.estado == "difiere"
+    assert "versión del esquema" in str(evidence.contenido.detalle)
+    assert backup_test_exit_code(evidence) == 5

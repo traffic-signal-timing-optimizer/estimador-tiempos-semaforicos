@@ -41,6 +41,7 @@ from semaforo.app.bd_commands import (
     verify,
     verify_exit_code,
 )
+from semaforo.app.bd_evidencia import EvidenceReport, collect_evidence, resolve_backup, summary
 from semaforo.app.bd_reconstruir import (
     Approval,
     Preparation,
@@ -194,7 +195,28 @@ def _add_check_and_decide(
         "--acta", required=True, help="acta en el repositorio (ruta relativa, confirmada en git)"
     )
     decide.add_argument("--responsable", required=True, help="quién decide")
-    return [check, regen, milestone, decide]
+    evidence = add(
+        "evidencia",
+        help="reúne verificación, red, conciliación, barrido y un respaldo en una carpeta nueva",
+    )
+    evidence.add_argument(
+        "--respaldo", type=Path, default=None, help="el respaldo a probar (.dump)"
+    )
+    evidence.add_argument(
+        "--respaldos",
+        type=Path,
+        default=None,
+        help="carpeta de respaldos: se prueba el más reciente de la versión vigente",
+    )
+    evidence.add_argument(
+        "--sin-recalcular",
+        action="store_true",
+        help="no vuelve a calcular las métricas al conciliar (más rápido, menos completo)",
+    )
+    evidence.add_argument(
+        "--hba", type=Path, default=None, help="pg_hba.conf que analizar (si no se puede leer)"
+    )
+    return [check, regen, milestone, decide, evidence]
 
 
 def _add_backups_and_rebuild(
@@ -210,7 +232,13 @@ def _add_backups_and_rebuild(
         "probar-respaldo",
         help="restaura un respaldo en una base temporal y compara su huella (la borra al terminar)",
     )
-    probe.add_argument("--respaldo", type=Path, required=True, help="el archivo .dump")
+    probe.add_argument("--respaldo", type=Path, default=None, help="el archivo .dump")
+    probe.add_argument(
+        "--respaldos",
+        type=Path,
+        default=None,
+        help="carpeta de respaldos: si se omite --respaldo, el más reciente de la versión vigente",
+    )
     rebuild = add(
         "reconstruir", help="reconstruye la base con una candidata validada antes del cambio"
     )
@@ -254,13 +282,25 @@ def add_database_commands(
     database = add_group("bd", help="base de datos de consulta en PostgreSQL (DEV31)")
     actions = database.add_subparsers(dest="action", required=True)
     start, loader, metrics, reconcile = _add_load_and_reconcile(actions.add_parser)
-    check, regen, milestone, decide = _add_check_and_decide(actions.add_parser)
+    check, regen, milestone, decide, evidence = _add_check_and_decide(actions.add_parser)
     backup, card, probe, prepare, switch = _add_backups_and_rebuild(actions.add_parser)
-    for command in (loader, check, regen, milestone, backup, reconcile, decide, prepare, switch):
+    for command in (
+        loader,
+        check,
+        regen,
+        milestone,
+        backup,
+        reconcile,
+        decide,
+        evidence,
+        probe,
+        prepare,
+        switch,
+    ):
         command.add_argument(
             "--base", default=None, help="base de datos (por defecto, la del servicio: semaforo)"
         )
-    for command in (loader, check, regen, milestone, reconcile, decide, prepare, switch):
+    for command in (loader, check, regen, milestone, reconcile, decide, evidence, prepare, switch):
         command.add_argument(
             "--repositorio",
             type=Path,
@@ -276,6 +316,7 @@ def add_database_commands(
         regen,
         milestone,
         decide,
+        evidence,
         backup,
         card,
         probe,
@@ -517,9 +558,29 @@ def _card(arguments: argparse.Namespace, workspace: Path) -> int:
     return 0
 
 
+def _evidence(arguments: argparse.Namespace, workspace: Path) -> int:
+    report: EvidenceReport = collect_evidence(
+        workspace,
+        Path(arguments.repositorio),
+        backup=None if arguments.respaldo is None else Path(arguments.respaldo),
+        backups=None if arguments.respaldos is None else Path(arguments.respaldos),
+        recompute=not arguments.sin_recalcular,
+        hba=None if arguments.hba is None else Path(arguments.hba),
+        database=arguments.base,
+    )
+    emit(with_exit(report.model_dump(mode="json"), report.exit_code))
+    say(summary(report) + f"Carpeta: {report.folder}")
+    return report.exit_code
+
+
 def _probe(arguments: argparse.Namespace, workspace: Path) -> int:
     del workspace
-    evidence = test_backup(Path(arguments.respaldo))
+    dump = resolve_backup(
+        None if arguments.respaldo is None else Path(arguments.respaldo),
+        None if arguments.respaldos is None else Path(arguments.respaldos),
+        arguments.base,
+    )
+    evidence = test_backup(dump)
     code = backup_test_exit_code(evidence)
     emit(with_exit(evidence.model_dump(mode="json"), code))
     say(_probe_summary(evidence))
@@ -604,6 +665,7 @@ HANDLERS: dict[str, Callable[[argparse.Namespace, Path], int]] = {
     "iniciar": _initialize,
     "cargar": _load,
     "verificar": _verify,
+    "evidencia": _evidence,
     "regenerar": _regenerate,
     "hito": _milestone,
     "decidir": _decide,
