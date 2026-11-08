@@ -16,7 +16,7 @@
 version = "1.2.0-candidato"
 fecha = "2026-11-08"
 motor = "PostgreSQL 17.9"
-estado = "candidato de F5: vistas nuevas del panel; las tablas no cambian desde la versión aprobada en D11"
+estado = "aprobado por el PO en F5 (las tres huellas): vistas nuevas del panel; las tablas no cambian desde D11"
 
 [[esquemas]]
 nombre = "control"

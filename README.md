@@ -24,6 +24,8 @@ Prototipo local de estimación de tiempos semafóricos con SUMO, para el cruce d
 
 **Panel de resultados:** `.venv\Scripts\python.exe -m semaforo bd panel` publica en `datos\reportes\panel\<fecha>\` una foto de la base que se abre con doble clic, sin servidor ni internet: datos de entrada, simulaciones, comparación con el plan actual y evidencia. Ver [docs/panel/LEEME.md](docs/panel/LEEME.md).
 
+**Arquitectura:** cómo está construido el programa y qué partes tiene la solución, con sus gráficos, en [`docs/arquitectura/`](docs/arquitectura/). El modelo de datos con todas las columnas está en [`modelo-de-datos.md`](docs/arquitectura/modelo-de-datos.md), también como archivo editable de draw.io. Las decisiones están en [`docs/adr/`](docs/adr/README.md).
+
 ## Instalación desde cero
 
 En PowerShell, en la carpeta donde quiera el proyecto:

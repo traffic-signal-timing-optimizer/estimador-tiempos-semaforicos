@@ -63,7 +63,7 @@ if MATRICES.is_dir():
     tr=rows(MATRICES/'trazabilidad.csv');tasks=rows(MATRICES/'tareas.csv');qa=rows(MATRICES/'pruebas.csv')
     def trace():
         hu={r['HU'] for r in tr};q={r['id'] for r in qa};t={r['id'] for r in tasks}
-        assert hu=={f'HU{x:02}' for x in range(1,15)}
+        assert hu=={f'HU{x:02}' for x in range(1,16)}
         for r in tr:assert set(r['pruebas'].split(';'))<=q
         for r in tasks:
             assert set(r['historias'].split(';'))<=hu

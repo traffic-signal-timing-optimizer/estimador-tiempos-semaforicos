@@ -2,7 +2,7 @@ Escrito para: el Product Owner (revisión del diseño), el asesor y el jurado (q
 
 # Diccionario de datos de la base «semaforo»
 
-Versión 1.2.0-candidato del 2026-11-08. Motor: PostgreSQL 17.9. Estado: candidato de F5: vistas nuevas del panel; las tablas no cambian desde la versión aprobada en D11.
+Versión 1.2.0-candidato del 2026-11-08. Motor: PostgreSQL 17.9. Estado: aprobado por el PO en F5 (las tres huellas): vistas nuevas del panel; las tablas no cambian desde D11.
 
 **Archivo generado** por `scripts/bd_esquema.py` desde `docs/bd/esquema.toml`. No se edita a mano: se cambia el esquema y se vuelve a generar.
 

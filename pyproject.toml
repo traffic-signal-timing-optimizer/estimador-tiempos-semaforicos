@@ -41,6 +41,8 @@ select = ["E", "W", "F", "I", "B", "UP", "S", "ANN", "RUF", "PL"]
 "tests/**" = ["S101", "PLR2004"]
 # Los guiones de mutaciones guardan líneas de código como texto y lanzan pytest con el Python del proyecto.
 "scripts/mutaciones/**" = ["E501", "S603", "S607"]
+# Lista de cajas de cada gráfico: una caja por línea se lee mejor que partida.
+"scripts/graficos_arquitectura.py" = ["E501"]
 
 [tool.pyright]
 include = ["src", "tests"]

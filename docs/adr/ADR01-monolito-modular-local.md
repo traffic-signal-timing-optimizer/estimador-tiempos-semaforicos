@@ -1,6 +1,6 @@
 # ADR01: Monolito modular local
 
-- **Estado:** Propuesta
+- **Estado:** Aceptada el 2026-11-08 (DEC09, por delegación del PO)
 - **Tipo:** V/P
 - **Fecha de registro:** 2026-10-19
 - **Fuente:** `documentacion/documentos/01_Diseno_tecnico.md`, sección «Arquitectura y decisiones registradas»
@@ -26,4 +26,13 @@ Define la dirección de dependencia: interfaz → servicios de aplicación → r
 
 `tests/unit/test_arquitectura.py`: comprueba las reglas de dependencia entre módulos y que los detectores fallan ante imports prohibidos, incluidos los relativos.
 
-**Aceptada por el Product Owner para su prueba de aceptación.** La adopción formal sigue pendiente de DEC09.
+Aceptada por el Product Owner para su prueba de aceptación; adopción formal en DEC09.
+
+## Precisiones de DEC09 (2026-11-08)
+
+Análisis y motivo: `docs/actas/2026-11-08-dev31-f7-dec09.md`.
+
+1. **Paquete `bd` y PostgreSQL.** El monolito suma el paquete `bd`. PostgreSQL es un servicio externo, igual que SUMO es un proceso externo: no convierte el programa en un sistema de servicios. La base depende del proyecto y nunca al revés: ningún módulo de cálculo importa `bd`, y `bd` no importa `app` ni `cli`. Lo comprueba `tests/unit/test_arquitectura.py`.
+2. **Cómo crece.** El proyecto crece con más corridas y más cruces del mismo programa, no partiéndolo en servicios. El cruce es un dato (`caso_id`); ninguna regla del código depende de Frutales. Las corridas se pueden hacer en otra máquina, porque su manifiesto viaja con ellas y la base se carga después, verificando las huellas.
+3. **Otra interfaz.** Un formulario o una API se agregaría junto a `cli`, llamando a `app`, sin tocar `dominio`. Requiere otro ADR y su modelo de amenazas (ver ADR02).
+4. **Cuándo revisar esta decisión.** Si aparece un requisito real de varios usuarios a la vez, de ejecución coordinada entre máquinas o de un servicio en línea. Hoy ninguno existe.
