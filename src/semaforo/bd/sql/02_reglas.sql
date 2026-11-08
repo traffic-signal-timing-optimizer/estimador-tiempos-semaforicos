@@ -20,6 +20,11 @@ $$;
 COMMENT ON FUNCTION control.prueba_abierta(text) IS
     'Verdadero si existe un hito test_opened para esa partición.';
 
+-- La versión es la huella de estos archivos: no se puede escribir aquí. Esta función queda
+-- vacía y apply_schema la reemplaza al terminar, dentro de la misma transacción.
+CREATE FUNCTION control.version_esquema() RETURNS text LANGUAGE sql IMMUTABLE
+    AS $$ SELECT NULL::text $$;
+
 CREATE VIEW control.escenarios_cegados WITH (security_invoker = true) AS
     SELECT a.escenario_id, a.particion_id
     FROM experimento.asignaciones AS a
@@ -483,3 +488,232 @@ CREATE VIEW vistas.indicadores_finales WITH (security_invoker = true) AS
     );
 COMMENT ON VIEW vistas.indicadores_finales IS
     'Indicadores I4 a I7 del experimento final con sus intervalos. Vacía hasta la apertura.';
+
+-- ---------------------------------------------------------------------------------------------
+-- Vistas de entradas y de procedencia para el panel (DEV31 F5). El panel las lee con permisos del
+-- dueño, que no está sujeto al cegado por filas: cada una lleva su filtro explícito. El caso y los
+-- protocolos son públicos (ADR07); lo que cuelga de un escenario se filtra por ese escenario. Las
+-- semillas de la etapa final no se muestran: son parte de lo que la prueba mantiene reservado.
+
+CREATE VIEW vistas.estado_base WITH (security_invoker = true) AS
+    SELECT
+        control.version_esquema() AS version_esquema,
+        u.carga_id AS ultima_carga_id, u.estado AS ultima_carga_estado, u.fin AS ultima_carga_fin,
+        u.commit_codigo, u.arbol_limpio, u.version_postgres, u.huella_contenido,
+        (SELECT count(*) FROM control.conflictos AS f WHERE f.decision IS NULL)
+            AS conflictos_pendientes,
+        (SELECT count(*) FROM control.artefactos AS a WHERE a.alcance = 'desconocido')
+            AS archivos_alcance_desconocido
+    FROM (SELECT 1) AS una
+    LEFT JOIN LATERAL (
+        SELECT c.* FROM control.cargas AS c
+        WHERE c.estado = 'completed' AND c.huella_contenido IS NOT NULL
+        ORDER BY c.inicio DESC, c.carga_id DESC LIMIT 1
+    ) AS u ON true;
+COMMENT ON VIEW vistas.estado_base IS
+    'Versión del esquema, última carga completa con su huella, conflictos pendientes y archivos de alcance desconocido. Solo conteos globales: no dice cuántos archivos o filas tiene la prueba.';
+
+CREATE VIEW vistas.caso_resumen WITH (security_invoker = true) AS
+    SELECT
+        c.caso_id, c.caso_version, c.origen, c.descripcion, c.estado_representacion, c.red_ruta,
+        c.red_sha256, c.tick_s, c.ciclo_min_s, c.ciclo_max_s, c.politica_frontera,
+        c.evidencia_restricciones, c.huella_caso,
+        a.ruta_relativa AS archivo, a.sha256 AS archivo_sha256,
+        (SELECT coalesce(array_agg(t.clase_id ORDER BY t.orden), '{}'::text[])
+            FROM caso.tipos_vehiculo AS t
+            WHERE t.caso_id = c.caso_id AND t.caso_version = c.caso_version) AS clases
+    FROM caso.casos AS c
+    JOIN control.artefactos AS a ON a.artefacto_id = c.artefacto_id;
+COMMENT ON VIEW vistas.caso_resumen IS
+    'El caso: identidad, origen, límites del ciclo, clases de vehículo y su archivo con huella.';
+
+CREATE VIEW vistas.caso_movimientos WITH (security_invoker = true) AS
+    SELECT
+        m.caso_id, m.caso_version, m.movimiento_id, m.orden, m.acceso, m.carriles_entrada,
+        m.aristas_salida, m.flujo_min_vph, m.flujo_max_vph
+    FROM caso.movimientos AS m;
+COMMENT ON VIEW vistas.caso_movimientos IS
+    'Los movimientos del caso: de qué acceso salen, por qué carriles y qué flujo admiten.';
+
+CREATE VIEW vistas.caso_tramos WITH (security_invoker = true) AS
+    SELECT
+        t.caso_id, t.caso_version, t.tramo_id, t.orden, t.tipo, t.minimo_s, t.maximo_s, t.estados,
+        (SELECT coalesce(
+                jsonb_agg(
+                    jsonb_build_object(
+                        'grupo_id', g.grupo_id, 'minimo_s', g.minimo_s, 'maximo_s', g.maximo_s,
+                        'proposito', g.proposito
+                    ) ORDER BY g.grupo_id
+                ),
+                '[]'::jsonb
+            )
+            FROM caso.grupo_tramo AS gt
+            JOIN caso.grupos_verde AS g
+                ON g.caso_id = gt.caso_id AND g.caso_version = gt.caso_version
+                AND g.grupo_id = gt.grupo_id
+            WHERE gt.caso_id = t.caso_id AND gt.caso_version = t.caso_version
+                AND gt.tramo_id = t.tramo_id) AS grupos
+    FROM caso.tramos AS t;
+COMMENT ON VIEW vistas.caso_tramos IS
+    'Los tramos del programa del semáforo, una fila por tramo, con sus límites y sus grupos de verde.';
+
+CREATE VIEW vistas.planes_resumen WITH (security_invoker = true) AS
+    SELECT
+        p.plan_id, p.caso_id, p.caso_version, p.ciclo_s, p.duraciones_s,
+        o.plan_observado_id IS NOT NULL AS es_plan_observado,
+        o.fuente AS fuente_observada, o.variacion_horaria, o.confirmado_por
+    FROM simulacion.planes AS p
+    LEFT JOIN caso.planes_observados AS o ON o.plan_id = p.plan_id
+    WHERE o.plan_observado_id IS NOT NULL
+        OR EXISTS (
+            SELECT 1 FROM simulacion.corridas AS c
+            WHERE c.plan_id = p.plan_id AND control.escenario_visible(c.escenario_id)
+        )
+        OR EXISTS (
+            SELECT 1 FROM simulacion.candidatos AS n
+            JOIN simulacion.busquedas AS b ON b.busqueda_id = n.busqueda_id
+            WHERE n.plan_id = p.plan_id AND control.escenario_visible(b.escenario_id)
+        )
+        OR EXISTS (
+            SELECT 1 FROM simulacion.comparadores AS k
+            WHERE k.webster_plan_id = p.plan_id AND control.escenario_visible(k.escenario_id)
+        );
+COMMENT ON VIEW vistas.planes_resumen IS
+    'Los planes con sus duraciones, solo si los usa algo visible; marca el plan observado del caso.';
+
+CREATE VIEW vistas.escenarios_detalle WITH (security_invoker = true) AS
+    SELECT
+        e.escenario_id, e.caso_id, e.caso_version, e.familia_id, e.origen, e.preliminar,
+        e.request_id, e.origen_solicitud, e.inicio_observacion, e.fin_observacion, e.fuentes,
+        e.politica_frontera, e.calentamiento_s, e.medicion_s, e.vaciado_max_s, e.semilla_demanda,
+        e.demanda_sha256, e.huella_escenario,
+        a.ruta_relativa AS archivo, a.sha256 AS archivo_sha256
+    FROM experimento.escenarios AS e
+    JOIN control.artefactos AS a ON a.artefacto_id = e.artefacto_id
+    WHERE control.escenario_visible(e.escenario_id);
+COMMENT ON VIEW vistas.escenarios_detalle IS
+    'Los datos de entrada de cada escenario visible: ventana, tiempos, semilla de demanda y su archivo con huella.';
+
+CREATE VIEW vistas.demanda_escenario WITH (security_invoker = true) AS
+    SELECT
+        d.escenario_id, d.caso_id, d.caso_version, d.movimiento_id, d.clase_id, d.flujo_vph,
+        d.proporcion
+    FROM experimento.demanda AS d
+    WHERE control.escenario_visible(d.escenario_id);
+COMMENT ON VIEW vistas.demanda_escenario IS
+    'La demanda de cada escenario visible, por movimiento y clase de vehículo.';
+
+CREATE VIEW vistas.protocolos_resumen WITH (security_invoker = true) AS
+    SELECT
+        p.protocolo_id, p.estado, p.proposito, p.definicion_metrica, p.politica_cohorte,
+        p.politica_censura, p.presupuesto_busqueda, p.finalistas, p.epsilon_empate_s,
+        p.umbral_cola_mps, p.umbral_detencion_mps, p.muestreo_cola_s, p.carriles_zona,
+        p.nivel_confianza, p.remuestreos_bootstrap, p.margen_aceptacion_s,
+        (SELECT coalesce(array_agg(s.semilla ORDER BY s.orden), '{}'::integer[])
+            FROM experimento.protocolo_semillas AS s
+            WHERE s.protocolo_id = p.protocolo_id AND s.etapa = 'search') AS semillas_busqueda,
+        (SELECT coalesce(array_agg(s.semilla ORDER BY s.orden), '{}'::integer[])
+            FROM experimento.protocolo_semillas AS s
+            WHERE s.protocolo_id = p.protocolo_id AND s.etapa = 'finalists') AS semillas_finalistas
+    FROM experimento.protocolos AS p;
+COMMENT ON VIEW vistas.protocolos_resumen IS
+    'Las reglas de cada protocolo y sus semillas de búsqueda y de finalistas; las de la etapa final quedan fuera.';
+
+CREATE VIEW vistas.corridas_procedencia WITH (security_invoker = true) AS
+    SELECT
+        c.run_id, c.reintento_de, c.creada_en, c.semilla_demanda, c.paso_s, c.calentamiento_s,
+        c.medicion_s, c.vaciado_max_s, c.fin_s, c.vehiculos_total, c.vehiculos_cohorte,
+        c.red_sha256, c.programa_sha256, c.rutas_sha256, c.tipos_sha256, c.entradas_sha256,
+        c.limitaciones, c.error, c.memoria_pico_bytes,
+        r.protocolo_metricas_id, r.estado_protocolo_metricas, r.version_metricas,
+        r.definicion_demora, r.origen_caso, r.origen_demanda, r.zona_disponible,
+        r.motivo_zona_no_disponible, r.inicio_medicion_s, r.fin_medicion_s, r.cobertura_cola,
+        r.cohorte_solicitada, r.cohorte_terminada, r.cohorte_sin_terminar, r.cohorte_no_insertada,
+        r.teletransportes_atasco, r.teletransportes_cruce, r.teletransportes_carril,
+        r.perdida_tiempo_media_s, r.demora_salida_media_cohorte_s, r.demanda_insatisfecha,
+        e.version_sumo, e.commit_codigo, e.codigo_modificado,
+        m.ruta_relativa AS manifiesto, m.sha256 AS manifiesto_sha256,
+        x.ruta_relativa AS metricas, x.sha256 AS metricas_sha256
+    FROM simulacion.corridas AS c
+    LEFT JOIN simulacion.resultados_corrida AS r ON r.run_id = c.run_id
+    LEFT JOIN control.entornos AS e ON e.entorno_id = c.entorno_id
+    LEFT JOIN control.artefactos AS m ON m.artefacto_id = c.artefacto_id
+    LEFT JOIN control.artefactos AS x ON x.artefacto_id = r.artefacto_metricas_id
+    WHERE control.escenario_visible(c.escenario_id);
+COMMENT ON VIEW vistas.corridas_procedencia IS
+    'De dónde sale cada corrida visible: entradas con su huella, versión de SUMO, commit, protocolo de sus métricas, manifiesto y archivo de métricas.';
+
+CREATE VIEW vistas.resultados_acceso WITH (security_invoker = true) AS
+    SELECT
+        r.run_id, r.acceso, r.con_cohorte, r.solicitados, r.terminados, r.sin_terminar,
+        r.no_insertados, r.estado_demora, r.demora_media_s, r.perdida_tiempo_media_s,
+        r.demora_salida_media_s, r.cota_inf_demora_s, r.estado_cola, r.cobertura_cola,
+        r.cola_media_veh, r.cola_maxima_veh, r.estado_detenciones, r.detenciones_media
+    FROM simulacion.resultados_acceso AS r
+    JOIN simulacion.corridas AS c ON c.run_id = r.run_id
+    WHERE control.escenario_visible(c.escenario_id);
+COMMENT ON VIEW vistas.resultados_acceso IS
+    'Demora, cola y detenciones de cada acceso en cada corrida visible; con_cohorte dice si la demora puede existir.';
+
+CREATE VIEW vistas.resultados_movimiento WITH (security_invoker = true) AS
+    SELECT
+        r.run_id, r.caso_id, r.caso_version, r.movimiento_id, r.solicitados, r.terminados,
+        r.sin_terminar, r.no_insertados, r.estado_demora, r.demora_media_s,
+        r.perdida_tiempo_media_s, r.demora_salida_media_s, r.cota_inf_demora_s
+    FROM simulacion.resultados_movimiento AS r
+    JOIN simulacion.corridas AS c ON c.run_id = r.run_id
+    WHERE control.escenario_visible(c.escenario_id);
+COMMENT ON VIEW vistas.resultados_movimiento IS
+    'Demora de cada movimiento en cada corrida visible.';
+
+CREATE VIEW vistas.candidatos_resumen WITH (security_invoker = true) AS
+    SELECT
+        n.busqueda_id, b.escenario_id, n.candidato_id, n.plan_id, p.ciclo_s, n.origen,
+        n.consume_presupuesto, n.orden, n.elegible_busqueda, n.puntaje_busqueda_s,
+        n.cola_media_busqueda_veh, n.detenciones_media_busqueda, n.problemas_busqueda,
+        n.semillas_faltantes_busqueda, n.posicion_busqueda, n.finalista, n.elegible_finalistas,
+        n.puntaje_finalistas_s, n.cola_media_finalistas_veh, n.detenciones_media_finalistas,
+        n.problemas_finalistas, n.semillas_faltantes_finalistas, n.posicion_finalistas, n.ganador
+    FROM simulacion.candidatos AS n
+    JOIN simulacion.busquedas AS b ON b.busqueda_id = n.busqueda_id
+    JOIN simulacion.planes AS p ON p.plan_id = n.plan_id
+    WHERE control.escenario_visible(b.escenario_id);
+COMMENT ON VIEW vistas.candidatos_resumen IS
+    'Cada plan probado en una búsqueda visible: su origen, si fue elegible, su puntaje y sus motivos de descarte.';
+
+CREATE VIEW vistas.candidato_semillas WITH (security_invoker = true) AS
+    SELECT
+        s.busqueda_id, s.candidato_id, s.etapa, s.semilla, s.run_id, s.estado_corrida,
+        s.demora_media_s, s.cola_media_veh, s.detenciones_media, s.teletransportes, s.choques,
+        s.problemas, s.clase_incidente
+    FROM simulacion.candidato_semillas AS s
+    JOIN simulacion.busquedas AS b ON b.busqueda_id = s.busqueda_id
+    WHERE control.escenario_visible(b.escenario_id);
+COMMENT ON VIEW vistas.candidato_semillas IS
+    'El resultado de cada plan en cada semilla de una búsqueda visible, con su corrida.';
+
+CREATE VIEW vistas.comparadores_resumen WITH (security_invoker = true) AS
+    SELECT
+        k.comparador_id, k.escenario_id, k.caso_id, k.caso_version, k.origen_caso,
+        k.origen_demanda, k.origen_evidencia, k.plan_observado_id, k.webster_estado,
+        k.webster_adaptacion, k.conjunto_parametros, k.provisional, k.webster_ciclo_s,
+        k.webster_plan_id, k.webster_reglas_incumplidas, k.webster_problemas, k.y_critico,
+        k.tiempo_perdido_s, k.ciclo_recorrido_s, k.saturacion_vph_carril, k.estado_parametros
+    FROM simulacion.comparadores AS k
+    WHERE control.escenario_visible(k.escenario_id);
+COMMENT ON VIEW vistas.comparadores_resumen IS
+    'Los comparadores de cada escenario visible: el plan observado y el estado de Webster con sus motivos.';
+
+-- Una exclusión decidida es un registro público del procedimiento, con su decisión y su acta.
+-- Un archivo que cuelga de un escenario cegado no aparece; el de alcance desconocido, sí: se
+-- decidió justamente porque no se pudo ligar a ningún escenario.
+CREATE VIEW vistas.exclusiones WITH (security_invoker = true) AS
+    SELECT
+        f.conflicto_id, a.ruta_relativa AS archivo, a.sha256 AS archivo_sha256, a.alcance, f.tipo,
+        f.detalle, f.decision, f.decidido_en, f.decidido_por
+    FROM control.conflictos AS f
+    JOIN control.artefactos AS a ON a.artefacto_id = f.artefacto_id
+    WHERE f.decision IS NOT NULL
+        AND (a.alcance = 'desconocido' OR control.archivo_visible(a.artefacto_id));
+COMMENT ON VIEW vistas.exclusiones IS
+    'Los archivos excluidos con una decisión registrada: qué archivo, por qué, qué se decidió y quién.';

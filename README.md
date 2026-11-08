@@ -22,6 +22,8 @@ Prototipo local de estimación de tiempos semafóricos con SUMO, para el cruce d
 
 **Base de evidencia (HU15/DEV31):** PostgreSQL guarda una copia relacional local para consulta; los archivos publicados en `datos/` con sus manifiestos y huellas siguen siendo el original. La instalación y reconstrucción de esa base requieren pasos adicionales a la instalación básica de Python y SUMO: siga [el manual para otra laptop](docs/manuales/instalacion-en-otra-laptop.md). La puerta completa `scripts/check.ps1` requiere PostgreSQL en ejecución y crea bases temporales de prueba. Al 2026-11-08, F4c C0, C1 y C2 están cerradas; [el acta de C2](docs/actas/2026-11-08-dev31-f4c-c2-cierre.md) registra D11 y el cambio de la base vigente. C3 y F5–F8 siguen pendientes de orden del Product Owner. El [plan F4c](docs/actas/2026-11-07-dev31-plan-correcciones-auditoria.md) conserva las puertas aprobadas. La etiqueta «1.1.0-candidato» del [diccionario generado](docs/bd/diccionario.md) identifica el diseño usado en C2; las tres huellas de ese diseño fueron aprobadas en D11.
 
+**Panel de resultados:** `.venv\Scripts\python.exe -m semaforo bd panel` publica en `datos\reportes\panel\<fecha>\` una foto de la base que se abre con doble clic, sin servidor ni internet: datos de entrada, simulaciones, comparación con el plan actual y evidencia. Ver [docs/panel/LEEME.md](docs/panel/LEEME.md).
+
 ## Instalación desde cero
 
 En PowerShell, en la carpeta donde quiera el proyecto:

@@ -25,6 +25,7 @@ from psycopg import sql
 from semaforo.bd.carga.insercion import Catalog, TableInfo
 from semaforo.bd.carga.modelo import DATA_ROOT, REPOSITORY_ROOT
 from semaforo.bd.conexion import Connection
+from semaforo.bd.reglas import RULES_ALGORITHM
 from semaforo.dominio.base_model import FrozenModel
 from semaforo.trazabilidad.hashing import sha256_file
 
@@ -185,6 +186,17 @@ def compare_with_reference(
             outcome="no_concluyente",
             reason=(
                 f"contenido no comprobado: algoritmo distinto ({algorithm}; ahora {HASH_ALGORITHM})"
+            ),
+            differences=[],
+        )
+    rules_algorithm = reference.algoritmo_reglas
+    if reference.reglas_sha256 is not None and rules_algorithm not in (None, RULES_ALGORITHM):
+        return ReferenceCheck(
+            source=source,
+            outcome="no_concluyente",
+            reason=(
+                "reglas no comprobadas: algoritmo distinto "
+                f"({rules_algorithm}; ahora {RULES_ALGORITHM})"
             ),
             differences=[],
         )

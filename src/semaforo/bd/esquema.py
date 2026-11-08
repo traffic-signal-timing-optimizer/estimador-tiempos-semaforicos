@@ -62,7 +62,8 @@ def apply_schema(connection: Connection) -> str:
         version = schema_version()
         # La versión es una huella hexadecimal calculada aquí, no un texto de afuera.
         connection.execute(
-            "CREATE FUNCTION control.version_esquema() RETURNS text LANGUAGE sql IMMUTABLE "
+            "CREATE OR REPLACE FUNCTION control.version_esquema() RETURNS text "
+            "LANGUAGE sql IMMUTABLE "
             f"AS $$ SELECT '{version}'::text $$".encode()
         )
     return version

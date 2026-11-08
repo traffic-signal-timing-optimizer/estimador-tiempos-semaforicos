@@ -23,7 +23,7 @@ from semaforo.bd.conexion import ROLES, Connection
 
 __all__ = ["RULES_ALGORITHM", "SCHEMAS", "rules_digest"]
 
-RULES_ALGORITHM = "reglas-1"
+RULES_ALGORITHM = "reglas-2"  # 2: también el usuario del panel
 SCHEMAS = ["control", "caso", "experimento", "simulacion", "aprendizaje", "evaluacion", "vistas"]
 SEPARATOR = "\x1f"
 

@@ -78,6 +78,7 @@ def _blinding_text(cegado: str) -> str:
         "apertura_experimento": f"Sí. Se oculta hasta abrir la prueba del experimento (`{arg}`).",
         "archivo_alcance": "Sí. Global o todos sus escenarios visibles; desconocido queda oculto.",
         "archivo_enlace": "Sí. El enlace solo se ve si el archivo vinculado es visible.",
+        "archivo_incidencia": "Sí. La incidencia solo se ve si el archivo que la causó es visible.",
         "uso_plan": "Sí. Solo si una relación de uso visible menciona el plan.",
         "ambas_corridas": "Sí. Solo cuando las dos corridas son visibles.",
         "ambas_comparaciones": "Sí. Solo cuando las dos comparaciones son visibles.",

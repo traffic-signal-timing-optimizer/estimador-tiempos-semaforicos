@@ -13,10 +13,10 @@
 # - «origen» dice de qué archivo y campo sale el dato, o qué proceso lo calcula;
 # - cada tabla recibe además las columnas comunes (sección [comunes]); el generador las agrega.
 
-version = "1.1.0-candidato"
+version = "1.2.0-candidato"
 fecha = "2026-11-08"
 motor = "PostgreSQL 17.9"
-estado = "aprobado en D11; C2 cerrada con P0–P9 completados"
+estado = "candidato de F5: vistas nuevas del panel; las tablas no cambian desde la versión aprobada en D11"
 
 [[esquemas]]
 nombre = "control"
@@ -181,6 +181,81 @@ fuentes = ["aprendizaje.consultas", "aprendizaje.consulta_reglas"]
 nombre = "vistas.indicadores_finales"
 descripcion = "Indicadores I4 a I7 del experimento final con sus intervalos. Vacía hasta la apertura."
 fuentes = ["evaluacion.indicadores", "evaluacion.experimentos"]
+
+[[vistas]]
+nombre = "vistas.estado_base"
+descripcion = "Versión del esquema, última carga completa con su huella, conflictos pendientes y archivos de alcance desconocido. Solo conteos globales: no dice cuántos archivos o filas tiene la prueba."
+fuentes = ["control.cargas", "control.conflictos", "control.artefactos"]
+
+[[vistas]]
+nombre = "vistas.caso_resumen"
+descripcion = "El caso: identidad, origen, límites del ciclo, clases de vehículo y su archivo con huella."
+fuentes = ["caso.casos", "caso.tipos_vehiculo", "control.artefactos"]
+
+[[vistas]]
+nombre = "vistas.caso_movimientos"
+descripcion = "Los movimientos del caso: de qué acceso salen, por qué carriles y qué flujo admiten."
+fuentes = ["caso.movimientos"]
+
+[[vistas]]
+nombre = "vistas.caso_tramos"
+descripcion = "Los tramos del programa del semáforo, una fila por tramo, con sus límites y sus grupos de verde."
+fuentes = ["caso.tramos", "caso.grupo_tramo", "caso.grupos_verde"]
+
+[[vistas]]
+nombre = "vistas.planes_resumen"
+descripcion = "Los planes con sus duraciones, solo si los usa algo visible; marca el plan observado del caso."
+fuentes = ["simulacion.planes", "caso.planes_observados", "simulacion.corridas", "simulacion.candidatos", "simulacion.busquedas", "simulacion.comparadores"]
+
+[[vistas]]
+nombre = "vistas.escenarios_detalle"
+descripcion = "Los datos de entrada de cada escenario visible: ventana, tiempos, semilla de demanda y su archivo con huella."
+fuentes = ["experimento.escenarios", "control.artefactos"]
+
+[[vistas]]
+nombre = "vistas.demanda_escenario"
+descripcion = "La demanda de cada escenario visible, por movimiento y clase de vehículo."
+fuentes = ["experimento.demanda"]
+
+[[vistas]]
+nombre = "vistas.protocolos_resumen"
+descripcion = "Las reglas de cada protocolo y sus semillas de búsqueda y de finalistas; las de la etapa final quedan fuera."
+fuentes = ["experimento.protocolos", "experimento.protocolo_semillas"]
+
+[[vistas]]
+nombre = "vistas.corridas_procedencia"
+descripcion = "De dónde sale cada corrida visible: entradas con su huella, versión de SUMO, commit, protocolo de sus métricas, manifiesto y archivo de métricas."
+fuentes = ["simulacion.corridas", "simulacion.resultados_corrida", "control.entornos", "control.artefactos"]
+
+[[vistas]]
+nombre = "vistas.resultados_acceso"
+descripcion = "Demora, cola y detenciones de cada acceso en cada corrida visible; con_cohorte dice si la demora puede existir."
+fuentes = ["simulacion.resultados_acceso", "simulacion.corridas"]
+
+[[vistas]]
+nombre = "vistas.resultados_movimiento"
+descripcion = "Demora de cada movimiento en cada corrida visible."
+fuentes = ["simulacion.resultados_movimiento", "simulacion.corridas"]
+
+[[vistas]]
+nombre = "vistas.candidatos_resumen"
+descripcion = "Cada plan probado en una búsqueda visible: su origen, si fue elegible, su puntaje y sus motivos de descarte."
+fuentes = ["simulacion.candidatos", "simulacion.busquedas", "simulacion.planes"]
+
+[[vistas]]
+nombre = "vistas.candidato_semillas"
+descripcion = "El resultado de cada plan en cada semilla de una búsqueda visible, con su corrida."
+fuentes = ["simulacion.candidato_semillas", "simulacion.busquedas"]
+
+[[vistas]]
+nombre = "vistas.comparadores_resumen"
+descripcion = "Los comparadores de cada escenario visible: el plan observado y el estado de Webster con sus motivos."
+fuentes = ["simulacion.comparadores"]
+
+[[vistas]]
+nombre = "vistas.exclusiones"
+descripcion = "Los archivos excluidos con una decisión registrada: qué archivo, por qué, qué se decidió y quién."
+fuentes = ["control.conflictos", "control.artefactos"]
 
 # =====================================================================================
 # control
@@ -351,7 +426,7 @@ grano = "Una fila por incidencia"
 origen = "Cargador y «bd verificar»."
 fuente = "pendiente F3"
 filas_dev16 = "0 si todo está bien"
-cegado = "no"
+cegado = "archivo_incidencia"
 excepcion_solo_agregar = "Se permite una sola modificación: registrar la decisión (decision, decidido_en y decidido_por) cuando estaba vacía."
 clave_primaria = ["conflicto_id"]
 columnas = [

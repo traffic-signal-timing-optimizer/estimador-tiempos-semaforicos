@@ -41,6 +41,21 @@ PANEL_VIEWS = (
     "metricas_modelos",
     "consultas_resumen",
     "indicadores_finales",
+    "estado_base",
+    "caso_resumen",
+    "caso_movimientos",
+    "caso_tramos",
+    "planes_resumen",
+    "escenarios_detalle",
+    "demanda_escenario",
+    "protocolos_resumen",
+    "corridas_procedencia",
+    "resultados_acceso",
+    "resultados_movimiento",
+    "candidatos_resumen",
+    "candidato_semillas",
+    "comparadores_resumen",
+    "exclusiones",
 )
 VIEWS_SCHEMA = "vistas"
 MAX_NAME = 63  # largo máximo de un nombre en PostgreSQL
@@ -177,6 +192,8 @@ def blinding_expression(  # noqa: PLR0911, PLR0912 (cada tipo de cegado tiene su
         return "control.archivo_visible(artefactos.artefacto_id)"
     if kind == "archivo_enlace":
         return "control.archivo_visible(archivo_escenarios.artefacto_id)"
+    if kind == "archivo_incidencia":
+        return "control.archivo_visible(conflictos.artefacto_id)"
     if kind == "ambas_corridas":
         return (
             "EXISTS (SELECT 1 FROM simulacion.corridas AS a "

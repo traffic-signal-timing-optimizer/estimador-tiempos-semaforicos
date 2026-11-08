@@ -1,0 +1,209 @@
+# Avance del proyecto que muestra el panel (DEV31 F5). Se actualiza a mano al cerrar cada fase.
+#
+# Lo lee «bd panel». No es un dato de la base: es el resumen del proyecto para quien lo revisa.
+# - estado: hecho, en_curso o pendiente;
+# - acta: ruta en el repositorio; si no existe, «bd panel» lo avisa y una prueba lo rechaza;
+# - un estado «hecho» sin acta no se admite.
+
+[proyecto]
+corto = "Estimador de tiempos semafóricos"
+titulo = "Estimador de tiempos semafóricos"
+objetivo = "Un modelo supervisado, entrenado fuera de línea, que propone el ciclo y los verdes de una intersección a partir de su demanda, y que se compara en SUMO con el plan actual, con Webster y con una búsqueda de referencia."
+alcance = "Se evalúan la demora, las colas, las detenciones, la precisión, la factibilidad de los tiempos propuestos y el costo de calcularlos. Hoy el trabajo va en la etapa de simulación con demanda sintética: se está construyendo y comprobando el procedimiento antes de entrenar el modelo."
+
+# Cómo se llama cada acceso: la red de SUMO solo tiene identificadores. Sentido comprobado con la
+# geometría de la red (dirección de cada calle y nombre de la avenida en osm.net.xml.gz).
+[accesos]
+"279893869#6" = "Javier Prado, de este a oeste"
+"1183810724#2" = "Javier Prado, de oeste a este"
+"282567283#5" = "Los Frutales, de norte a sur"
+"88161175#3" = "Los Frutales, de sur a norte"
+"1436359637#0" = "Entrada menor"
+"1185174556" = "Entrada menor"
+"563085958" = "Entrada menor"
+
+[[fase]]
+id = "DEV00"
+titulo = "Recepción de la simulación existente"
+sirve_para = "Copia verificada de la red y de la simulación de partida, sin tocar el original."
+estado = "hecho"
+fecha = "2026-10-29"
+acta = "docs/actas/2026-10-29-dev00-cierre.md"
+
+[[fase]]
+id = "DEV01"
+titulo = "Entorno y repositorio"
+sirve_para = "Entorno repetible, con diagnóstico y pruebas automáticas."
+estado = "hecho"
+fecha = "2026-10-29"
+acta = "docs/actas/2026-10-29-dev01-cierre.md"
+
+[[fase]]
+id = "DEV02"
+titulo = "Modelo del caso"
+sirve_para = "El cruce descrito en un archivo validado: movimientos, clases y límites."
+estado = "hecho"
+fecha = "2026-10-30"
+acta = "docs/actas/2026-10-30-dev02-cierre.md"
+
+[[fase]]
+id = "DEV03"
+titulo = "Mapa de la red y plan actual"
+sirve_para = "El plan del semáforo derivado y comprobado contra el original."
+estado = "hecho"
+fecha = "2026-10-30"
+acta = "docs/actas/2026-10-30-dev03-cierre.md"
+
+[[fase]]
+id = "DEV04"
+titulo = "Lectura de aforos"
+sirve_para = "Lector y normalización de conteos, probado con datos sintéticos."
+estado = "hecho"
+fecha = "2026-10-30"
+acta = "docs/actas/2026-10-30-dev04-aforos.md"
+
+[[fase]]
+id = "DEV05"
+titulo = "Control de calidad de aforos"
+sirve_para = "Cobertura, errores y exclusiones de los conteos, con su reporte."
+estado = "hecho"
+fecha = "2026-10-31"
+acta = "docs/actas/2026-10-31-dev05-cierre.md"
+
+[[fase]]
+id = "DEV06"
+titulo = "Corrida aislada de SUMO"
+sirve_para = "Demanda, cohorte y entradas de cada simulación, con sus huellas."
+estado = "hecho"
+fecha = "2026-10-31"
+acta = "docs/actas/2026-10-31-dev06-cierre.md"
+
+[[fase]]
+id = "DEV07"
+titulo = "Ejecutar SUMO y comprobar la salida"
+sirve_para = "Cada corrida queda registrada, también si falla."
+estado = "hecho"
+fecha = "2026-11-01"
+acta = "docs/actas/2026-11-01-dev07-cierre.md"
+
+[[fase]]
+id = "DEV08"
+titulo = "Trazabilidad"
+sirve_para = "Manifiestos y huellas: cualquier archivo alterado se detecta."
+estado = "hecho"
+fecha = "2026-11-01"
+acta = "docs/actas/2026-11-01-dev08-cierre.md"
+
+[[fase]]
+id = "DEV09"
+titulo = "Informes del caso y de los datos"
+sirve_para = "Páginas para revisar el caso y la calidad de los datos."
+estado = "hecho"
+fecha = "2026-11-02"
+acta = "docs/actas/2026-11-02-dev09-cierre.md"
+
+[[fase]]
+id = "DEV10"
+titulo = "Verificación de la base sintética"
+sirve_para = "Recorrido completo con datos sintéticos y réplica comprobada."
+estado = "hecho"
+fecha = "2026-11-01"
+acta = "docs/actas/2026-11-01-dev10-cierre.md"
+
+[[fase]]
+id = "DEV11"
+titulo = "Escenarios controlados"
+sirve_para = "Generador de escenarios de demanda, repetible con una semilla."
+estado = "hecho"
+fecha = "2026-11-02"
+acta = "docs/actas/2026-11-02-dev11-cierre.md"
+
+[[fase]]
+id = "DEV12"
+titulo = "Separación de grupos"
+sirve_para = "Entrenamiento, validación y prueba sin fuga de información entre ellos."
+estado = "hecho"
+fecha = "2026-11-02"
+acta = "docs/actas/2026-11-02-dev12-cierre.md"
+
+[[fase]]
+id = "DEV13"
+titulo = "Reglas temporales"
+sirve_para = "Corrige una propuesta para que siempre sea un plan que se pueda aplicar."
+estado = "hecho"
+fecha = "2026-11-02"
+acta = "docs/actas/2026-11-02-dev13-cierre.md"
+
+[[fase]]
+id = "DEV19"
+titulo = "Métricas y cohorte"
+sirve_para = "Demora, cola y detenciones, medidas y publicadas por corrida."
+estado = "hecho"
+fecha = "2026-11-02"
+acta = "docs/actas/2026-11-02-dev19-cierre.md"
+
+[[fase]]
+id = "DEV14"
+titulo = "Etiquetas por búsqueda"
+sirve_para = "Piloto: prueba 21 planes en SUMO para elegir uno de referencia."
+estado = "hecho"
+fecha = "2026-11-03"
+acta = "docs/actas/2026-11-03-dev14-cierre.md"
+
+[[fase]]
+id = "DEV15"
+titulo = "Comparadores"
+sirve_para = "El plan actual y Webster, con los casos en que Webster no aplica."
+estado = "hecho"
+fecha = "2026-11-05"
+acta = "docs/actas/2026-11-05-dev15-cierre.md"
+
+[[fase]]
+id = "DEV31"
+titulo = "Base de datos de la evidencia y este panel"
+sirve_para = "Todas las entradas y salidas en PostgreSQL, con conciliación, cegado y este panel."
+estado = "en_curso"
+acta = "docs/actas/2026-11-08-dev31-f4c-c3-cierre.md"
+
+[[fase]]
+id = "DEV16"
+titulo = "Entrenar la mediana y XGBoost"
+sirve_para = "Primer modelo con el corpus sintético. En pausa hasta cerrar DEV31."
+estado = "pendiente"
+acta = "docs/actas/2026-11-05-plan-dev16.md"
+
+[[fase]]
+id = "DEV17 a DEV18"
+titulo = "Empaquetar el modelo y consultarlo"
+sirve_para = "El modelo propone tiempos y las reglas los corrigen."
+estado = "pendiente"
+
+[[fase]]
+id = "DEV20 a DEV21"
+titulo = "Comparar alternativas y prueba de extremo a extremo"
+sirve_para = "El modelo frente al plan actual, Webster y la referencia, con datos sintéticos."
+estado = "pendiente"
+
+[[fase]]
+id = "DEV22 a DEV23"
+titulo = "Aforos reales y calibración de SUMO"
+sirve_para = "Pasar de demanda supuesta a demanda medida en el cruce."
+estado = "pendiente"
+
+[[fase]]
+id = "DEV24 a DEV25"
+titulo = "Corpus principal y selección del estimador"
+sirve_para = "Datos definitivos y elección del modelo, antes de congelarlo."
+estado = "pendiente"
+
+[[fase]]
+id = "DEV26"
+titulo = "Prueba final"
+sirve_para = "La evaluación que decide la tesis. Se abre una sola vez."
+estado = "pendiente"
+
+[[fase]]
+id = "DEV27 a DEV30"
+titulo = "Reproducir, proteger y documentar"
+sirve_para = "Evidencia reproducible, validación y manual de operación."
+estado = "pendiente"

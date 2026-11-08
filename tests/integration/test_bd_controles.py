@@ -13,7 +13,7 @@ from semaforo.app.bd_commands import regenerate, verify
 from semaforo.bd.candado import try_exclusive
 from semaforo.bd.carga.motor import LoadOptions, load_workspace
 from semaforo.bd.conciliacion import reconcile
-from semaforo.bd.conexion import ADMIN, CARGA, LECTURA, BdError, connect
+from semaforo.bd.conexion import ADMIN, CARGA, LECTURA, ROLES, BdError, connect
 from semaforo.bd.instantanea import Inconcluso, lectura_estable
 from semaforo.bd.reglas import RULES_ALGORITHM, rules_digest
 from semaforo.bd.temporales import create_database, drop_database
@@ -108,6 +108,13 @@ def test_changing_a_policy_a_permission_a_function_or_an_index_changes_the_finge
         assert _rules(base) != before, change
         _admin(base, undo)
         assert _rules(base) == before, undo
+
+
+def test_the_rules_fingerprint_also_watches_the_panel_user(base: str) -> None:
+    with connect(ADMIN, database=base, autocommit=True) as connection:
+        before = rules_digest(connection)[1]["usuarios del proyecto"]
+    assert before == len(ROLES)
+    assert "semaforo_panel" in ROLES
 
 
 # --- verificación contra la referencia (C1.6; B06) --------------------------------------------

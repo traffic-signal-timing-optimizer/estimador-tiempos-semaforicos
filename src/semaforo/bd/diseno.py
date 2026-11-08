@@ -462,6 +462,8 @@ def _check_blinding(  # noqa: PLR0912 (validación de cada tipo de cegado)
     elif kind == "archivo_enlace" and table.full == "control.archivo_escenarios":
         if not _has_key(table, ("artefacto_id",), "control.artefactos"):
             found.add(table.full, "el enlace debe referir a un archivo")
+    elif kind == "archivo_incidencia" and table.full == "control.conflictos":
+        pass  # artefacto_id es la columna común de procedencia: toda fila la tiene
     elif kind == "uso_plan" and table.full == "simulacion.planes":
         pass  # las referencias de uso se construyen desde las claves foráneas en ddl.py
     elif kind == "ambas_corridas" and table.full == "control.replicas":

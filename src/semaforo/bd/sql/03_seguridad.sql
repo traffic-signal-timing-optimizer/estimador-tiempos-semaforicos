@@ -1,4 +1,4 @@
--- Archivo generado por scripts/bd_esquema.py desde docs/bd/esquema.toml (versión 1.1.0-candidato).
+-- Archivo generado por scripts/bd_esquema.py desde docs/bd/esquema.toml (versión 1.2.0-candidato).
 -- No se edita a mano: se cambia el esquema y se vuelve a generar.
 
 -- Solo agregar (B2): se rechazan la modificación, el borrado y el vaciado.
@@ -124,6 +124,9 @@ CREATE POLICY lectura_cegada ON control.artefactos FOR SELECT TO semaforo_lectur
 ALTER TABLE control.archivo_escenarios ENABLE ROW LEVEL SECURITY;
 CREATE POLICY carga_ve_todo ON control.archivo_escenarios TO semaforo_carga USING (true) WITH CHECK (true);
 CREATE POLICY lectura_cegada ON control.archivo_escenarios FOR SELECT TO semaforo_lectura USING (control.archivo_visible(archivo_escenarios.artefacto_id));
+ALTER TABLE control.conflictos ENABLE ROW LEVEL SECURITY;
+CREATE POLICY carga_ve_todo ON control.conflictos TO semaforo_carga USING (true) WITH CHECK (true);
+CREATE POLICY lectura_cegada ON control.conflictos FOR SELECT TO semaforo_lectura USING (control.archivo_visible(conflictos.artefacto_id));
 ALTER TABLE control.replicas ENABLE ROW LEVEL SECURITY;
 CREATE POLICY carga_ve_todo ON control.replicas TO semaforo_carga USING (true) WITH CHECK (true);
 CREATE POLICY lectura_cegada ON control.replicas FOR SELECT TO semaforo_lectura USING (EXISTS (SELECT 1 FROM simulacion.corridas AS a WHERE a.run_id = replicas.run_id_a) AND EXISTS (SELECT 1 FROM simulacion.corridas AS b WHERE b.run_id = replicas.run_id_b));
@@ -229,3 +232,33 @@ ALTER VIEW vistas.consultas_resumen SET (security_invoker = false);
 GRANT SELECT ON vistas.consultas_resumen TO semaforo_panel;
 ALTER VIEW vistas.indicadores_finales SET (security_invoker = false);
 GRANT SELECT ON vistas.indicadores_finales TO semaforo_panel;
+ALTER VIEW vistas.estado_base SET (security_invoker = false);
+GRANT SELECT ON vistas.estado_base TO semaforo_panel;
+ALTER VIEW vistas.caso_resumen SET (security_invoker = false);
+GRANT SELECT ON vistas.caso_resumen TO semaforo_panel;
+ALTER VIEW vistas.caso_movimientos SET (security_invoker = false);
+GRANT SELECT ON vistas.caso_movimientos TO semaforo_panel;
+ALTER VIEW vistas.caso_tramos SET (security_invoker = false);
+GRANT SELECT ON vistas.caso_tramos TO semaforo_panel;
+ALTER VIEW vistas.planes_resumen SET (security_invoker = false);
+GRANT SELECT ON vistas.planes_resumen TO semaforo_panel;
+ALTER VIEW vistas.escenarios_detalle SET (security_invoker = false);
+GRANT SELECT ON vistas.escenarios_detalle TO semaforo_panel;
+ALTER VIEW vistas.demanda_escenario SET (security_invoker = false);
+GRANT SELECT ON vistas.demanda_escenario TO semaforo_panel;
+ALTER VIEW vistas.protocolos_resumen SET (security_invoker = false);
+GRANT SELECT ON vistas.protocolos_resumen TO semaforo_panel;
+ALTER VIEW vistas.corridas_procedencia SET (security_invoker = false);
+GRANT SELECT ON vistas.corridas_procedencia TO semaforo_panel;
+ALTER VIEW vistas.resultados_acceso SET (security_invoker = false);
+GRANT SELECT ON vistas.resultados_acceso TO semaforo_panel;
+ALTER VIEW vistas.resultados_movimiento SET (security_invoker = false);
+GRANT SELECT ON vistas.resultados_movimiento TO semaforo_panel;
+ALTER VIEW vistas.candidatos_resumen SET (security_invoker = false);
+GRANT SELECT ON vistas.candidatos_resumen TO semaforo_panel;
+ALTER VIEW vistas.candidato_semillas SET (security_invoker = false);
+GRANT SELECT ON vistas.candidato_semillas TO semaforo_panel;
+ALTER VIEW vistas.comparadores_resumen SET (security_invoker = false);
+GRANT SELECT ON vistas.comparadores_resumen TO semaforo_panel;
+ALTER VIEW vistas.exclusiones SET (security_invoker = false);
+GRANT SELECT ON vistas.exclusiones TO semaforo_panel;

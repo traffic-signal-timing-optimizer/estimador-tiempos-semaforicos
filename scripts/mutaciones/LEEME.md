@@ -19,7 +19,7 @@ Los guiones de solo datos (`MUTATIONS` y `TESTS`) se corren con el ejecutor com�
 .venv\Scripts\python.exe scripts\mutaciones\mutar.py scripts\mutaciones\dev14_f1.py
 ```
 
-Los demás traen su propio ejecutor (`dev31_f3`, `dev31_f4` y `dev31_c1` aceptan, como argumentos, partes del nombre de un daño para correr solo esos):
+Los demás traen su propio ejecutor (`dev31_f3`, `dev31_f4`, `dev31_c1`, `dev31_c3` y `dev31_f5` aceptan, como argumentos, partes del nombre de un daño para correr solo esos):
 
 ```
 .venv\Scripts\python.exe scripts\mutaciones\dev31_c1.py
@@ -45,6 +45,8 @@ Los demás traen su propio ejecutor (`dev31_f3`, `dev31_f4` y `dev31_c1` aceptan
 | `dev31_f3.py` | cargador y SQL de la base (`bd/`) | pruebas de la base, de seguridad y de cegado (usa PostgreSQL y SUMO) | DEV31 F3 |
 | `dev31_f4.py` | conciliación y métricas (`bd/`) | `test_bd_conciliacion_sumo.py`, `test_bd_metricas.py` | DEV31 F4 |
 | `dev31_c1.py` | candado, lectura estable, huellas, cobertura, decisiones, fichas y cambio de base | pruebas de controles, cobertura, respaldos, reconstrucción y fuentes | DEV31 F4c, etapa C1 |
+| `dev31_c3.py` | reglas de hitos y de la cola, cegado de archivos, planes, réplicas y diferencias, barrido y evidencia | `test_bd_reglas.py`, `test_bd_evidencia.py` | DEV31 F4c, etapa C3 |
+| `dev31_f5.py` | cegado de cada vista del panel, lectura y publicación, comparación con el plan actual y la página | `test_bd_reglas.py`, `test_bd_panel.py`, `test_panel_resumen.py`, `test_panel_web.py` | DEV31 F5 |
 
 Los resultados de cada ensayo están en el acta de la fase. **Esta carpeta no guarda resultados**: cada corrida imprime cuántos daños se aplicaron, cuáles se detectaron y cuáles sobrevivieron.
 

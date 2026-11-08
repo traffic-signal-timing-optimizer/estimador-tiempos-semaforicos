@@ -1,4 +1,4 @@
--- Archivo generado por scripts/bd_esquema.py desde docs/bd/esquema.toml (versión 1.1.0-candidato).
+-- Archivo generado por scripts/bd_esquema.py desde docs/bd/esquema.toml (versión 1.2.0-candidato).
 -- No se edita a mano: se cambia el esquema y se vuelve a generar.
 
 CREATE SCHEMA control;

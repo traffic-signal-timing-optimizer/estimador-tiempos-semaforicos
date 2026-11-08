@@ -37,7 +37,7 @@ ADMIN = "semaforo_admin"
 CARGA = "semaforo_carga"
 LECTURA = "semaforo_lectura"
 PANEL = "semaforo_panel"
-ROLES = (ADMIN, CARGA, LECTURA)  # solo estos tres los administra «bd iniciar»
+ROLES = (ADMIN, CARGA, LECTURA, PANEL)  # los administra «bd iniciar»
 DATABASE = "semaforo"
 HOST = "localhost"
 PORT = 5432
@@ -91,7 +91,7 @@ def connect(role: str, *, database: str | None = None, autocommit: bool = False)
         BdError: DEPENDENCY_MISSING si PostgreSQL no responde, falta el servicio o la contraseña,
             o el usuario no puede entrar. El mensaje no incluye contraseñas.
     """
-    if role not in (*ROLES, PANEL):
+    if role not in ROLES:
         raise ValueError(f"usuario desconocido: {role}")
     options = {
         "service": role,

@@ -5,7 +5,7 @@ Con el administrador del servicio (``postgres``; su contraseña la da el PO en l
 
 1. crea la carpeta de los datos (por ejemplo ``D:\\pgdata\\semaforo``), le da permiso a la cuenta
    del servicio y la registra como espacio de tablas ``semaforo``;
-2. crea los tres usuarios del proyecto con contraseñas nuevas y aleatorias, que se escriben solo
+2. crea los cuatro usuarios del proyecto con contraseñas nuevas y aleatorias, que se escriben solo
    en el ``pgpass.conf`` del usuario de Windows, junto con sus datos de conexión en el archivo de
    servicios. Las líneas de otros proyectos de esos archivos se conservan tal cual;
 3. crea la base ``semaforo`` en ese espacio de tablas, con ``semaforo_admin`` como dueño, y le
@@ -35,6 +35,7 @@ from semaforo.bd.conexion import (
     DATABASE,
     HOST,
     LECTURA,
+    PANEL,
     PORT,
     ROLES,
     BdError,
@@ -174,6 +175,7 @@ _ROLE_OPTIONS: dict[str, sql.SQL] = {
     ADMIN: sql.SQL("LOGIN CREATEDB NOSUPERUSER NOCREATEROLE NOREPLICATION NOBYPASSRLS"),
     CARGA: sql.SQL("LOGIN NOCREATEDB NOSUPERUSER NOCREATEROLE NOREPLICATION NOBYPASSRLS"),
     LECTURA: sql.SQL("LOGIN NOCREATEDB NOSUPERUSER NOCREATEROLE NOREPLICATION NOBYPASSRLS"),
+    PANEL: sql.SQL("LOGIN NOCREATEDB NOSUPERUSER NOCREATEROLE NOREPLICATION NOBYPASSRLS"),
 }
 
 
@@ -310,13 +312,9 @@ def prepare_database(connection: Connection, name: str) -> None:
     connection.execute(
         sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(database, sql.Identifier(LECTURA))
     )
-    panel = connection.execute("SELECT 1 FROM pg_roles WHERE rolname = 'semaforo_panel'").fetchone()
-    if panel is not None:
-        connection.execute(
-            sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(
-                database, sql.Identifier("semaforo_panel")
-            )
-        )
+    connection.execute(
+        sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(database, sql.Identifier(PANEL))
+    )
 
 
 def _database(connection: Connection, name: str) -> Step:

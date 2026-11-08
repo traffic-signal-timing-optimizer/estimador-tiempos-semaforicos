@@ -285,12 +285,12 @@ Test-Path D:\pgdata\semaforo
 Este comando crea, una sola vez:
 
 1. la carpeta de datos y el espacio de tablas `semaforo`;
-2. tres usuarios del proyecto (`semaforo_admin`, `semaforo_carga`, `semaforo_lectura`) con **contraseñas nuevas y aleatorias**;
+2. cuatro usuarios del proyecto (`semaforo_admin`, `semaforo_carga`, `semaforo_lectura`, `semaforo_panel`) con **contraseñas nuevas y aleatorias**;
 3. sus contraseñas, en `%APPDATA%\postgresql\pgpass.conf`, y su configuración de conexión, en `%APPDATA%\postgresql\.pg_service.conf`;
 4. la base `semaforo`, con `semaforo_admin` como dueño;
-5. el esquema de la base (57 tablas en la versión C2 de este repositorio).
+5. el esquema de la base (57 tablas y las vistas del panel).
 
-El rol `semaforo_panel` se creó por separado en C0.5 en la laptop de origen. En otra laptop, el PO debe repetir ese paso D8 **antes** de `bd iniciar`: el esquema C2 le concede acceso solo a las vistas aprobadas y la instalación falla si el rol no existe. `bd iniciar` solo crea los tres usuarios indicados; no crea ni cambia la clave del panel. Consulte `docs/actas/2026-11-07-dev31-plan-correcciones-auditoria.md` (C0.5 y D8). La creación del rol y la instalación C2 en otra laptop están pendientes de verificación.
+El mismo comando crea también `semaforo_panel`, el usuario con el que se genera el panel de resultados: solo puede leer las vistas aprobadas, ninguna tabla.
 
 Necesita la contraseña del usuario **postgres** (la que puso en la sección 2.4). Pásela **solo para este comando**, como variable de la sesión, y bórrela al terminar. En PowerShell, sin que quede escrita en pantalla:
 
@@ -366,6 +366,7 @@ Todas las pruebas se corren desde la carpeta raíz del proyecto.
 | **T10. Pruebas rápidas** | `.venv\Scripts\pytest.exe -q -m "not bd and not sumo"` | `5080 passed, 1 skipped` (tarda unos 3 minutos; probado el 2026-11-07), sin `FAILED` |
 | **T11. Pruebas de la base** | `.venv\Scripts\pytest.exe -q -m bd` | Termina sin fallas. Requiere la sección 5 completa |
 | **T12. Pruebas con SUMO** | `.venv\Scripts\pytest.exe -q -m sumo` | Termina sin fallas. Requiere SUMO y `SUMO_HOME` |
+| **T14. Panel** | `.venv\Scripts\python.exe -m semaforo bd panel` | `Panel publicado: reportes/panel/<fecha>/index.html`, código **0**. Abra ese `index.html` con doble clic: deben verse las diez páginas, con 130 corridas en Inicio |
 | **T13. Puerta completa** | `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\check.ps1` | Termina con `Todas las verificaciones pasaron.`, código **0**. Tarda unos 11 minutos |
 
 **Notas sobre estas pruebas:**
@@ -384,6 +385,7 @@ Cuando T1 a T13 pasen, la laptop queda **funcionando**.
 
 - **Ejecutar el proyecto:** `README.md` documenta los comandos básicos; las operaciones de la base están en las secciones 5 y 6 de este manual y en `docs/actas/` de DEV31. Use siempre `.venv\Scripts\python.exe -m semaforo ...` desde la carpeta raíz.
 - **Actualizar el código** (caso A o B, con GitHub): `git pull` y después `uv sync --frozen`.
+- **Generar el panel de resultados:** `.venv\Scripts\python.exe -m semaforo bd panel`. Es una foto de la base: se abre con doble clic y se puede copiar a otra computadora. Ver `docs/panel/LEEME.md`.
 - **Respaldar la base:** `.venv\Scripts\python.exe -m semaforo bd respaldar --carpeta D:\respaldos\semaforo`. Cada respaldo sale con su ficha (`.dump` y `.dump.sha256`).
 - **Respaldos previos:** la laptop de origen tiene dos respaldos en `D:\respaldos\semaforo` (14 MB cada uno). No son necesarios para reconstruir la base (se reconstruye desde `datos\`), pero conviene copiarlos como respaldo adicional.
 

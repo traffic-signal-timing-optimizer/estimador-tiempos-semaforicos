@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' file:; style-src 'self' file:; base-uri 'none'; form-action 'none'">
+  <title>Panel de resultados</title>
+  <meta name="description" content="Resultados y datos de entrada del estimador de tiempos semafóricos: una foto de la base de datos, sin conexión.">
+  <link rel="stylesheet" href="estilos.css">
+  <script src="datos.js" defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#contenido">Saltar al contenido</a>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Navegación principal">
+      <div class="brand"><strong>PANEL DE RESULTADOS</strong><small id="brand-sub"></small></div>
+      <nav id="nav" aria-label="Secciones"></nav>
+      <div class="sidebar-foot"><span class="dot" aria-hidden="true"></span> Foto de la base<br><small id="foot-date"></small></div>
+    </aside>
+    <div class="workspace">
+      <header class="topbar">
+        <div class="crumb"><b id="crumb-current">Inicio</b></div>
+        <div class="top-actions">
+          <span class="cutoff" id="cutoff"></span>
+          <button class="ghost" id="help-btn" type="button">Cómo leer los datos</button>
+        </div>
+      </header>
+      <main id="contenido" tabindex="-1"><div id="app"><p>Cargando… Si este mensaje no cambia, el navegador bloqueó los archivos de esta carpeta.</p></div></main>
+      <footer id="pie"></footer>
+    </div>
+  </div>
+  <dialog id="help" aria-labelledby="help-title">
+    <form method="dialog">
+      <button class="dialog-close" aria-label="Cerrar" value="cancel">×</button>
+      <h2 id="help-title">Cómo leer los datos</h2>
+      <dl class="glosario">
+        <dt>Plan</dt><dd>Los tiempos de un semáforo: cuánto dura cada tramo de su ciclo. El <b>plan actual</b> es el que hoy tiene el cruce.</dd>
+        <dt>Corrida</dt><dd>Una simulación en SUMO con un plan, una demanda y una semilla.</dd>
+        <dt>Semilla</dt><dd>El número que fija el azar de la simulación. Dos corridas con la misma semilla y la misma demanda enfrentan a los mismos vehículos: por eso se pueden restar.</dd>
+        <dt>Demora</dt><dd>Segundos que cada vehículo pierde frente a un viaje sin tránsito, sumando la espera para entrar a la red. Se mide en s/veh sobre los vehículos que se estudian (la cohorte).</dd>
+        <dt>Cohorte</dt><dd>Los vehículos que entran durante la ventana de medición. Si alguno no termina su viaje, la demora queda «censurada»: solo se conoce un mínimo.</dd>
+        <dt>Cola</dt><dd>Vehículos detenidos o casi detenidos en la zona medida. Depende de qué calles mide cada protocolo: las colas de protocolos distintos no se comparan.</dd>
+        <dt>Teletransporte</dt><dd>SUMO saca de la red a un vehículo atascado demasiado tiempo y lo pone más adelante. Es señal de un atasco grave: esa corrida no cuenta como válida.</dd>
+        <dt>Par válido</dt><dd>Misma semilla en los dos planes y ninguno de los dos con incidentes.</dd>
+        <dt>Elegible</dt><dd>El plan cumplió las condiciones del protocolo en todas sus semillas.</dd>
+      </dl>
+      <p>Un guion largo (—) significa que el dato no existe o no se pudo medir; nunca significa cero. El color nunca es la única señal: cada estado también se dice con texto o con la forma del punto.</p>
+      <button class="primary" value="ok">Entendido</button>
+    </form>
+  </dialog>
+</body>
+</html>

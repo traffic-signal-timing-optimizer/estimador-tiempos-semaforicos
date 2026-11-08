@@ -2,7 +2,7 @@ Escrito para: el Product Owner (revisión del diseño), el asesor y el jurado (q
 
 # Diccionario de datos de la base «semaforo»
 
-Versión 1.1.0-candidato del 2026-11-08. Motor: PostgreSQL 17.9. Estado: aprobado en D11; C2 cerrada con P0–P9 completados.
+Versión 1.2.0-candidato del 2026-11-08. Motor: PostgreSQL 17.9. Estado: candidato de F5: vistas nuevas del panel; las tablas no cambian desde la versión aprobada en D11.
 
 **Archivo generado** por `scripts/bd_esquema.py` desde `docs/bd/esquema.toml`. No se edita a mano: se cambia el esquema y se vuelve a generar.
 
@@ -83,6 +83,21 @@ La zona (desarrollo o prueba) no se guarda en cada fila: se deduce de la partici
 | `vistas.metricas_modelos` | Métricas de cada entrenamiento por partición, en columnas, para comparar la mediana con XGBoost. | `aprendizaje.metricas_modelo`, `aprendizaje.entrenamientos` |
 | `vistas.consultas_resumen` | Consultas con su estado, sus tiempos y sus reglas incumplidas. | `aprendizaje.consultas`, `aprendizaje.consulta_reglas` |
 | `vistas.indicadores_finales` | Indicadores I4 a I7 del experimento final con sus intervalos. Vacía hasta la apertura. | `evaluacion.indicadores`, `evaluacion.experimentos` |
+| `vistas.estado_base` | Versión del esquema, última carga completa con su huella, conflictos pendientes y archivos de alcance desconocido. Solo conteos globales: no dice cuántos archivos o filas tiene la prueba. | `control.cargas`, `control.conflictos`, `control.artefactos` |
+| `vistas.caso_resumen` | El caso: identidad, origen, límites del ciclo, clases de vehículo y su archivo con huella. | `caso.casos`, `caso.tipos_vehiculo`, `control.artefactos` |
+| `vistas.caso_movimientos` | Los movimientos del caso: de qué acceso salen, por qué carriles y qué flujo admiten. | `caso.movimientos` |
+| `vistas.caso_tramos` | Los tramos del programa del semáforo, una fila por tramo, con sus límites y sus grupos de verde. | `caso.tramos`, `caso.grupo_tramo`, `caso.grupos_verde` |
+| `vistas.planes_resumen` | Los planes con sus duraciones, solo si los usa algo visible; marca el plan observado del caso. | `simulacion.planes`, `caso.planes_observados`, `simulacion.corridas`, `simulacion.candidatos`, `simulacion.busquedas`, `simulacion.comparadores` |
+| `vistas.escenarios_detalle` | Los datos de entrada de cada escenario visible: ventana, tiempos, semilla de demanda y su archivo con huella. | `experimento.escenarios`, `control.artefactos` |
+| `vistas.demanda_escenario` | La demanda de cada escenario visible, por movimiento y clase de vehículo. | `experimento.demanda` |
+| `vistas.protocolos_resumen` | Las reglas de cada protocolo y sus semillas de búsqueda y de finalistas; las de la etapa final quedan fuera. | `experimento.protocolos`, `experimento.protocolo_semillas` |
+| `vistas.corridas_procedencia` | De dónde sale cada corrida visible: entradas con su huella, versión de SUMO, commit, protocolo de sus métricas, manifiesto y archivo de métricas. | `simulacion.corridas`, `simulacion.resultados_corrida`, `control.entornos`, `control.artefactos` |
+| `vistas.resultados_acceso` | Demora, cola y detenciones de cada acceso en cada corrida visible; con_cohorte dice si la demora puede existir. | `simulacion.resultados_acceso`, `simulacion.corridas` |
+| `vistas.resultados_movimiento` | Demora de cada movimiento en cada corrida visible. | `simulacion.resultados_movimiento`, `simulacion.corridas` |
+| `vistas.candidatos_resumen` | Cada plan probado en una búsqueda visible: su origen, si fue elegible, su puntaje y sus motivos de descarte. | `simulacion.candidatos`, `simulacion.busquedas`, `simulacion.planes` |
+| `vistas.candidato_semillas` | El resultado de cada plan en cada semilla de una búsqueda visible, con su corrida. | `simulacion.candidato_semillas`, `simulacion.busquedas` |
+| `vistas.comparadores_resumen` | Los comparadores de cada escenario visible: el plan observado y el estado de Webster con sus motivos. | `simulacion.comparadores` |
+| `vistas.exclusiones` | Los archivos excluidos con una decisión registrada: qué archivo, por qué, qué se decidió y quién. | `control.conflictos`, `control.artefactos` |
 
 ## Diagrama general
 
@@ -715,7 +730,7 @@ erDiagram
 - **Origen:** Cargador y «bd verificar».
 - **Estado de la fuente:** pendiente F3
 - **Filas estimadas en DEV16:** 0 si todo está bien
-- **Cegado de la prueba:** No. El usuario de lectura ve todas las filas.
+- **Cegado de la prueba:** Sí. La incidencia solo se ve si el archivo que la causó es visible.
 - **Visible porque:** No aplica.
 - **Solo agregar:** Se permite una sola modificación: registrar la decisión (decision, decidido_en y decidido_por) cuando estaba vacía.
 

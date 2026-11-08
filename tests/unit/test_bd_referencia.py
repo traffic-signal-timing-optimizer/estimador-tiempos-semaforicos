@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 
+from semaforo.bd.reglas import RULES_ALGORITHM
 from semaforo.bd.verificacion import (
     HASH_ALGORITHM,
     Fingerprint,
@@ -26,7 +27,7 @@ def _reference(**changes: object) -> FingerprintFile:
         "content_sha256": CONTENT,
         "algoritmo_huella": HASH_ALGORITHM,
         "reglas_sha256": RULES,
-        "algoritmo_reglas": "reglas-1",
+        "algoritmo_reglas": RULES_ALGORITHM,
         "rows": ROWS,
         "roots": ROOTS,
     }
@@ -90,6 +91,13 @@ def test_a_root_added_or_removed_is_a_difference() -> None:
     extra = [*ROOTS, Fingerprint(artefacto_id="datos:otro.json", sha256="3" * 64)]
     assert compare_with_reference(_reference(), _measured(roots=extra), "x").outcome == "difiere"
     assert compare_with_reference(_reference(), _measured(roots=[]), "x").outcome == "difiere"
+
+
+def test_a_reference_with_another_rules_algorithm_is_not_comparable() -> None:
+    old = _reference(algoritmo_reglas="reglas-1", reglas_sha256="9" * 64)
+    check = compare_with_reference(old, _measured(), "x")
+    assert check.outcome == "no_concluyente"
+    assert "algoritmo distinto" in str(check.reason)
 
 
 def test_a_reference_without_rules_says_nothing_about_the_rules() -> None:

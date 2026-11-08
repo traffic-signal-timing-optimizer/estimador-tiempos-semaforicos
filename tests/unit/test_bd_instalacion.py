@@ -29,12 +29,12 @@ def test_an_entry_of_another_database_with_the_same_user_is_not_touched() -> Non
     assert merge_password_lines(lines, {"semaforo_carga": "x"})[0] == lines[0]
 
 
-def test_the_service_file_keeps_other_sections_and_writes_the_three_users() -> None:
+def test_the_service_file_keeps_other_sections_and_writes_the_four_users() -> None:
     before = "[trading]\nhost=localhost\ndbname=trading_predict\n\n[semaforo_carga]\nuser=viejo\n"
     after = merge_service_text(before, "semaforo")
     assert after.startswith("[trading]\nhost=localhost\ndbname=trading_predict\n")
     assert "user=viejo" not in after
-    for role in ("semaforo_admin", "semaforo_carga", "semaforo_lectura"):
+    for role in ("semaforo_admin", "semaforo_carga", "semaforo_lectura", "semaforo_panel"):
         assert f"[{role}]\nhost=localhost\nport=5432\ndbname=semaforo\nuser={role}\n" in after
     assert merge_service_text(after, "semaforo") == after
 

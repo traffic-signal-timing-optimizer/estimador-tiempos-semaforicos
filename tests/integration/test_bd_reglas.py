@@ -18,6 +18,7 @@ from psycopg.types.json import Jsonb
 from bd_tools import insert, rows_of, scalar
 from prepared_inputs import request_for
 from search_tools import protocol
+from semaforo.app.bd_panel import generate_panel
 from semaforo.bd.barrido import sweep, sweep_exit_code
 from semaforo.bd.carga.caso import case_unit, protocol_unit
 from semaforo.bd.carga.corridas import entorno_row
@@ -26,6 +27,7 @@ from semaforo.bd.carga.motor import artifact_rows
 from semaforo.bd.conexion import ADMIN, CARGA, LECTURA, PANEL, connect
 from semaforo.bd.ddl import PANEL_VIEWS
 from semaforo.bd.diseno import load
+from semaforo.bd.panel_datos import read_panel_rows
 from workspace_tools import build_workspace
 
 pytestmark = pytest.mark.bd
@@ -368,7 +370,9 @@ def test_the_panel_reads_only_approved_views_and_sees_no_closed_test(world: Worl
     )
 
 
-def test_catalog_sweep_hides_test_marks_and_denies_panel_tables(world: World) -> None:
+def test_catalog_sweep_hides_test_marks_and_denies_panel_tables(  # noqa: PLR0915  (un solo recorrido)
+    world: World, tmp_path: Path
+) -> None:
     """P6/C3.2: cada tabla y vista se inspecciona, incluidas las futuras."""
     database = world.database
     hidden_file = "datos:prueba/ARCHIVO-PRUEBA-OCULTA.json"
@@ -460,6 +464,120 @@ def test_catalog_sweep_hides_test_marks_and_denies_panel_tables(world: World) ->
             ],
         },
     )
+    hidden_candidate = "CANDIDATO-PRUEBA-OCULTO"
+    hidden_comparator = "COMPARADOR-PRUEBA-OCULTO"
+    hidden_access = "ACCESO-PRUEBA-OCULTO"
+    hidden_flow = 4242.125
+    movement = str(
+        rows_of(database, "SELECT movimiento_id FROM caso.movimientos LIMIT 1", ADMIN)[0][0]
+    )
+    klass = str(rows_of(database, "SELECT clase_id FROM caso.tipos_vehiculo LIMIT 1", ADMIN)[0][0])
+    public_plan = "f" * 64
+    case_ids = {"caso_id": world.case_id, "caso_version": world.case_version}
+    insert(
+        database,
+        {
+            "simulacion.planes": [
+                _row(plan_id=public_plan, **case_ids, duraciones_s={tramo: 1.0}, ciclo_s=1.0)
+            ],
+            "caso.planes_observados": [
+                _row(
+                    plan_observado_id="OBSERVADO",
+                    **case_ids,
+                    plan_id=public_plan,
+                    fuente="prueba",
+                    variacion_horaria="ninguna",
+                    confirmado_por="prueba",
+                    carpeta_programa="prueba",
+                    reglas_incumplidas=[],
+                )
+            ],
+            "simulacion.candidatos": [
+                _row(
+                    busqueda_id=hidden_search,
+                    candidato_id=hidden_candidate,
+                    plan_id=hidden_plan,
+                    origen="sampled",
+                    consume_presupuesto=True,
+                    orden=0,
+                    finalista=False,
+                    ganador=False,
+                )
+            ],
+            "simulacion.candidato_semillas": [
+                _row(
+                    busqueda_id=hidden_search,
+                    candidato_id=hidden_candidate,
+                    etapa="search",
+                    semilla=1,
+                    run_id="RUN-PLAN-TEST",
+                    teletransportes=0,
+                    choques=0,
+                    problemas=[],
+                )
+            ],
+            "simulacion.comparadores": [
+                _row(
+                    comparador_id=hidden_comparator,
+                    escenario_id=world.test,
+                    **case_ids,
+                    origen_caso="synthetic",
+                    origen_demanda="synthetic",
+                    origen_evidencia="synthetic",
+                    plan_observado_id="OBSERVADO",
+                    webster_estado="not_applicable",
+                    webster_adaptacion="prueba",
+                    conjunto_parametros="prueba",
+                    provisional=True,
+                    webster_reglas_incumplidas=[],
+                    webster_problemas=[],
+                    saturacion_vph_carril=1800.0,
+                    equivalencias_vehiculo={},
+                    estado_parametros="provisional",
+                    parametros={},
+                )
+            ],
+            "experimento.demanda": [
+                _row(
+                    escenario_id=world.test,
+                    **case_ids,
+                    movimiento_id=movement,
+                    clase_id=klass,
+                    flujo_vph=hidden_flow,
+                    proporcion=1.0,
+                )
+            ],
+            "simulacion.resultados_corrida": _steps_result("RUN-PLAN-TEST", [0.0])[
+                "simulacion.resultados_corrida"
+            ],
+            "simulacion.resultados_acceso": [
+                _row(run_id="RUN-PLAN-TEST", acceso=hidden_access, con_cohorte=False)
+            ],
+            "simulacion.resultados_movimiento": [
+                _row(
+                    run_id="RUN-PLAN-TEST",
+                    **case_ids,
+                    movimiento_id=movement,
+                    solicitados=0,
+                    terminados=0,
+                    sin_terminar=0,
+                    no_insertados=0,
+                    estado_demora="empty",
+                    suma_demora_s=0.0,
+                )
+            ],
+        },
+    )
+    # Una exclusión ya decidida de un archivo de la prueba cerrada tampoco se muestra.
+    with connect(ADMIN, database=database) as admin:
+        admin.execute(
+            "INSERT INTO control.conflictos (conflicto_id, tipo, detalle, detectado_en, decision, "
+            "decidido_en, decidido_por, carga_id, artefacto_id) VALUES ('CONFLICTO-OCULTO', "
+            "'not_loadable', 'CONFLICTO-OCULTO', now(), 'accepted_risk', now(), 'prueba', "
+            "'prueba', %s)",
+            (hidden_file,),
+        )
+        admin.commit()
     with connect(ADMIN, database=database) as admin:
         relations = [
             (str(schema), str(name), str(kind))
@@ -484,6 +602,10 @@ def test_catalog_sweep_hides_test_marks_and_denies_panel_tables(world: World) ->
         hidden_plan,
         str(hidden_duration),
         hidden_search,
+        hidden_candidate,
+        hidden_comparator,
+        hidden_access,
+        str(hidden_flow),
     )
     allowed = {
         ("experimento.asignaciones", "escenario_id"),
@@ -511,6 +633,33 @@ def test_catalog_sweep_hides_test_marks_and_denies_panel_tables(world: World) ->
                             column,
                             value,
                         )
+    # Lo que el panel lee y lo que publica tampoco lleva ninguna marca.
+    panel_rows = json.dumps(read_panel_rows(database), default=str)
+    workspace = tmp_path / "panel"
+    workspace.mkdir()
+    closed = generate_panel(workspace, tmp_path, database=database)
+    published = workspace.joinpath(*closed.folder.split("/"), "datos.js").read_text(
+        encoding="utf-8"
+    )
+    for mark in marks:
+        assert mark not in panel_rows, mark
+        assert mark not in published, mark
+    assert "RUN-TRAIN" in panel_rows  # lo visible, sí
+    assert "CONFLICTO-OCULTO" not in panel_rows
+    # Las semillas de la etapa final no salen, aunque el protocolo sea público.
+    final = {
+        int(row[0])
+        for row in rows_of(
+            database,
+            "SELECT semilla FROM experimento.protocolo_semillas WHERE etapa = 'final'",
+            ADMIN,
+        )
+    }
+    assert final
+    for protocol_row in read_panel_rows(database)["protocolos"]:
+        assert not final & set(
+            protocol_row["semillas_busqueda"] + protocol_row["semillas_finalistas"]
+        )
     for code, kind, objects in (
         ("H1", "protocol_frozen", {"protocolo_id": world.protocol_id}),
         ("H2", "split_frozen", {"particion_id": "P1"}),
@@ -520,6 +669,12 @@ def test_catalog_sweep_hides_test_marks_and_denies_panel_tables(world: World) ->
         if code == "H1":
             insert(database, _model_rows(world))
         insert(database, _milestone(world, code, kind, **objects))
+    # Abierta la prueba, lo mismo que estaba oculto aparece en el panel, sin cambiar una fila.
+    opened = json.dumps(read_panel_rows(database), default=str)
+    for mark in (world.test, "RUN-PLAN-TEST", hidden_search, hidden_candidate, hidden_comparator):
+        assert mark in opened, mark
+    assert hidden_access in opened
+    assert hidden_flow in [row["flujo_vph"] for row in read_panel_rows(database)["demanda"]]
     assert (hidden_file, world.test) in rows_of(
         database, "SELECT artefacto_id, escenario_id FROM control.archivo_escenarios"
     )

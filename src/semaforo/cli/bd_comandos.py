@@ -42,6 +42,7 @@ from semaforo.app.bd_commands import (
     verify_exit_code,
 )
 from semaforo.app.bd_evidencia import EvidenceReport, collect_evidence, resolve_backup, summary
+from semaforo.app.bd_panel import PanelReport, generate_panel
 from semaforo.app.bd_reconstruir import (
     Approval,
     Preparation,
@@ -216,7 +217,11 @@ def _add_check_and_decide(
     evidence.add_argument(
         "--hba", type=Path, default=None, help="pg_hba.conf que analizar (si no se puede leer)"
     )
-    return [check, regen, milestone, decide, evidence]
+    panel = add(
+        "panel",
+        help="publica el panel de resultados en una carpeta nueva que se abre con doble clic",
+    )
+    return [check, regen, milestone, decide, evidence, panel]
 
 
 def _add_backups_and_rebuild(
@@ -282,7 +287,7 @@ def add_database_commands(
     database = add_group("bd", help="base de datos de consulta en PostgreSQL (DEV31)")
     actions = database.add_subparsers(dest="action", required=True)
     start, loader, metrics, reconcile = _add_load_and_reconcile(actions.add_parser)
-    check, regen, milestone, decide, evidence = _add_check_and_decide(actions.add_parser)
+    check, regen, milestone, decide, evidence, panel = _add_check_and_decide(actions.add_parser)
     backup, card, probe, prepare, switch = _add_backups_and_rebuild(actions.add_parser)
     for command in (
         loader,
@@ -293,6 +298,7 @@ def add_database_commands(
         reconcile,
         decide,
         evidence,
+        panel,
         probe,
         prepare,
         switch,
@@ -300,7 +306,18 @@ def add_database_commands(
         command.add_argument(
             "--base", default=None, help="base de datos (por defecto, la del servicio: semaforo)"
         )
-    for command in (loader, check, regen, milestone, reconcile, decide, evidence, prepare, switch):
+    for command in (
+        loader,
+        check,
+        regen,
+        milestone,
+        reconcile,
+        decide,
+        evidence,
+        panel,
+        prepare,
+        switch,
+    ):
         command.add_argument(
             "--repositorio",
             type=Path,
@@ -317,6 +334,7 @@ def add_database_commands(
         milestone,
         decide,
         evidence,
+        panel,
         backup,
         card,
         probe,
@@ -573,6 +591,21 @@ def _evidence(arguments: argparse.Namespace, workspace: Path) -> int:
     return report.exit_code
 
 
+def _panel(arguments: argparse.Namespace, workspace: Path) -> int:
+    report: PanelReport = generate_panel(
+        workspace, Path(arguments.repositorio), database=arguments.base
+    )
+    emit(with_exit(report.model_dump(mode="json"), 0))
+    lines = [
+        f"Panel publicado: {report.folder}/index.html",
+        f"Base {report.database}, esquema {report.version_esquema}; "
+        f"{report.counts['corridas']} corridas, {report.counts['planes']} planes.",
+    ]
+    lines += [f"- aviso: {warning}" for warning in report.warnings]
+    say("\N{LINE FEED}".join(lines))
+    return 0
+
+
 def _probe(arguments: argparse.Namespace, workspace: Path) -> int:
     del workspace
     dump = resolve_backup(
@@ -666,6 +699,7 @@ HANDLERS: dict[str, Callable[[argparse.Namespace, Path], int]] = {
     "cargar": _load,
     "verificar": _verify,
     "evidencia": _evidence,
+    "panel": _panel,
     "regenerar": _regenerate,
     "hito": _milestone,
     "decidir": _decide,
