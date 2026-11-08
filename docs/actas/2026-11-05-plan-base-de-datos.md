@@ -286,7 +286,9 @@ La nueva F0 y la F3 (antes F2) se parecen: F0 decide el diseño general y la F3 
 | **F8** (antes F2) | Word, diagramas y tesis v2.6 borrador, con su `.md` de cambios | Sonnet |
 
 **Consecuencias registradas:**
-- Hasta F7, la documentación del repositorio dice todavía que no hay base de datos (`CONTEXTO.md`, línea 71; documento 01; ADR02 y ADR03). Es una decisión del PO; se corrige en F7. Mientras tanto, el cambio de alcance queda registrado en `CONTEXTO.md` y en estas actas.
+- Al aprobarse este plan, la línea base documental todavía decía que no había base de datos (`CONTEXTO.md`, documento 01 y ADR03). Se programó su integración formal para F7. La actualización documental del 2026-11-07, registrada abajo, añade enmiendas de alcance para evitar leer esa línea base como estado vigente mientras llega F7.
 - F1 necesita el diseño de F0 aprobado, que queda con este registro.
 - **La decisión de que exista una base de datos ya está tomada por el PO.** Lo que se difiere a F7 es solo regularizar la documentación, incluida la aceptación formal de ADR01 a ADR08 (DEC09). No hace falta resolver DEC09 antes de F3.
 - Ninguna fase se ejecuta sin el OK del PO.
+
+**Actualización documental del 2026-11-07:** se añadieron notas de alcance vigentes a `CONTEXTO.md`, a los documentos técnicos 01 a 03, a ADR02/ADR03 y al README para distinguir la base PostgreSQL aprobada de la línea base v1.0. Esto corrige la interpretación actual de las frases anteriores que excluían una base de datos. La integración formal de HU15/ADR12, las matrices, los gráficos, Word y la tesis sigue en F7/F8, sin ejecutar; C2 y C3 de F4c también están pendientes.

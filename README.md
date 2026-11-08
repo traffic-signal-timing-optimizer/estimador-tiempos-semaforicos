@@ -10,6 +10,7 @@ Prototipo local de estimación de tiempos semafóricos con SUMO, para el cruce d
 | uv (entorno y dependencias) | 0.13 o posterior | `uv --version` |
 | Git | cualquiera reciente | `git --version` |
 | SUMO | 1.27.1 | `echo $env:SUMO_HOME` muestra la carpeta de SUMO |
+| PostgreSQL | 17.9 para DEV31 y las pruebas de base | `Get-Service postgresql-x64-17` |
 
 **Instalar uv**, si `uv --version` no responde:
 
@@ -18,6 +19,8 @@ Prototipo local de estimación de tiempos semafóricos con SUMO, para el cruce d
 3. Cierre PowerShell, ábralo de nuevo y compruebe con `uv --version`.
 
 **SUMO:** el instalador de Windows crea la variable `SUMO_HOME`. Si no existe, `doctor` puede recibir la ruta del ejecutable con `--sumo-bin`.
+
+**Base de evidencia (HU15/DEV31):** PostgreSQL guarda una copia relacional local para consulta; los archivos publicados en `datos/` con sus manifiestos y huellas siguen siendo el original. La instalación y reconstrucción de esa base requieren pasos adicionales a la instalación básica de Python y SUMO: siga [el manual para otra laptop](docs/manuales/instalacion-en-otra-laptop.md). La puerta completa `scripts/check.ps1` requiere PostgreSQL en ejecución y crea bases temporales de prueba. Al 2026-11-07, F4c C0 y C1 están cerradas; C2, C3 y el panel siguen pendientes de orden del Product Owner. El [plan F4c](docs/actas/2026-11-07-dev31-plan-correcciones-auditoria.md) indica las puertas antes de cambiar la base vigente.
 
 ## Instalación desde cero
 

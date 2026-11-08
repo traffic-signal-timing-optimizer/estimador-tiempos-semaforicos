@@ -4,7 +4,7 @@ Escrito para: el Product Owner y cualquier persona o agente de IA que deba dejar
 
 Este manual permite pasar el proyecto **de extremo a extremo** a una laptop con Windows: programas, entorno de Python, PostgreSQL, SUMO, base de datos y pruebas que confirman que todo funciona.
 
-Está probado sobre la laptop de origen el 2026-11-07, con el commit `05e55b3` de `main`. Si el proyecto cambia, las versiones de la sección 2 siguen siendo las correctas mientras no se actualice `uv.lock` o el comando de diagnóstico lo indique.
+El procedimiento se cotejó en la laptop de origen el 2026-11-07, en el corte `05e55b3`; allí se registraron `doctor`, estado de red, conciliación, regeneración y pruebas rápidas. **No se ha demostrado una instalación desde cero en otra laptop ni se ejecutaron allí T1 a T13 en conjunto.** Este manual se actualizó con los cambios posteriores de C1.11; la puerta completa más reciente, en `a52123a`, pasó con 5408 pruebas y 43/43 contratos. **`a52123a` es un commit local sin push:** un clon de GitHub puede no incluir todavía esa corrección. Para trasladar exactamente el estado local, use el caso B o espere a que el PO autorice el push. Las versiones de la sección 1 se basan en el lockfile comprobado en ese corte; revíselas si cambia `uv.lock`.
 
 ---
 
@@ -173,7 +173,7 @@ Ejemplo de carpeta: `D:\proyectos`. Use cualquier carpeta **fuera de OneDrive** 
    git branch --show-current
    git log -1 --oneline
    ```
-   Debe mostrar `main`. El último commit de referencia es `05e55b3 fix(bd): la aprobación de la reconstrucción incluye versión del esquema y huella de reglas (HU15)`. Si `main` tiene commits más nuevos, es normal: lo que se verifica en la sección 6 es que pasen las pruebas, no el hash exacto.
+   Debe mostrar `main`. Compare el commit con la referencia publicada en GitHub en el momento de clonar; no se exige un hash fijo. La corrección P9 del commit local `a52123a` solo llegará al clon cuando el PO autorice su publicación.
 4. **Traiga `datos\` desde la laptop de origen.** No está en git. Copie la carpeta completa `datos` (2.9 GB, por ejemplo con un disco externo) a `D:\proyectos\estimador-tiempos-semaforicos\datos`. Sin esta carpeta la base quedará vacía (ver sección 5.4 y la prueba T8).
 5. Traiga también `documentacion\` (no está en git, es la documentación completa del paquete). Cópiela a `D:\proyectos\estimador-tiempos-semaforicos\documentacion`. No es necesaria para ejecutar el código, pero sí para el proyecto.
 6. Siga en la sección 4.
@@ -190,12 +190,12 @@ Ejemplo de carpeta: `D:\proyectos`. Use cualquier carpeta **fuera de OneDrive** 
    ```powershell
    Remove-Item -Recurse -Force .pytest_cache, .ruff_cache, .hypothesis -ErrorAction SilentlyContinue
    ```
-4. Compruebe el estado de git. Debe mostrar solo carpetas sin seguimiento que no son del código (`.claude/` y `docs/auditorias/`, que se quedan fuera de git a propósito):
+4. Compruebe el estado de git. Los archivos seguidos deberían conservar el mismo estado que en la carpeta de origen. Pueden aparecer carpetas locales sin seguimiento, como `.claude/` y `docs/auditorias/`:
    ```powershell
    git status --short
    git log -1 --oneline
    ```
-   Si hay archivos modificados (`M`) que no esperaba, **no siga**: avise al PO antes de continuar.
+   Compare cualquier archivo modificado (`M`) o commit local con el origen antes de continuar; no descarte cambios del PO.
 5. Compruebe la integridad de `datos\` (no cambió nada en el traslado):
    ```powershell
    .venv\Scripts\python.exe -m semaforo runs verify --workspace datos
@@ -290,6 +290,8 @@ Este comando crea, una sola vez:
 4. la base `semaforo`, con `semaforo_admin` como dueño;
 5. el esquema de la base (56 tablas).
 
+El rol `semaforo_panel` se creó por separado en C0.5 en la laptop de origen. `bd iniciar` solo crea los tres usuarios indicados; la configuración de acceso del panel corresponde a C2.6 y aún no se ha ejecutado en otra laptop.
+
 Necesita la contraseña del usuario **postgres** (la que puso en la sección 2.4). Pásela **solo para este comando**, como variable de la sesión, y bórrela al terminar. En PowerShell, sin que quede escrita en pantalla:
 
 ```powershell
@@ -372,7 +374,7 @@ Todas las pruebas se corren desde la carpeta raíz del proyecto.
 - **T8:** un resultado distinto de `equal` indica que falta algún archivo de `datos\`. Compare la cobertura del informe con el número de la sección 5.4.
 - **T9** crea y borra una base temporal (`semaforo_pruebas_*`). No toca `semaforo`.
 - **T10 a T13** también crean bases temporales con nombre `semaforo_pruebas_*`. Ninguna prueba toca `tickers_report_db`, `trading_predict` ni otras bases del servidor.
-- **Referencia de la laptop de origen** (para comparar): al 2026-11-07, T10 dio 5080 pruebas pasaron y `check.ps1` (T13, que incluye también las de la base y de SUMO) dio **5406 pruebas pasaron, 1 omitida**. Un número distinto solo es normal si se agregaron o quitaron pruebas. Lo que importa es que no haya `FAILED` ni `Error`.
+- **Referencia de la laptop de origen:** T10 dio 5080 pruebas pasaron en el corte del manual. La puerta completa más reciente, con la corrección P9 en el commit local `a52123a`, dio **5408 pruebas pasaron, 1 omitida y 43/43 contratos**. Los conteos cambian si se agregan o retiran pruebas; cada corte debe terminar sin fallos.
 
 Cuando T1 a T13 pasen, la laptop queda **funcionando**.
 
@@ -380,7 +382,7 @@ Cuando T1 a T13 pasen, la laptop queda **funcionando**.
 
 ## 7. Después de la instalación
 
-- **Ejecutar el proyecto:** cada comando está documentado en `README.md` (sección «Ejecutar una simulación», «Revisar y comparar corridas», etc.). Use siempre `.venv\Scripts\python.exe -m semaforo ...` desde la carpeta raíz.
+- **Ejecutar el proyecto:** `README.md` documenta los comandos básicos; las operaciones de la base están en las secciones 5 y 6 de este manual y en `docs/actas/` de DEV31. Use siempre `.venv\Scripts\python.exe -m semaforo ...` desde la carpeta raíz.
 - **Actualizar el código** (caso A o B, con GitHub): `git pull` y después `uv sync --frozen`.
 - **Respaldar la base:** `.venv\Scripts\python.exe -m semaforo bd respaldar --carpeta D:\respaldos\semaforo`. Cada respaldo sale con su ficha (`.dump` y `.dump.sha256`).
 - **Respaldos previos:** la laptop de origen tiene dos respaldos en `D:\respaldos\semaforo` (14 MB cada uno). No son necesarios para reconstruir la base (se reconstruye desde `datos\`), pero conviene copiarlos como respaldo adicional.

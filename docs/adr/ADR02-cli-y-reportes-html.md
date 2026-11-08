@@ -5,6 +5,8 @@
 - **Fecha de registro:** 2026-10-19
 - **Fuente:** `documentacion/documentos/01_Diseno_tecnico.md`, sección «Arquitectura y decisiones registradas»
 
+> **Alcance posterior aprobado por el PO el 2026-11-05:** HU15/DEV31 añade un panel HTML estático generado desde PostgreSQL local. El panel sigue abriéndose sin servidor web ni API HTTP; PostgreSQL es el servicio de datos local. Su implementación corresponde a DEV31 F5, aún pendiente. La aceptación formal de ADR02 sigue pendiente de DEC09 en F7.
+
 ## Decisión
 
 La CLI es la interfaz ejecutable inicial. Las cinco vistas (Caso, Datos, Construcción, Consulta y Resultados) son reportes HTML estáticos. No se monta un servidor.

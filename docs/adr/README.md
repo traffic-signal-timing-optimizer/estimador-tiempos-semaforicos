@@ -17,3 +17,5 @@ Los ADR01 a ADR08 provienen de `documentacion/documentos/01_Diseno_tecnico.md` y
 | [ADR11](ADR11-salidas-de-medicion.md) | Salidas de medición de las corridas preparadas (FCD en la zona y no iniciados) | P (equipo) | Aceptada (2026-11-02, por delegación del PO); enmendada en DEV19 F5 (zona = aproximación modelada) | Implementada en DEV19 |
 
 Estados posibles: Propuesta, Aceptada, Rechazada, Sustituida.
+
+**Alcance posterior al registro inicial:** el PO aprobó HU15/DEV31 y PostgreSQL local el 2026-11-05. ADR02 y ADR03 contienen notas de alcance que impiden interpretar sus frases originales como una prohibición vigente de la base. ADR12 y la aceptación formal de ADR01–ADR08 (DEC09) siguen pendientes de DEV31 F7; esta nota no cambia el estado «Propuesta» de esas ocho ADR.

@@ -6,7 +6,7 @@ Escrito para: el Product Owner (revisión de C1 de la fase F4c de DEV31) y el eq
 - **Tarea:** DEV31 (historia HU15). Plan de correcciones v3.4: `docs/actas/2026-11-07-dev31-plan-correcciones-auditoria.md`, sección C1.
 - **Orden:** «ejecuta todo C1» (PO, 2026-11-07).
 - **Modelo:** Sonnet, dos sesiones, como indica el plan.
-- **Estado:** hecho y verificado. **Pendiente de tu revisión** antes de C2.
+- **Estado actualizado al 2026-11-07:** C1 cerrada técnicamente. La conciliación y las decisiones D7 se actualizaron después del corte inicial de esta acta; C1.11 recibió dos correcciones posteriores, documentadas en actas propias. C2 sigue sin orden de ejecución.
 - **Esquema:** no cambió (`sql-d405569d4d1daf46`, 56 tablas, 871 columnas, 113 relaciones). No hubo migraciones.
 
 ## Qué se hizo, en palabras simples
@@ -50,10 +50,12 @@ Además:
 
 Pruebas nuevas de C1: unitarias de fuentes, acceso, decisiones, referencia y contexto; de integración de controles, cobertura, respaldos, reconstrucción y fuentes con SUMO (7 pruebas); y de línea de comandos (7 pruebas).
 
-**Conciliación de la base real** (`bd conciliar --sin-recalcular`, solo lectura):
+**Conciliación de la base real en el corte inicial de C1** (`bd conciliar --sin-recalcular`, solo lectura):
 - 2615 archivos, 130 corridas, 0 diferencias.
 - Cobertura: 137 cargadas de 140 publicadas; **3 excluidas pendientes**; 0 faltan; 0 sobran.
-- Código de salida 5: la base está **incompleta**, no igual. Las 3 pendientes son las corridas de DEV00. Quedan así hasta que el PO las resuelva (decisión D7, aprobada como riesgo aceptado; ver la sección siguiente).
+- Código de salida 5: la base estaba **incompleta** en ese corte, no igual. Las 3 pendientes eran las corridas de DEV00. El estado posterior se registra abajo.
+
+**Actualización posterior de D7, verificada en la bitácora del proyecto:** se publicaron tres decisiones «riesgo aceptado», una por cada corrida de DEV00, con ruta y huella del archivo. La conciliación posterior informó 143 unidades publicadas: 140 cargadas y 3 con decisión, sin pendientes, código 0. `docs/bd/huellas.json` se confirmó después en el commit `ad04c8c` con la última carga `20261107T230813Z_9cd9f1e2` y 2625 artefactos. Estas cifras son del registro posterior; no sustituyen la medición inicial de 2615 archivos y 130 corridas de esta acta.
 
 ## Límites honestos
 
@@ -64,8 +66,13 @@ Pruebas nuevas de C1: unitarias de fuentes, acceso, decisiones, referencia y con
 
 ## Decisiones de DEV00 (D7)
 
-Las 3 corridas de DEV00 se publicarán como decisión verificable «riesgo aceptado», según el plan (paso posterior a confirmar esta acta en git). Ese paso se registra en la bitácora de `documentacion/CONTEXTO.md` cuando se haga.
+Las 3 corridas de DEV00 se publicaron después de confirmar esta acta en git como decisiones verificables «riesgo aceptado». Sus identificadores y la conciliación posterior están en `documentacion/CONTEXTO.md`, sección 10. La decisión no convierte esas corridas en datos válidos para entrenamiento.
+
+## Correcciones posteriores de C1.11
+
+- `docs/actas/2026-11-07-dev31-f4c-aprobacion-tres-huellas.md`: P7 y P9 comparan versión del esquema, huella de contenido y huella de reglas. `bd reconstruir cambiar` exige la aprobación de los tres valores.
+- `docs/actas/2026-11-07-dev31-f4c-c1-p9-reversion-excepciones.md`: P9 intenta revertir también cuando `verify()` lanza una excepción después de P8. Si falla la reversión, informa que el estado de las bases debe comprobarse. Dos pruebas nuevas reprodujeron el defecto antes de la corrección y pasaron después. Puerta completa posterior: 5408 pruebas pasaron, 1 omitida y 43/43 contratos.
 
 ## Próximo paso
 
-**C2 (Opus)** solo con orden expresa del PO. Lo que sigue no se toca sin esa orden: cambio de esquema, `listen_addresses` (C0.6), reconstrucción real de la base y envío a git.
+**C2 (Opus)** solo con orden expresa del PO: cambio de esquema y reconstrucción real de la base. El cambio de `listen_addresses` a `localhost` (C0.6) es una acción separada, todavía sin orden; requiere reiniciar PostgreSQL. El push también requiere orden expresa.

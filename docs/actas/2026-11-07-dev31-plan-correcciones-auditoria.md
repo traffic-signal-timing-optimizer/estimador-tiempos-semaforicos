@@ -1,27 +1,27 @@
 Escrito para: el Product Owner (decisiones y aprobación) y el equipo técnico y el auditor (ejecución y verificación).
 
-# DEV31: análisis y plan de correcciones de las auditorías del 6 y 7 de noviembre (versión 3.3)
+# DEV31: análisis y plan de correcciones de las auditorías del 6 y 7 de noviembre (versión 3.4)
 
 - **Fecha:** 2026-11-07
 - **Tarea:** DEV31 (historia HU15). Se inserta **antes de F5** (panel estático), como etapa de correcciones «F4c». Orden general de fases: sección 13 de `docs/actas/2026-11-05-plan-base-de-datos.md`.
-- **Estado:** **plan aprobado por el PO el 2026-11-07, con las decisiones D1 a D14 aprobadas** (sección 10). **No se ejecuta nada:** cada etapa empieza solo con tu orden expresa (ACU-21).
+- **Estado actualizado al 2026-11-07:** plan aprobado por el PO; C0 y C1 cerradas, incluida la corrección posterior de P9. C2 y C3 no se han ejecutado. Cada etapa nueva empieza solo con orden expresa del PO (ACU-21); D11 se decide en P7.
 - **Fuentes:** `docs/auditorias/2026-11-06-auditoria-seguimiento-postgresql.md`, `docs/auditorias/2026-11-07-auditoria-seguimiento-dev31.md`, la corroboración del 2026-11-07 (sección 2) y las dos revisiones del PO (sección 1.1 y sección 3).
-- **Versiones anteriores:** v1 y v2 de este mismo documento. La v3.3 reemplaza a las anteriores; los acuerdos de la sección 3 vienen de ellas.
+- **Versiones anteriores:** v1 a v3.3 de este mismo documento. La v3.4 reemplaza a las anteriores; los acuerdos de la sección 3 vienen de ellas.
 - **Modelo con que se preparó:** Haiku 5.5.
 
 ## 1. Resumen para el PO
 
-**Qué pasa.** Las dos auditorías dejaron 10 observaciones abiertas (B01 a B10). Las comprobé con pruebas y no solo leyendo el código: **todas son reales**. Ninguna cambia una cifra de tus datos. Las 130 corridas están completas y coinciden con los archivos. Lo que fallan son las **herramientas de control**: en algunos casos dirían «todo en orden» cuando no lo está.
+**Qué pasaba al corte de la auditoría.** Las dos auditorías dejaron 10 observaciones abiertas (B01 a B10). Las comprobé con pruebas y no solo leyendo el código: **todas eran reales en ese corte**. Ninguna cambió una cifra de tus datos. Las 130 corridas estaban completas y coincidían con los archivos. Fallaban las **herramientas de control**: en algunos casos podían decir «todo en orden» cuando no lo estaba. El avance posterior de C0 y C1 está resumido arriba; C2 y C3 siguen pendientes.
 
 **Por qué aparecieron.** Casi todas salen de seis causas de fondo (sección 4). Si se corrigen solo los síntomas, la próxima auditoría encontrará el mismo problema en otra tabla. Por eso el plan corrige las causas.
 
-**Qué propongo.** Cuatro etapas antes de F5:
+**Plan aprobado.** Cuatro etapas antes de F5:
 
 | Etapa | Qué se hace | Cambia la base |
 |---|---|---|
 | C0 | Tus decisiones, y comprobaciones **solo de lectura** de red y de permisos | No |
 | C1 | Controles nuevos sin cambiar el esquema: cobertura en los dos sentidos, decisiones como archivos verificables, verificación con candado compartido, catálogo de reglas instaladas, respaldos con versión, comando de reconstrucción seguro | No |
-| C2 | Diseño corregido y **una sola reconstrucción** en un proceso de siete pasos con puertas (sección 6.2). Incluye el rol del panel, en un paso propio | Sí |
+| C2 | Diseño corregido y **una sola reconstrucción** en los diez pasos P0 a P9 con puertas (sección 6.2). Otorga al rol del panel acceso solo a vistas aprobadas | Sí |
 | C3 | Pruebas por observación, barrido de cegado en base desechable, ensayo de daño, evidencia reproducible y acta | No |
 
 **Esfuerzo:** cinco o seis sesiones. **Riesgo:** medio en C2, concentrado en el cegado y en el cambio de base.
@@ -29,6 +29,8 @@ Escrito para: el Product Owner (decisiones y aprobación) y el equipo técnico y
 **Medidas de protección de los datos:** (1) los procedimientos solo leen `datos/` y agregan carpetas nuevas; no modifican las existentes. (2) La base vigente se conserva con otro nombre y no se borra sin tu confirmación. (3) El cambio de nombre se prueba con reversión antes de hacerse. (4) Hay respaldo con ficha, verificado antes de cualquier cambio. **Riesgo residual:** un fallo no previsto durante el cambio, o un error al confirmar un borrado. Estas medidas lo reducen; no lo eliminan.
 
 **Meta para la próxima auditoría:** ninguna observación alta; solo observaciones bajas o riesgos aceptados y escritos.
+
+**Evidencia posterior al plan:** C0 y C1 se cerraron el 2026-11-07. La decisión D7 sobre las tres corridas de DEV00 ya se publicó; la bitácora registró 143 unidades publicadas, 140 cargadas y 3 con decisión. En C1.11 se añadió la comparación de versión del esquema, contenido y reglas, y la reversión cuando P9 encuentra una diferencia o `verify()` lanza una excepción. La puerta completa posterior pasó con 5408 pruebas y 43/43 contratos. Véanse las actas de C1, de las tres huellas y de la corrección P9. Las tablas de diagnóstico de este plan conservan el corte de la auditoría inicial; esta nota registra lo resuelto después.
 
 ### 1.1 Qué cambió en cada versión
 
@@ -127,8 +129,9 @@ Los dejo escritos para que no vuelvan a aparecer:
 ### C0. Decisiones y comprobaciones de solo lectura
 
 **Estado: cerrada el 2026-11-07.** Resultados:
+- **Acta documental de cierre:** `docs/actas/2026-11-07-dev31-f4c-c0-cierre-documental.md`; registra las comprobaciones previas y sus límites, sin repetir consultas.
 - **C0.1:** decisiones D1 a D15 aprobadas o aceptadas por el PO (D15 como riesgo aceptado).
-- **C0.2:** revisión de la configuración por los archivos del servidor (`postgresql.conf`, `postgresql.auto.conf`, `pg_hba.conf`) y del servicio. Sin confirmación en vivo de `SHOW hba_file` ni de `pg_hba_file_rules`: se dejó como pendiente opcional, porque no se hizo el paso de confirmación.
+- **C0.2:** revisión de la configuración por los archivos del servidor (`postgresql.conf`, `postgresql.auto.conf`, `pg_hba.conf`) y del servicio. Posteriormente `SHOW hba_file` respondió como `semaforo_lectura`, pero ese rol no pudo leer `pg_hba_file_rules`. Sigue pendiente la comprobación en vivo de las reglas con un rol autorizado; es opcional para el cierre de C0 y no debe confundirse con una confirmación ya hecha.
 - **C0.3:** rechazo confirmado desde 192.168.1.36, dos direcciones IPv6 públicas y el nombre del equipo; `localhost` sí pide clave. Firewall sin reglas de entrada para 5432.
 - **C0.4:** confirmado por el PO: Power BI y Python usan `localhost`.
 - **C0.5:** rol `semaforo_panel` creado por el PO como `postgres`; verificado sin privilegios de administrador, sin pertenencias, con clave aceptada por el servidor y sin acceso a `semaforo` (esperado hasta C2).
@@ -145,6 +148,8 @@ Los dejo escritos para que no vuelvan a aparecer:
 
 ### C1. Controles nuevos, sin cambiar el esquema
 
+**Estado actualizado:** C1 cerrada el 2026-11-07. Después se reforzó C1.11 para comparar tres huellas y revertir también si P9 lanza una excepción. Las descripciones siguientes son los criterios del plan; la evidencia está en las actas de C1 y de ambas correcciones.
+
 **Modelo:** Sonnet. **Riesgo:** bajo. **Esfuerzo:** dos sesiones.
 
 | Tarea | Corrige | Qué se hace | Criterio de aceptación |
@@ -159,7 +164,7 @@ Los dejo escritos para que no vuelvan a aparecer:
 | **C1.8 Ficha y referencia de cada respaldo** | B10, ACU-15, ACU-22, ACU-24 | Para los respaldos nuevos, `bd respaldar` registra en la ficha: la versión del esquema; la huella del contenido **del mismo estado de la base que se exportó**; el `carga_id` cuando corresponda; el commit; y el sha256 del `.dump`. Mecanismo: la huella y el volcado se toman con la misma instantánea de lectura (transacción de solo lectura y `pg_dump --snapshot`), para que la ficha corresponda exactamente a lo exportado. La ficha sirve de referencia para la restauración de prueba. Para los dos respaldos antiguos, los archivos se conservan en sus ubicaciones y la ficha registra qué campos pudieron comprobarse. La huella histórica de `control.cargas` puede usarse como referencia solo si corresponde al estado que se quiso respaldar y se identifica la carga de origen; si esa relación no se puede establecer, el resultado de contenido queda *no comprobado*, aunque la restauración termine bien. La versión y la huella mencionadas en la v3.2 para esas copias son valores esperados hasta verificarlas individualmente. Cada campo tiene un estado (*verificado*, *declarado*, *no comprobado* o *desconocido*); ninguno afirma más de lo leído o restaurado | Ficha generada; ningún campo afirma más de lo verificado. Pruebas en C3.5 |
 | **C1.9 Estado de la red** | B07, ACU-14 | `bd verificar --red` informa `listen_addresses`, `hba_file` y las reglas de `pg_hba.conf`, en solo lectura. Si el rol no puede leer las reglas, el resultado es *no verificado: lo consulta el administrador*, sin inventarlo | Con un archivo de reglas de ejemplo (analizador) y en la laptop real (C0.2) |
 | **C1.10 Catálogo de reglas instaladas** | N3, B02, ACU-11 | La huella de referencia incluye: disparadores y si están activos, seguridad por filas, políticas, permisos por rol, definiciones de funciones y vistas, y los `GRANT`. `bd verificar` las compara | Regresión: **desactivar un disparador sin tocar datos debe fallar**; cambiar una política debe fallar |
-| **C1.11 `bd reconstruir` seguro** | A06, N4, B10, ACU-02, ACU-17 | Exige la carpeta del repositorio. Crea la base candidata con **nombre temporal** y la llena con el proceso de la sección 6.2 (pasos P0 a P9). Cambia el nombre solo si todo coincide y tienes aprobada la huella nueva (D11). La base vigente pasa a `semaforo_anterior_<fecha>` y **no se borra** sin tu confirmación (D12). Si el cambio de nombre falla, lo revierte. Nunca toca otras bases | Prueba de reversión: si el segundo cambio de nombre falla, la base vigente queda como estaba |
+| **C1.11 `bd reconstruir` seguro** | A06, N4, B10, ACU-02, ACU-17 | Exige la carpeta del repositorio. Crea la base candidata con **nombre temporal** y la llena con el proceso de la sección 6.2 (P0 a P9). Cambia el nombre solo si coinciden la versión del esquema, la huella de contenido y la huella de reglas aprobadas por el PO (D11). La base vigente pasa a `semaforo_anterior_<fecha>` y **no se borra** sin tu confirmación (D12). Si falla el cambio de nombre o la verificación P9, intenta revertir. Si también falla la reversión, informa que el estado de las bases debe comprobarse. Nunca toca otras bases | Pruebas con bases temporales: fallo del segundo cambio, diferencia o excepción en P9, y fallo adicional de la reversión |
 | **C1.12 Guiones versionados** | A06, N4 | Los ensayos de daño de F2 a F4 pasan a `scripts/mutaciones/` con su índice | Están en el repositorio y se pueden repetir |
 
 ### C2. Diseño corregido, con una sola reconstrucción
@@ -178,7 +183,7 @@ Los dejo escritos para que no vuelvan a aparecer:
 
 ### 6.2. Proceso de la reconstrucción (C2.7)
 
-Cada paso tiene una puerta: si falla, se detiene y la base vigente no se toca.
+Cada paso tiene una puerta. Hasta P7, si falla, se detiene sin cambiar el nombre de la base vigente. P8 y P9 intentan revertir cualquier cambio de nombre fallido; si también falla la reversión, se informa el estado incierto y se comprueba antes de continuar. No se promete que la base vigente nunca cambie durante esos dos pasos.
 
 | Paso | Qué se hace | Puerta |
 |---|---|---|
@@ -189,9 +194,9 @@ Cada paso tiene una puerta: si falla, se detiene y la base vigente no se toca.
 | **P4** | Regenerar una segunda candidata con el mismo proceso | Misma huella (QA36) |
 | **P5** | Registrar la versión y la huella de la candidata **antes** de generar su respaldo, para que la referencia corresponda al estado que se exporta. Respaldar; restaurar ese respaldo en una base temporal; recalcular la huella a partir de sus tablas | P5 pasa solo si el sha256 del archivo coincide, la restauración termina bien y la versión y la huella recalculada coinciden con la referencia registrada antes del respaldo. *No comprobado* detiene el proceso antes del cambio de nombre |
 | **P6** | **Pruebas de cegado y seguridad** de C3.1 y C3.2, en una **base desechable** con el mismo esquema, permisos y catálogo (comparado por huella). Sobre la candidata, solo consultas de solo lectura | Todas las pruebas pasan |
-| **P7** | Calcular la huella nueva de la candidata y presentarla al PO | **D11**: el PO aprueba la huella nueva |
+| **P7** | Calcular y presentar al PO la versión del esquema, la huella de contenido y la huella de reglas de la candidata | **D11**: el PO aprueba esos tres valores solo si P0 a P6 pasan |
 | **P8** | Cambio de nombre con reversión: vigente → `semaforo_anterior_<fecha>`; candidata → `semaforo`. Si el segundo paso falla, se revierte. La reversión se prueba antes en la base desechable | El cambio queda confirmado y la vigente conservada |
-| **P9** | Verificación posterior de la base nueva contra la huella aprobada (P7). Se escribe `docs/bd/huellas.json` como commit aparte | Coincide |
+| **P9** | Verificación posterior de la base nueva contra los tres valores aprobados en P7. Si hay diferencia o la verificación lanza una excepción, se intenta restaurar la base anterior; si la reversión falla, se informa el estado por comprobar. Tras una coincidencia se escribe `docs/bd/huellas.json` como commit aparte | Coinciden esquema, contenido y reglas |
 
 ### C3. Pruebas, evidencia y cierre
 
@@ -301,7 +306,7 @@ Queda para F6 (ACU-19). Dos reglas desde ahora, para no rehacer el diseño: la i
 | D8 | Rol del panel `semaforo_panel` | Crearlo una vez como `postgres` (tú), en el paso C0.5 / no tener rol de panel | **Crearlo**, en su paso propio. El panel no tiene permisos de tabla |
 | D9 | Archivos que mezclan escenarios de desarrollo y de prueba | (a) ocultos hasta abrir la prueba / (b) visibles con sus nombres | **(a)** |
 | D10 | Versión del manifiesto de métricas | 1.1.0 con huella del protocolo / no cambiar versión | **1.1.0**, sin tocar `metricas.json` |
-| D11 | Huella nueva de la base candidata (paso P7) | Aprobar después de P0 a P6 / no aprobar | **Aprobar** solo si P0 a P6 pasan. Es el punto en que se decide la base nueva |
+| D11 | Versión del esquema, huella de contenido y huella de reglas de la candidata (P7) | Aprobar después de P0 a P6 / no aprobar | **Aprobar los tres valores** solo si P0 a P6 pasan. Es el punto en que se decide la base nueva |
 | D12 | Borrar la base anterior `semaforo_anterior_<fecha>` | Después de tu confirmación, en una fecha posterior / conservarla | **Conservarla** hasta que F5 esté verificado; luego borrarla con tu confirmación |
 | D13 | Aprobada por el PO (2026-11-07): el algoritmo de la huella queda versionado en la ficha y en `huellas.json` (`algoritmo_huella`). Si no coincide, la respuesta es *contenido no comprobado: algoritmo distinto* | (a) versionarlo / (b) no versionarlo | **(a)**. El algoritmo no cambió desde F3 (`verificacion.py`, commit `d66b723`). Versionarlo evita que una reforma futura convierta una huella válida en *difiere* |
 | D14 | Aprobada por el PO (2026-11-07): una huella histórica de `control.cargas` solo sirve como referencia si la última carga de la base restaurada está completada, tiene huella registrada y no tiene cargas posteriores | (a) esa regla / (b) aceptar cualquier carga anterior | **(a)**. Sin esa regla, una huella antigua podría atribuirse a un respaldo que no corresponde |
