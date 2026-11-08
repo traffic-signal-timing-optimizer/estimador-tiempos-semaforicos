@@ -235,8 +235,12 @@
     if (!comparison) return '';
     const items = [];
     const base = comparison.plan_observado_diagnostico;
+    const withFinalistSeeds = comparison.plan_observado_finalistas;
+    if (withFinalistSeeds && withFinalistSeeds.corridas) {
+      items.push(`<li><b>Plan actual con las semillas de los finalistas (${esc(withFinalistSeeds.corridas)} semillas):</b> ${esc(withFinalistSeeds.con_incidentes)} con atascos o choques (teletransportes o choques). Sin ellos, la demora media es ${num(withFinalistSeeds.demora_sin_incidentes.media)} s/veh.</li>`);
+    }
     if (base && base.corridas) {
-      items.push(`<li><b>Plan actual, ${esc(base.corridas)} semillas:</b> demora de ${num(base.demora.minimo)} a ${num(base.demora.maximo)} s/veh. En ${esc(base.con_incidentes)} semillas hubo vehículos atascados (teletransportes o choques): con ellos la media es ${num(base.demora_con_incidentes.media)} s/veh, sin ellos ${num(base.demora_sin_incidentes.media)} s/veh. Por eso un solo promedio no lo describe bien.</li>`);
+      items.push(`<li><b>Plan actual, ${esc(base.corridas)} semillas de diagnóstico:</b> demora de ${num(base.demora.minimo)} a ${num(base.demora.maximo)} s/veh. En ${esc(base.con_incidentes)} semillas hubo vehículos atascados (teletransportes o choques): con ellos la media es ${num(base.demora_con_incidentes.media)} s/veh, sin ellos ${num(base.demora_sin_incidentes.media)} s/veh. Por eso un solo promedio no lo describe bien.</li>`);
     }
     const paired = list(comparison.emparejada);
     const eligible = paired.filter((p) => p.elegible);
@@ -517,15 +521,32 @@
   }
 
   function finalistsSection(comparison) {
-    const base = comparison.plan_observado_diagnostico;
+    const base = comparison.plan_observado_finalistas || comparison.plan_observado_diagnostico;
     const dots = (group) => list(group.por_semilla).map((s) => ({ v: s.demora_media_s, bad: Boolean(s.teletransportes || s.choques), title: `Semilla ${s.semilla}: ${num(s.demora_media_s)} s/veh` }));
-    const rows = [{ label: 'Plan actual (diagnóstico)', dots: dots(base) }, ...list(comparison.finalistas).map((f) => ({ label: planLabel(f), dots: dots(f.grupo) }))];
+    const rows = [{ label: 'Plan actual (mismas semillas)', dots: dots(base) }, ...list(comparison.finalistas).map((f) => ({ label: planLabel(f), dots: dots(f.grupo) }))];
     const statRow = (name, group, extra) => ({ name, group, extra });
-    const stats = [statRow('Plan actual (diagnóstico)', base, null), ...list(comparison.finalistas).map((f) => statRow(planLabel(f), f.grupo, f))];
+    const stats = [statRow('Plan actual (mismas semillas)', base, null), ...list(comparison.finalistas).map((f) => statRow(planLabel(f), f.grupo, f))];
+    const pairs = list(comparison.finalistas).map((f) => ({ f, p: f.pares_con_plan_actual })).filter((x) => x.p);
+    const pairSummary = pairs.length ? '<h3 class="sub">Diferencia con el plan actual, semilla por semilla</h3><p class="cap">Solo cuentan las semillas en que ambos planes llegaron sin atascos ni choques, con demora medida. Negativo = menos espera que el plan actual.</p>'
+      + table([
+        ['Plan', (x) => `<span class="id">${esc(x.f.plan_id.slice(0, 8))}</span> · ciclo ${num(x.f.ciclo_s, 0)} s`],
+        ['Pares válidos', (x) => int(x.p.pares_validos), true],
+        ['Diferencia media (s/veh)', (x) => `<span class="${x.p.diferencia_valida.media < 0 ? 'menos' : 'mas'}">${signed(x.p.diferencia_valida.media)}</span>`, true],
+        ['Semillas', (x) => esc(x.p.por_semilla.filter((s) => s.valida).map((s) => s.semilla).join(', ') || '—')]
+      ], pairs)
+      + pairs.map((x) => `<details><summary><span class="id">${esc(x.f.plan_id.slice(0, 8))}</span>: semilla por semilla</summary>`
+        + table([
+          ['Semilla', (s) => esc(s.semilla), true],
+          ['Demora del finalista (s/veh)', (s) => num(s.demora_s), true],
+          ['Demora del plan actual (s/veh)', (s) => num(s.demora_actual_s), true],
+          ['Diferencia (s/veh)', (s) => `<span class="${s.diferencia_s < 0 ? 'menos' : 'mas'}">${signed(s.diferencia_s)}</span>`, true],
+          ['¿Par válido?', (s) => (s.valida ? 'Sí' : pill('draft', 'No'))]
+        ], x.p.por_semilla) + '</details>').join('') : '';
     if (!list(comparison.finalistas).length) return '';
     return '<h2 class="sec">3. Más semillas: finalistas y plan actual</h2>'
       + (comparison.finalistas_con_mismas_semillas ? '' : notice(`<b>No es una comparación emparejada.</b> Los finalistas corrieron con las semillas ${esc(list(comparison.semillas_finalistas).join(', '))}; el plan actual, con otras (${esc(list(base.por_semilla).map((s) => s.semilla).join(', '))}). Se pueden mirar lado a lado, pero no restar. Para compararlos de verdad hay que simular el plan actual con las semillas de los finalistas.`, true))
       + stripPlot(rows, 's/veh', 'Demora por semilla del plan actual y de cada finalista')
+      + pairSummary
       + table([
         ['Plan', (r) => esc(r.name)],
         ['Semillas', (r) => int(r.group.corridas), true],

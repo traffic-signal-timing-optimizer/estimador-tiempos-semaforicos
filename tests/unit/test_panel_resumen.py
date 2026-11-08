@@ -10,7 +10,7 @@ OBSERVED = "plan-actual"
 OTHER = "plan-otro"
 SCENARIO = "ESC"
 CASE = {"caso_id": "C", "caso_version": "1"}
-SEARCH = {"busqueda_id": "B", "escenario_id": SCENARIO, **CASE}
+SEARCH = {"busqueda_id": "B", "escenario_id": SCENARIO, "protocolo_id": "P", **CASE}
 
 
 def _run(  # noqa: PLR0913  (cada dato de la corrida se nombra)
@@ -142,7 +142,7 @@ def test_without_a_valid_pair_there_is_no_difference_never_a_zero() -> None:
 
 def test_finalists_on_other_seeds_are_declared_not_paired() -> None:
     runs = [
-        _run("d1", OBSERVED, 100, stage="diagnostic"),
+        _run("d1", OBSERVED, 100, stage="diagnostic", protocol="DEV19"),
         _run("f1", OTHER, 2001, delay=70.0, stage="finalists"),
     ]
     seeds = [_seed("B", 2001, "f1", stage="finalists", delay=70.0)]
@@ -208,3 +208,36 @@ def test_a_series_is_one_stage_and_one_measuring_protocol() -> None:
 def test_without_an_observed_plan_there_is_nothing_to_compare_against() -> None:
     plans = [{"plan_id": OTHER, **CASE}]
     assert comparisons([SEARCH], [_candidate("B", OTHER)], [], [], plans) == []
+
+
+def test_the_current_plan_on_the_finalist_seeds_is_not_mixed_with_the_diagnostics() -> None:
+    runs = [
+        _run("dx", OBSERVED, 100, stage="diagnostic", protocol="DEV19"),
+        _run("fa", OBSERVED, 2001, stage="diagnostic", protocol="P", delay=100.0),
+        _run("fb", OBSERVED, 2002, stage="diagnostic", protocol="P", teleports=5, delay=None),
+        _run("ff", OTHER, 2001, stage="finalists", protocol="P", delay=70.0),
+    ]
+    seeds = [_seed("B", 2001, "ff", stage="finalists", delay=70.0)]
+    result = _compare(runs, seeds, _candidate("A", OBSERVED), _candidate("B", OTHER, finalist=True))
+    assert result["plan_observado_diagnostico"]["corridas"] == 1  # solo la de DEV19
+    # Solo cuentan las semillas de finalistas de esta búsqueda (2001); la 2002 no es de ellas.
+    with_finalists = result["plan_observado_finalistas"]
+    assert with_finalists["corridas"] == 1
+    assert with_finalists["con_incidentes"] == 0
+    assert result["finalistas_con_mismas_semillas"] is True
+    (finalist,) = result["finalistas"]
+    pairs = finalist["pares_con_plan_actual"]
+    assert pairs["pares_validos"] == 1
+    assert pairs["diferencia_valida"]["media"] == pytest.approx(-30.0)  # 70 frente a 100
+
+
+def test_a_pair_with_a_teleport_on_either_side_is_not_counted() -> None:
+    runs = [
+        _run("fa", OBSERVED, 2001, stage="diagnostic", protocol="P", delay=100.0),
+        _run("ff", OTHER, 2001, stage="finalists", protocol="P", delay=70.0, teleports=1),
+    ]
+    seeds = [_seed("B", 2001, "ff", stage="finalists", delay=70.0)]
+    result = _compare(runs, seeds, _candidate("A", OBSERVED), _candidate("B", OTHER, finalist=True))
+    pairs = result["finalistas"][0]["pares_con_plan_actual"]
+    assert pairs["pares_validos"] == 0
+    assert pairs["diferencia_valida"]["media"] is None

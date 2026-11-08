@@ -180,7 +180,50 @@ def _paired_plan(
     }
 
 
-def _finalist_plan(candidate: Row, rows: list[Row], runs: dict[str, Row]) -> Row:
+def _usable(run: Row | None) -> bool:
+    """Una corrida cuenta para una diferencia: tiene demora y no tuvo atascos ni choques."""
+    return (
+        run is not None
+        and run.get("demora_media_s") is not None
+        and not run.get("teletransportes_total")
+        and not run.get("choques")
+    )
+
+
+def _finalist_pairs(
+    candidate: Row, rows: list[Row], runs: dict[str, Row], actual: dict[int, Row]
+) -> Row:
+    """El finalista frente al plan actual, semilla por semilla (solo pares en que ambos cuentan)."""
+    own = _seed_rows(candidate, rows, FINALISTS)
+    seeds: list[Row] = []
+    for seed in sorted(own):
+        mine = runs.get(str(own[seed].get("run_id")))
+        theirs = actual.get(seed)
+        both = _usable(mine) and _usable(theirs)
+        seeds.append(
+            {
+                "semilla": seed,
+                "demora_s": None if mine is None else mine.get("demora_media_s"),
+                "demora_actual_s": None if theirs is None else theirs.get("demora_media_s"),
+                "diferencia_s": (
+                    mine["demora_media_s"] - theirs["demora_media_s"] if both else None  # type: ignore[index,operator]
+                ),
+                "valida": both,
+            }
+        )
+    valid = [item["diferencia_s"] for item in seeds if item["valida"]]
+    return {
+        "candidato_id": candidate["candidato_id"],
+        "plan_id": candidate["plan_id"],
+        "pares_validos": len(valid),
+        "diferencia_valida": _stats(valid),
+        "por_semilla": seeds,
+    }
+
+
+def _finalist_plan(
+    candidate: Row, rows: list[Row], runs: dict[str, Row], actual: dict[int, Row]
+) -> Row:
     own = _seed_rows(candidate, rows, FINALISTS)
     members = [runs[str(row["run_id"])] for row in own.values() if str(row["run_id"]) in runs]
     return {
@@ -191,6 +234,7 @@ def _finalist_plan(candidate: Row, rows: list[Row], runs: dict[str, Row]) -> Row
         "posicion": candidate.get("posicion_finalistas"),
         "problemas": candidate.get("problemas_finalistas") or {},
         "grupo": group_stats(members),
+        "pares_con_plan_actual": _finalist_pairs(candidate, rows, runs, actual),
     }
 
 
@@ -220,8 +264,23 @@ def _one_comparison(  # noqa: PLR0913  (cada lista de filas tiene su nombre)
             if row["etapa"] == FINALISTS and row["busqueda_id"] == search["busqueda_id"]
         }
     )
-    observed_seeds = {run.get("semilla_sumo") for run in observed_runs}
-    diagnostic = [run for run in observed_runs if run.get("etapa") == DIAGNOSTIC]
+    protocol = search.get("protocolo_id")
+    # El plan actual medido con las semillas de los finalistas y con su mismo protocolo.
+    with_finalists = [
+        run
+        for run in observed_runs
+        if protocol is not None
+        and run.get("protocolo_metricas_id") == protocol
+        and run.get("semilla_sumo") in finalist_seeds
+    ]
+    actual_by_seed = {int(run["semilla_sumo"]): run for run in with_finalists}
+    observed_seeds = {run.get("semilla_sumo") for run in with_finalists}
+    # Lo demás de diagnóstico, con otro protocolo: no se mezcla con las semillas de finalistas.
+    diagnostic = [
+        run
+        for run in observed_runs
+        if run.get("etapa") == DIAGNOSTIC and run.get("protocolo_metricas_id") != protocol
+    ]
     return {
         "busqueda_id": search["busqueda_id"],
         "escenario_id": scenario,
@@ -245,8 +304,9 @@ def _one_comparison(  # noqa: PLR0913  (cada lista de filas tiene su nombre)
         "semillas_finalistas": finalist_seeds,
         "finalistas_con_mismas_semillas": bool(finalist_seeds)
         and all(seed in observed_seeds for seed in finalist_seeds),
-        "finalistas": [_finalist_plan(row, rows, by_id) for row in finalists],
+        "finalistas": [_finalist_plan(row, rows, by_id, actual_by_seed) for row in finalists],
         "plan_observado_diagnostico": group_stats(diagnostic),
+        "plan_observado_finalistas": group_stats(with_finalists),
     }
 
 
