@@ -1,11 +1,11 @@
 {
   "schema_version": "1.1.0",
-  "generated_at": "2026-11-08T00:38:06.491251Z",
-  "carga_id": "20261107T230813Z_9cd9f1e2",
-  "schema_version_db": "sql-d405569d4d1daf46",
-  "content_sha256": "da4c33599f5668a3753cca70e193bf6fab98cbef302af53b9ca3b95e5b1ed0e0",
+  "generated_at": "2026-11-08T13:06:02.283066Z",
+  "carga_id": "20261108T053053Z_4a30b512",
+  "schema_version_db": "sql-891b34e6c96bf201",
+  "content_sha256": "9980fa130cc294af764f764c31320153d58edac0b073cefd5568b4982a33a9f2",
   "algoritmo_huella": "contenido-1",
-  "reglas_sha256": "6e0eed086f3025847af5ae487be0cbc7b8e4b930dfc3fc6aadf16f0a0d76e257",
+  "reglas_sha256": "82d7c55d8c12abb4f85899f320740c4aca598c602680a104d4238cdd2774610d",
   "algoritmo_reglas": "reglas-1",
   "rows": {
     "aprendizaje.conjunto_etiquetas": 0,
@@ -32,6 +32,7 @@
     "caso.reportes_calidad": 0,
     "caso.tipos_vehiculo": 4,
     "caso.tramos": 9,
+    "control.archivo_escenarios": 2611,
     "control.artefactos": 2625,
     "control.entornos": 1,
     "control.hitos": 0,
@@ -58,7 +59,7 @@
     "simulacion.eventos": 1499,
     "simulacion.plan_tramos": 189,
     "simulacion.planes": 21,
-    "simulacion.resultados_acceso": 520,
+    "simulacion.resultados_acceso": 910,
     "simulacion.resultados_corrida": 130,
     "simulacion.resultados_movimiento": 2600,
     "simulacion.vehiculos": 231400
