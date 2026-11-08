@@ -64,8 +64,8 @@ MUTATIONS = [
     M(
         "se abre la prueba sin modelo congelado",
         SQL / "02_reglas.sql",
-        "        IF NOT EXISTS (SELECT 1 FROM control.hitos WHERE tipo = 'model_frozen' AND modelo_id = v_modelo)\n            OR NOT EXISTS (",
-        "        IF NOT EXISTS (",
+        "        IF NOT EXISTS (\n                SELECT 1 FROM control.hitos AS h\n",
+        "        IF FALSE AND NOT EXISTS (\n                SELECT 1 FROM control.hitos AS h\n",
         RULES,
     ),
     M(
@@ -90,10 +90,10 @@ MUTATIONS = [
         RULES,
     ),
     M(
-        "la vista no aplica el cegado a quien consulta",
+        "la vista del panel no filtra los escenarios cegados",
         SQL / "02_reglas.sql",
-        "CREATE VIEW vistas.zona_escenario WITH (security_invoker = true) AS",
-        "CREATE VIEW vistas.zona_escenario AS",
+        "    WHERE control.escenario_visible(e.escenario_id);\nCOMMENT ON VIEW vistas.zona_escenario",
+        "    ;\nCOMMENT ON VIEW vistas.zona_escenario",
         RULES,
     ),
     M(
