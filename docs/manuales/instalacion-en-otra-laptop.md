@@ -306,7 +306,7 @@ Remove-Item Env:PGPASSWORD
 Remove-Variable secure, ptr
 ```
 
-- Debe terminar con código **0** y decir `PostgreSQL 17.9 listo: base semaforo, esquema sql-d405569d4d1daf46`.
+- Debe terminar con código **0** y decir `PostgreSQL 17.9 listo: base semaforo, esquema sql-891b34e6c96bf201` (versión C2; en una instalación anterior a C2 aparecería la versión previa).
 - **Puede repetirse**: lo que ya existe se deja como está y el informe lo dice.
 - Si falla con «no hay conexión», el servicio no está en ejecución (sección 2.4, paso 3).
 - Si falla con «permiso denegado» sobre la carpeta, ejecute PowerShell **como administrador** y repita.
