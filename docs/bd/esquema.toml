@@ -14,9 +14,9 @@
 # - cada tabla recibe además las columnas comunes (sección [comunes]); el generador las agrega.
 
 version = "1.1.0-candidato"
-fecha = "2026-11-07"
+fecha = "2026-11-08"
 motor = "PostgreSQL 17.9"
-estado = "candidato C2; pendiente de aprobar las tres huellas en D11"
+estado = "aprobado en D11; C2 cerrada con P0–P9 completados"
 
 [[esquemas]]
 nombre = "control"
