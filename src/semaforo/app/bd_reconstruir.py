@@ -15,19 +15,22 @@ queda como estaba.
 - **P5** su respaldo, con la huella registrada **antes** de exportarlo, se restaura en otra base
   temporal y la huella recalculada coincide;
 - **P7** se calculan la versión, la huella de contenido y la huella de reglas de la candidata, para
-  que el PO apruebe la huella nueva (D11).
+  que el PO apruebe las tres (D11).
 
 Las pruebas de cegado y de seguridad (**P6**) corren en una base desechable con el mismo esquema:
 no pueden correr aquí, porque insertan datos de prueba y la base es de solo agregar. Quien ejecuta
 las declara aprobadas al pasar a la segunda fase.
 
-**Cambiar.** Solo con la huella aprobada y las pruebas de seguridad declaradas:
+**Cambiar.** Solo con la aprobación (versión del esquema, huella de contenido y huella de reglas,
+las tres que dio la preparación) y las pruebas de seguridad declaradas:
 
 - **P8** la vigente pasa a ``semaforo_anterior_<fecha>`` y la candidata ocupa su lugar. Si el
   segundo cambio de nombre falla, se **revierte** el primero y la vigente queda como estaba. La
   anterior **no se borra** nunca aquí;
-- **P9** se verifica la base nueva contra la huella aprobada y, si se pide, se escribe el archivo
-  de huellas. Si no coincide, también se revierte.
+- **P7** se vuelve a comprobar que la candidata tiene las tres huellas aprobadas, antes de tocar
+  nada;
+- **P9** se verifica la base nueva contra las tres huellas aprobadas y, si se pide, se escribe el
+  archivo de huellas. Si no coincide, también se revierte.
 
 Nunca toca bases que no sean del proyecto: los nombres tienen que ser ``semaforo`` o empezar con
 ``semaforo_candidata_``, ``semaforo_anterior_`` o ``semaforo_pruebas_``.
@@ -40,7 +43,7 @@ from typing import Literal
 
 from psycopg import sql
 
-from semaforo.app.bd_commands import load_options_of, regenerate, verify
+from semaforo.app.bd_commands import VerifyReport, load_options_of, regenerate, verify
 from semaforo.bd.carga.motor import LoadOptions, load_workspace
 from semaforo.bd.conciliacion import reconcile
 from semaforo.bd.conexion import ADMIN, DATABASE, BdError, Connection, connect
@@ -52,7 +55,15 @@ from semaforo.dominio.base_model import FrozenModel
 from semaforo.dominio.errors import ErrorCode
 from semaforo.trazabilidad.store import utc_now
 
-__all__ = ["Preparation", "Rename", "Step", "SwitchReport", "prepare_rebuild", "switch_database"]
+__all__ = [
+    "Approval",
+    "Preparation",
+    "Rename",
+    "Step",
+    "SwitchReport",
+    "prepare_rebuild",
+    "switch_database",
+]
 
 NAME = re.compile(r"^semaforo(_(candidata|anterior|pruebas)_[a-z0-9_]+)?$")
 PREVIOUS_PREFIX = "semaforo_anterior_"
@@ -85,6 +96,18 @@ class Preparation(FrozenModel):
     backup: str | None
 
 
+class Approval(FrozenModel):
+    """Lo que aprueba el PO: las tres huellas que dejó la preparación en la candidata (D11).
+
+    Aprobar solo el contenido no alcanza: permisos, políticas y disparadores pueden cambiar sin
+    tocar una sola fila, y también forman parte de la base que se entrega.
+    """
+
+    version_esquema: str
+    content_sha256: str
+    rules_sha256: str
+
+
 class SwitchReport(FrozenModel):
     """Resultado de ``bd reconstruir cambiar``."""
 
@@ -95,7 +118,9 @@ class SwitchReport(FrozenModel):
     previous: str | None
     reason: str | None
     steps: list[Step]
+    version_esquema: str | None
     content_sha256: str | None
+    rules_sha256: str | None
     fingerprints_file: str | None
 
 
@@ -256,6 +281,19 @@ def _swap(admin: Connection, current: str, candidate: str, previous: str, rename
         raise
 
 
+def _mismatch(measured: VerifyReport, approved: Approval) -> str | None:
+    """Qué huella de la base medida no coincide con la aprobada (``None`` si las tres coinciden)."""
+    if measured.status != "intact":
+        return "la base no se pudo medir con certeza"
+    if measured.database_schema != approved.version_esquema:
+        return "versión del esquema"
+    if measured.content_sha256 != approved.content_sha256:
+        return "huella de contenido"
+    if measured.rules_sha256 != approved.rules_sha256:
+        return "huella de reglas"
+    return None
+
+
 def _switch_stopped(  # noqa: PLR0913, PLR0917  (describe la falla de un paso)
     process: _Process, current: str, candidate: str, code: str, name: str, reason: str
 ) -> SwitchReport:
@@ -267,7 +305,9 @@ def _switch_stopped(  # noqa: PLR0913, PLR0917  (describe la falla de un paso)
         previous=None,
         reason=reason,
         steps=process.steps,
+        version_esquema=None,
         content_sha256=None,
+        rules_sha256=None,
         fingerprints_file=None,
     )
 
@@ -277,7 +317,7 @@ def switch_database(  # noqa: PLR0913  (opciones de solo palabra clave)
     repository: Path,
     *,
     candidate: str,
-    approved_sha256: str,
+    approved: Approval,
     tests_approved: bool,
     database: str = DATABASE,
     previous: str | None = None,
@@ -302,16 +342,17 @@ def switch_database(  # noqa: PLR0913  (opciones de solo palabra clave)
         )
     process.ok("P6", "pruebas de cegado y seguridad declaradas aprobadas por quien ejecuta")
     measured = verify(workspace, repository, compare=False, database=name)
-    if measured.status != "intact" or measured.content_sha256 != approved_sha256:
+    mismatch = _mismatch(measured, approved)
+    if mismatch is not None:
         return _switch_stopped(
             process,
             current,
             name,
             "P7",
-            "huella aprobada",
-            "la huella de la candidata no es la aprobada",
+            "aprobación",
+            f"la candidata no coincide con lo aprobado en la {mismatch}",
         )
-    process.ok("P7", "huella aprobada", approved_sha256)
+    process.ok("P7", "aprobación", f"esquema, contenido y reglas: {approved.content_sha256}")
     with connect(ADMIN, database="postgres", autocommit=True) as admin:
         if _connections(admin, [current, name]):
             return _switch_stopped(
@@ -320,7 +361,8 @@ def switch_database(  # noqa: PLR0913  (opciones de solo palabra clave)
         _swap(admin, current, name, old, rename)
         process.ok("P8", "cambio de nombre", f"la vigente quedó como {old}")
         after = verify(workspace, repository, compare=False, database=current)
-        if after.content_sha256 != approved_sha256 or after.status != "intact":
+        mismatch = _mismatch(after, approved)
+        if mismatch is not None:
             _swap(admin, current, old, name, rename)  # la vigente vuelve a su lugar
             return _switch_stopped(
                 process,
@@ -328,9 +370,10 @@ def switch_database(  # noqa: PLR0913  (opciones de solo palabra clave)
                 name,
                 "P9",
                 "verificación de la base nueva",
-                "la base nueva no da la huella aprobada: se revirtió el cambio",
+                f"la base nueva no coincide con lo aprobado en la {mismatch}: "
+                "se revirtió el cambio",
             )
-    process.ok("P9", "verificación de la base nueva", "misma huella")
+    process.ok("P9", "verificación de la base nueva", "las tres huellas coinciden")
     written: str | None = None
     if fingerprints is not None:
         written = verify(
@@ -343,6 +386,8 @@ def switch_database(  # noqa: PLR0913  (opciones de solo palabra clave)
         previous=old,
         reason=None,
         steps=process.steps,
+        version_esquema=after.database_schema,
         content_sha256=after.content_sha256,
+        rules_sha256=after.rules_sha256,
         fingerprints_file=written,
     )

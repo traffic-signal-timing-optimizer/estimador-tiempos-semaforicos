@@ -42,6 +42,7 @@ from semaforo.app.bd_commands import (
     verify_exit_code,
 )
 from semaforo.app.bd_reconstruir import (
+    Approval,
     Preparation,
     Step,
     SwitchReport,
@@ -224,7 +225,13 @@ def _add_backups_and_rebuild(
     switch = phases.add_parser("cambiar", help="cambia la candidata por la vigente (P6 a P9)")
     switch.add_argument("--candidata", required=True, help="la candidata que preparó la fase 1")
     switch.add_argument(
+        "--esquema-aprobado", required=True, help="la versión del esquema que aprobó el PO (D11)"
+    )
+    switch.add_argument(
         "--huella-aprobada", required=True, help="la huella de contenido que aprobó el PO (D11)"
+    )
+    switch.add_argument(
+        "--reglas-aprobadas", required=True, help="la huella de reglas instaladas que aprobó el PO"
     )
     switch.add_argument(
         "--pruebas-aprobadas",
@@ -556,8 +563,9 @@ def _rebuild(arguments: argparse.Namespace, workspace: Path) -> int:
         code = 0 if prepared.status == "lista" else 5
         emit(with_exit(prepared.model_dump(mode="json"), code))
         header = (
-            f"Candidata {prepared.candidate} lista. Huella de contenido a aprobar: "
-            f"{prepared.content_sha256}"
+            f"Candidata {prepared.candidate} lista. Para aprobar, las tres huellas: esquema "
+            f"{prepared.version_esquema}, contenido {prepared.content_sha256}, reglas "
+            f"{prepared.rules_sha256}"
             if prepared.status == "lista"
             else f"Reconstrucción detenida en {prepared.stopped_at}: {prepared.reason}"
         )
@@ -567,7 +575,11 @@ def _rebuild(arguments: argparse.Namespace, workspace: Path) -> int:
         workspace,
         repository,
         candidate=str(arguments.candidata),
-        approved_sha256=str(arguments.huella_aprobada),
+        approved=Approval(
+            version_esquema=str(arguments.esquema_aprobado),
+            content_sha256=str(arguments.huella_aprobada),
+            rules_sha256=str(arguments.reglas_aprobadas),
+        ),
         tests_approved=bool(arguments.pruebas_aprobadas),
         database=database,
         previous=arguments.anterior,

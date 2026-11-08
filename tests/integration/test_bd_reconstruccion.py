@@ -15,6 +15,7 @@ import pytest
 
 from semaforo.app.bd_commands import verify
 from semaforo.app.bd_reconstruir import (
+    Approval,
     Preparation,
     Rename,
     SwitchReport,
@@ -71,6 +72,23 @@ def rebuild(tmp_path: Path) -> Iterator[Rebuild]:
         drop_database(name)
 
 
+WRONG = Approval(
+    version_esquema="sql-de-otra-version", content_sha256="0" * 64, rules_sha256="0" * 64
+)
+
+
+def _approval(prepared: Preparation) -> Approval:
+    """Lo que aprueba el PO: las tres huellas que dejó la preparación."""
+    assert prepared.version_esquema is not None
+    assert prepared.content_sha256 is not None
+    assert prepared.rules_sha256 is not None
+    return Approval(
+        version_esquema=prepared.version_esquema,
+        content_sha256=prepared.content_sha256,
+        rules_sha256=prepared.rules_sha256,
+    )
+
+
 def _prepare(made: Rebuild, workspace: Path | None = None) -> Preparation:
     return prepare_rebuild(
         workspace or made.workspace,
@@ -84,7 +102,7 @@ def _prepare(made: Rebuild, workspace: Path | None = None) -> Preparation:
 
 def _switch(
     made: Rebuild,
-    approved: str,
+    approved: Approval,
     *,
     tests_approved: bool = True,
     fingerprints: Path | None = None,
@@ -94,7 +112,7 @@ def _switch(
         made.workspace,
         made.workspace.parent,
         candidate=made.candidate,
-        approved_sha256=approved,
+        approved=approved,
         tests_approved=tests_approved,
         database=made.current,
         previous=made.previous,
@@ -146,9 +164,9 @@ def test_the_switch_needs_the_tests_declared_and_the_fingerprint_the_po_approved
 ) -> None:
     prepared = _prepare(rebuild)
     assert prepared.content_sha256 is not None
-    without_tests = _switch(rebuild, prepared.content_sha256, tests_approved=False)
+    without_tests = _switch(rebuild, _approval(prepared), tests_approved=False)
     assert (without_tests.status, without_tests.steps[-1].paso) == ("detenida", "P6")
-    other = _switch(rebuild, "0" * 64)
+    other = _switch(rebuild, WRONG)
     assert (other.status, other.steps[-1].paso) == ("detenida", "P7")
     assert _has_marker(rebuild.current) and not _exists(rebuild.previous)
 
@@ -159,7 +177,7 @@ def test_the_switch_keeps_the_previous_base_and_writes_the_new_fingerprints(
     prepared = _prepare(rebuild)
     assert prepared.content_sha256 is not None
     fingerprints = tmp_path / "huellas.json"
-    done = _switch(rebuild, prepared.content_sha256, fingerprints=fingerprints)
+    done = _switch(rebuild, _approval(prepared), fingerprints=fingerprints)
     assert (done.status, done.previous) == ("cambiada", rebuild.previous)
     assert [s.paso for s in done.steps] == ["P6", "P7", "P8", "P9"]
     assert not _has_marker(rebuild.current)  # la candidata ocupa el lugar de la vigente
@@ -182,7 +200,7 @@ def test_if_the_second_rename_fails_the_first_is_reverted(rebuild: Rebuild) -> N
         _rename(admin, old, new)
 
     with pytest.raises(BdError, match="falla"):
-        _switch(rebuild, prepared.content_sha256, rename=flaky)
+        _switch(rebuild, _approval(prepared), rename=flaky)
     assert calls == [
         (rebuild.current, rebuild.previous),
         (rebuild.candidate, rebuild.current),
@@ -196,7 +214,7 @@ def test_the_switch_does_not_run_with_open_connections(rebuild: Rebuild) -> None
     prepared = _prepare(rebuild)
     assert prepared.content_sha256 is not None
     with connect(ADMIN, database=rebuild.current, autocommit=True):
-        stopped = _switch(rebuild, prepared.content_sha256)
+        stopped = _switch(rebuild, _approval(prepared))
     assert (stopped.status, stopped.steps[-1].paso) == ("detenida", "P8")
     assert "conexiones abiertas" in str(stopped.reason)
     assert _has_marker(rebuild.current) and _exists(rebuild.candidate)
@@ -213,7 +231,7 @@ def test_it_never_touches_a_base_that_is_not_the_projects(other: str, tmp_path: 
             folder,
             tmp_path,
             candidate=other,
-            approved_sha256="0" * 64,
+            approved=WRONG,
             tests_approved=True,
         )
     with pytest.raises(BdError, match="solo se tocan bases del proyecto"):
@@ -221,9 +239,73 @@ def test_it_never_touches_a_base_that_is_not_the_projects(other: str, tmp_path: 
             folder,
             tmp_path,
             candidate="semaforo_pruebas_x",
-            approved_sha256="0" * 64,
+            approved=WRONG,
             tests_approved=True,
             previous=other,
         )
     with pytest.raises(BdError):
         drop_database(other)
+
+
+def test_a_candidate_whose_rules_differ_is_refused_even_though_its_rows_are_the_same(
+    rebuild: Rebuild,
+) -> None:
+    """Un disparador apagado no cambia ninguna fila, así que la huella de contenido no lo ve."""
+    prepared = _prepare(rebuild)
+    with connect(ADMIN, database=rebuild.candidate, autocommit=True) as connection:
+        connection.execute("ALTER TABLE simulacion.corridas DISABLE TRIGGER solo_agregar")
+    stopped = _switch(rebuild, _approval(prepared))
+    assert (stopped.status, stopped.steps[-1].paso) == ("detenida", "P7")
+    assert "huella de reglas" in str(stopped.reason)
+    assert _has_marker(rebuild.current) and _exists(rebuild.candidate)
+    assert not _exists(rebuild.previous)
+
+
+def test_an_approval_of_another_schema_version_is_refused(rebuild: Rebuild) -> None:
+    prepared = _prepare(rebuild)
+    approval = _approval(prepared)
+    other = Approval(
+        version_esquema="sql-de-otra-version",
+        content_sha256=approval.content_sha256,
+        rules_sha256=approval.rules_sha256,
+    )
+    stopped = _switch(rebuild, other)
+    assert (stopped.status, stopped.steps[-1].paso) == ("detenida", "P7")
+    assert "versión del esquema" in str(stopped.reason)
+    assert _has_marker(rebuild.current) and _exists(rebuild.candidate)
+
+
+def test_an_approval_whose_content_differs_is_refused_when_the_schema_and_rules_match(
+    rebuild: Rebuild,
+) -> None:
+    """Cada huella se comprueba por separado: aquí solo la de contenido es la que no coincide."""
+    prepared = _prepare(rebuild)
+    approval = _approval(prepared)
+    other = Approval(
+        version_esquema=approval.version_esquema,
+        content_sha256="0" * 64,
+        rules_sha256=approval.rules_sha256,
+    )
+    stopped = _switch(rebuild, other)
+    assert (stopped.status, stopped.steps[-1].paso) == ("detenida", "P7")
+    assert "huella de contenido" in str(stopped.reason)
+    assert _has_marker(rebuild.current) and _exists(rebuild.candidate)
+
+
+def test_rules_that_change_while_the_names_are_swapped_are_reverted_at_P9(
+    rebuild: Rebuild,
+) -> None:
+    """Un cambio de reglas justo después del cambio de nombre lo detecta la última comprobación."""
+    prepared = _prepare(rebuild)
+
+    def break_rules_on_swap(admin: Connection, old: str, new: str) -> None:
+        _rename(admin, old, new)
+        if old == rebuild.candidate:  # la candidata acaba de ocupar el lugar de la vigente
+            with connect(ADMIN, database=new, autocommit=True) as connection:
+                connection.execute("ALTER TABLE simulacion.corridas DISABLE TRIGGER solo_agregar")
+
+    stopped = _switch(rebuild, _approval(prepared), rename=break_rules_on_swap)
+    assert (stopped.status, stopped.steps[-1].paso) == ("detenida", "P9")
+    assert "huella de reglas" in str(stopped.reason)
+    assert _has_marker(rebuild.current)  # la vigente volvió a su lugar
+    assert _exists(rebuild.candidate) and not _exists(rebuild.previous)
