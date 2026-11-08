@@ -1,9 +1,9 @@
 {
   "schema_version": "1.1.0",
-  "generated_at": "2026-11-07T22:55:48.750638Z",
-  "carga_id": "20261107T132435Z_8605bee2",
+  "generated_at": "2026-11-08T00:38:06.491251Z",
+  "carga_id": "20261107T230813Z_9cd9f1e2",
   "schema_version_db": "sql-d405569d4d1daf46",
-  "content_sha256": "545063407b83f6d365647ecba9c14d32844be383de454d75877ae856fcb7d5a7",
+  "content_sha256": "da4c33599f5668a3753cca70e193bf6fab98cbef302af53b9ca3b95e5b1ed0e0",
   "algoritmo_huella": "contenido-1",
   "reglas_sha256": "6e0eed086f3025847af5ae487be0cbc7b8e4b930dfc3fc6aadf16f0a0d76e257",
   "algoritmo_reglas": "reglas-1",
@@ -32,7 +32,7 @@
     "caso.reportes_calidad": 0,
     "caso.tipos_vehiculo": 4,
     "caso.tramos": 9,
-    "control.artefactos": 2618,
+    "control.artefactos": 2625,
     "control.entornos": 1,
     "control.hitos": 0,
     "control.replicas": 0,
@@ -66,6 +66,9 @@
   "roots": [
     {"artefacto_id":"datos:casos/caso-001/case.json","sha256":"fabaa43f91f25301d7845190217f61cef38a7cc8495b20f0405845fc960c9b88"},
     {"artefacto_id":"datos:derivados/comparadores/caso-001/20261105T141416Z_24543b7d/manifiesto.json","sha256":"6e1df6584109988e20307ba640bdd8c653407ed32ef0dc48352af8af2878296f"},
+    {"artefacto_id":"datos:derivados/decisiones/decision-20261107T230807Z-d931238f/manifiesto.json","sha256":"427d429681ec1a4198e7274853df89ccd684abd62a19475554b28850e6702aa7"},
+    {"artefacto_id":"datos:derivados/decisiones/decision-20261107T230810Z-a05aec28/manifiesto.json","sha256":"8011b5dffa60d76eb036c2b876489ddcade696c3f742bb8a5efa7d5570652fad"},
+    {"artefacto_id":"datos:derivados/decisiones/decision-20261107T230813Z-65bcd385/manifiesto.json","sha256":"a464398aba9a98b49b90540b22cf02b0146792bc7bfbd5a29725e9d909ce0d88"},
     {"artefacto_id":"datos:derivados/metricas/caso-001/20261102T233541Z_simulation_64e1063f/manifiesto.json","sha256":"738021edec7fb4bc01c981a5b19152e04de4b79fa35475c33d7de701dc895a57"},
     {"artefacto_id":"datos:derivados/metricas/caso-001/20261102T233548Z_simulation_e362f169/manifiesto.json","sha256":"03e8e9ac7d9151a4f595eb6b931bb8398b0399fce6a70cbe6f80dcb7a7ef2c44"},
     {"artefacto_id":"datos:derivados/metricas/caso-001/20261102T233600Z_simulation_5c0b7f85/manifiesto.json","sha256":"6b9a33e5c1e08b6d131565780b9720e60c0a55088e86faaeb0481b7ef0310b25"},
@@ -331,6 +334,7 @@
     {"artefacto_id":"datos:ejecuciones/20261103T163532Z_simulation_864a492c/manifest.json","sha256":"4039064f84e40afa4afc43409ffa11144fb394d88e4140ce5837729ed514be9c"},
     {"artefacto_id":"datos:ejecuciones/20261103T163540Z_simulation_3467da96/manifest.json","sha256":"4f50f748fe8f9cba68734867f419833ea46c66c217dd73031379e6d649fe56bd"},
     {"artefacto_id":"datos:ejecuciones/20261103T163542Z_simulation_fcef09ca/manifest.json","sha256":"34bcc4c09bb9b7c1922aa9742645e81982b17302054397efe34cd95504924fb5"},
-    {"artefacto_id":"datos:escenarios/caso-001/ESC-SINT-001.json","sha256":"37c5fd325d431e2ccd553e39d15d0dbb4781f915d09a624a7da1a2295b6cf9a9"}
+    {"artefacto_id":"datos:escenarios/caso-001/ESC-SINT-001.json","sha256":"37c5fd325d431e2ccd553e39d15d0dbb4781f915d09a624a7da1a2295b6cf9a9"},
+    {"artefacto_id":"repositorio:docs/actas/2026-11-07-dev31-f4c-c1-controles.md","sha256":"166febd87e2d146478b33e0828c51d05a8e26839a6747bece39eebe49473056d"}
   ]
 }
