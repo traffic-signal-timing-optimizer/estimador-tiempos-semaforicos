@@ -7,7 +7,7 @@ Escrito para: el Product Owner (revisión y aprobación de F5 de DEV31) y el equ
 - **Orden del PO:** «ajusta el plan de F5 si es necesario. Ejecuta F5».
 - **Modelo:** Opus 5.5. El plan pedía Sonnet; el PO eligió Opus para esta fase.
 - **Commits:** código `d3927a1`, referencia `b970b4f`, esta acta en el commit siguiente. Sin push.
-- **Estado: hecho y verificado, con dos pasos pendientes del PO:** aprobar las huellas para cambiar la base vigente (sección 5) y la revisión manual QA37 (sección 6). F5 no se cierra hasta entonces.
+- **Estado: cerrada.** El PO aprobó las tres huellas (sección 5) y revisó el panel (sección 6).
 
 ## 1. El plan se ajustó así
 
@@ -84,10 +84,23 @@ Respaldo de la candidata, restaurado con la misma huella: `D:\respaldos\semaforo
 
 **QA37 pendiente:** la revisión manual la hace el PO. El panel para revisar es `datos/reportes/panel/20261108T183439Z/index.html`, generado desde la candidata. Avisa que su última evidencia es de otra versión de la base, y es correcto: la evidencia se repite después del cambio.
 
-## 7. Pendientes
+## 7. Cierre
 
-- Aprobación de las tres huellas (sección 5) y QA37 (sección 6).
-- D12: después de verificar F5, decidir si se borran `semaforo_anterior_20261108_c2` y, tras el cambio, `semaforo_anterior_20261108_f5`.
+El PO aprobó las tres huellas («se aprueba las tres huellas») y revisó el panel («ya se revisó el panel está bien»). Entonces:
+
+- `bd reconstruir cambiar` (P6 a P9): **cambiada**. La base vigente es `sql-afadf606c1a2065b`, la anterior quedó como `semaforo_anterior_20261108_f5`.
+- Referencia de git: commit `fda7065`, con la huella nueva.
+- `bd evidencia` sobre el repositorio limpio (`fda7065`): **coincide**, código 0, carpeta `datos/reportes/bd/20261108T185445Z`.
+- `bd panel` desde la base vigente: `datos/reportes/panel/20261108T185455Z/index.html`, sin avisos.
+
+La carpeta del panel previo (`20261108T183439Z`), generada desde la candidata, queda como respaldo y puede borrarse.
+
+## 8. Pendientes
+
+
+
+- D12: no borrar `semaforo_anterior_20261108_c2` ni `semaforo_anterior_20261108_f5` hasta que el asesor haya visto el panel.
 - Decidir si se simula el plan actual con las semillas de los finalistas (sección 3).
 - Causa de la prueba inestable de reversión de P9 (el PO la dejó para el final).
+- Simular el plan actual con las semillas de los finalistas (sección 3), si el PO lo pide.
 - Push, a pedido.
