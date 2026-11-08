@@ -163,7 +163,7 @@ id = "DEV31"
 titulo = "Base de datos de la evidencia y este panel"
 sirve_para = "Todas las entradas y salidas en PostgreSQL, con conciliación, cegado y este panel."
 estado = "en_curso"
-acta = "docs/actas/2026-11-08-dev31-f4c-c3-cierre.md"
+acta = "docs/actas/2026-11-08-dev31-f5-panel-de-resultados.md"
 
 [[fase]]
 id = "DEV16"
