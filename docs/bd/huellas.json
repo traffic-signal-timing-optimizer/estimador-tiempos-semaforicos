@@ -1,11 +1,11 @@
 {
   "schema_version": "1.1.0",
-  "generated_at": "2026-11-08T18:26:41.163563Z",
-  "carga_id": "20261108T053053Z_4a30b512",
-  "schema_version_db": "sql-891b34e6c96bf201",
+  "generated_at": "2026-11-08T18:50:45.857812Z",
+  "carga_id": "20261108T182702Z_3f97a7ee",
+  "schema_version_db": "sql-afadf606c1a2065b",
   "content_sha256": "9980fa130cc294af764f764c31320153d58edac0b073cefd5568b4982a33a9f2",
   "algoritmo_huella": "contenido-1",
-  "reglas_sha256": "345407d4ac7c6757e827261314229d61d7a51a7d1bd35e04a9159c2ebf311410",
+  "reglas_sha256": "008f66d8965fa3fc65dff9090e3f9a4a0fac4b548be3aff2693720cdffb3fbc6",
   "algoritmo_reglas": "reglas-2",
   "rows": {
     "aprendizaje.conjunto_etiquetas": 0,
