@@ -4,7 +4,7 @@ Escrito para: el Product Owner y cualquier persona o agente de IA que deba dejar
 
 Este manual permite pasar el proyecto **de extremo a extremo** a una laptop con Windows: programas, entorno de Python, PostgreSQL, SUMO, base de datos y pruebas que confirman que todo funciona.
 
-El procedimiento se cotejó en la laptop de origen el 2026-11-07, en el corte `05e55b3`; allí se registraron `doctor`, estado de red, conciliación, regeneración y pruebas rápidas. **No se ha demostrado una instalación desde cero en otra laptop ni se ejecutaron allí T1 a T13 en conjunto.** Este manual se actualizó con los cambios posteriores de C1.11; la puerta completa más reciente, en `a52123a`, pasó con 5408 pruebas y 43/43 contratos. **`a52123a` es un commit local sin push:** un clon de GitHub puede no incluir todavía esa corrección. Para trasladar exactamente el estado local, use el caso B o espere a que el PO autorice el push. Las versiones de la sección 1 se basan en el lockfile comprobado en ese corte; revíselas si cambia `uv.lock`.
+El procedimiento se cotejó en la laptop de origen el 2026-11-07, en el corte `05e55b3`; allí se registraron `doctor`, estado de red, conciliación, regeneración y pruebas rápidas. **No se ha demostrado una instalación desde cero en otra laptop ni se ejecutaron allí T1 a T13 en conjunto.** La base de la laptop de origen se reconstruyó en C2, con D11 y P0–P9 completados el 2026-11-08 ([acta de cierre](../actas/2026-11-08-dev31-f4c-c2-cierre.md)). La puerta completa más reciente pasó con 5434 pruebas, 1 omitida y 43/43 contratos. Las versiones de la sección 1 se basan en el lockfile comprobado en el corte inicial; revíselas si cambia `uv.lock`.
 
 ---
 
@@ -173,7 +173,7 @@ Ejemplo de carpeta: `D:\proyectos`. Use cualquier carpeta **fuera de OneDrive** 
    git branch --show-current
    git log -1 --oneline
    ```
-   Debe mostrar `main`. Compare el commit con la referencia publicada en GitHub en el momento de clonar; no se exige un hash fijo. La corrección P9 del commit local `a52123a` solo llegará al clon cuando el PO autorice su publicación.
+   Debe mostrar `main`. Compare el commit con la referencia publicada en GitHub en el momento de clonar; no se exige un hash fijo. Para reproducir el corte C2 de la laptop de origen, compruebe que el historial incluya `49e29af` (acta de cierre) y `f845262` (huellas aprobadas).
 4. **Traiga `datos\` desde la laptop de origen.** No está en git. Copie la carpeta completa `datos` (2.9 GB, por ejemplo con un disco externo) a `D:\proyectos\estimador-tiempos-semaforicos\datos`. Sin esta carpeta la base quedará vacía (ver sección 5.4 y la prueba T8).
 5. Traiga también `documentacion\` (no está en git, es la documentación completa del paquete). Cópiela a `D:\proyectos\estimador-tiempos-semaforicos\documentacion`. No es necesaria para ejecutar el código, pero sí para el proyecto.
 6. Siga en la sección 4.
@@ -374,7 +374,7 @@ Todas las pruebas se corren desde la carpeta raíz del proyecto.
 - **T8:** un resultado distinto de `equal` indica que falta algún archivo de `datos\`. Compare la cobertura del informe con el número de la sección 5.4.
 - **T9** crea y borra una base temporal (`semaforo_pruebas_*`). No toca `semaforo`.
 - **T10 a T13** también crean bases temporales con nombre `semaforo_pruebas_*`. Ninguna prueba toca `tickers_report_db`, `trading_predict` ni otras bases del servidor.
-- **Referencia de la laptop de origen:** T10 dio 5080 pruebas pasaron en el corte del manual. La puerta completa más reciente, con la corrección P9 en el commit local `a52123a`, dio **5408 pruebas pasaron, 1 omitida y 43/43 contratos**. Los conteos cambian si se agregan o retiran pruebas; cada corte debe terminar sin fallos.
+- **Referencia de la laptop de origen:** T10 dio 5080 pruebas pasaron en el corte inicial del manual. La puerta completa del cierre C2 dio **5434 pruebas pasaron, 1 omitida y 43/43 contratos**. Los conteos cambian si se agregan o retiran pruebas; cada corte debe terminar sin fallos.
 
 Cuando T1 a T13 pasen, la laptop queda **funcionando**.
 
