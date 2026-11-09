@@ -6,7 +6,7 @@ Escrito para: el Product Owner (revisión de F8 de DEV31) y quien ponga al día 
 - **Tarea:** DEV31 (HU15), fase F8 de la sección 13 de `docs/actas/2026-11-05-plan-base-de-datos.md`.
 - **Orden del PO:** «Ejecuta F8». El PO había autorizado antes pandoc y Graphviz.
 - **Modelo:** Sonnet 5.5, como pide el plan.
-- **Estado:** hecha, con **dos pendientes de limpieza** (sección 5). Espera la revisión del PO. Sin push.
+- **Estado:** hecha. **El PO dio conformidad a F7 y F8 el 2026-11-08.** Pendiente: la tesis debe completar HU15 (sección 6); los demás pendientes de la sección 5 quedan como están.
 - `documentacion/` no está en git, así que los entregables de esta fase no entran al commit. Lo que consta en git es esta acta.
 
 ## 1. Qué se entrega (en `documentacion/`)
@@ -48,3 +48,16 @@ Se abrieron los cinco Word con Microsoft Word, se exportaron a PDF y se revisaro
 - **Redibujar las Figuras 7, 8 y 9 de la tesis.**
 - **Para el final de DEV31:** prueba inestable de reconstrucción y D4. **D12:** conservar las bases anteriores hasta que el asesor vea el panel. **Con DEV16:** ensayo a escala.
 - **Cierre de DEV31:** con F8 terminan las fases del plan. Cerrar DEV31 requiere la conformidad del PO sobre F7 y F8.
+
+## 6. Conformidad del PO y completitud de HU15 en la tesis
+
+- **Conformidad:** el PO dio conformidad a F7 y F8 el 2026-11-08. Pidió que HU15 entre en la tesis y que el cambio de Figura 8 (redibujar figuras) quede pendiente.
+- **Lo que el borrador contiene de HU15:** la historia y sus criterios (3.2.5), la fila 15 del backlog (Tabla 11), la fila «Base de consulta» de la Tabla 14 y los párrafos de arquitectura y almacenamiento.
+- **Lo que le falta para estar completa** (HU14 aparece 29 veces en la tesis; HU15, 3):
+  1. El mapa de historias (Figura 7) y la tabla de entregas ENT1–ENT4 no incluyen HU15.
+  2. No hay descomposición de HU15 en tareas técnicas (como T23–T25 para HU14) ni su asignación a sprints.
+  3. El tablero y el roadmap (Tablas 12 y 13) no mencionan HU15.
+  4. La tabla de trazabilidad de historias no la lista con sus objetivos, indicadores y pruebas.
+  5. Los casos de prueba de la tesis (CP) no mencionan QA32 a QA37.
+  6. Dependencias: la Tabla 11 dice «HU14; HU13», pero la matriz dice «DEV08;DEV19». Hay que elegir una.
+- **Pendiente de redacción:** esos seis puntos. No se corrigieron en esta fase porque requieren decidir el reparto de sprints y las dependencias.
