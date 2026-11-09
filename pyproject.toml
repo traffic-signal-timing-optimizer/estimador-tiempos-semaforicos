@@ -43,6 +43,9 @@ select = ["E", "W", "F", "I", "B", "UP", "S", "ANN", "RUF", "PL"]
 "scripts/mutaciones/**" = ["E501", "S603", "S607"]
 # Lista de cajas de cada gráfico: una caja por línea se lee mejor que partida.
 "scripts/graficos_arquitectura.py" = ["E501"]
+# Figuras de la tesis: textos en español con rayas y guiones de rango, constantes de diseño en línea,
+# firmas de disposición con muchos parámetros y comprobaciones con assert antes de dibujar.
+"scripts/graficos_tesis.py" = ["E501", "RUF001", "PLR0913", "PLR0917", "PLR2004", "S101"]
 
 [tool.pyright]
 include = ["src", "tests"]
